@@ -1,8 +1,8 @@
-// Authentication module — MSAL-based token acquisition for Microsoft Graph.
+// Authentication module - MSAL-based token acquisition for Microsoft Graph.
 //
 // Supports two login methods:
-// 1. Interactive browser login (preferred) — opens system browser, handles redirect
-// 2. Device code flow (fallback) — for headless/remote environments
+// 1. Interactive browser login (preferred) - opens system browser, handles redirect
+// 2. Device code flow (fallback) - for headless/remote environments
 
 import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -69,9 +69,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
   const cachePath = path.join(configDir, CACHE_FILE_NAME);
 
   return {
-    async beforeCacheAccess(
-      context: msal.TokenCacheContext,
-    ): Promise<void> {
+    async beforeCacheAccess(context: msal.TokenCacheContext): Promise<void> {
       try {
         const data = await fs.readFile(cachePath, "utf-8");
         context.tokenCache.deserialize(data);
@@ -91,9 +89,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
       }
     },
 
-    async afterCacheAccess(
-      context: msal.TokenCacheContext,
-    ): Promise<void> {
+    async afterCacheAccess(context: msal.TokenCacheContext): Promise<void> {
       if (context.cacheHasChanged) {
         await fs.mkdir(path.dirname(cachePath), {
           recursive: true,
@@ -234,7 +230,7 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  /** Interactive browser login — opens system browser, handles redirect via loopback. */
+  /** Interactive browser login - opens system browser, handles redirect via loopback. */
   private async loginWithBrowser(): Promise<LoginResult> {
     logger.info("starting browser login");
     const client = this.createClient();
@@ -263,7 +259,7 @@ export class MsalAuthenticator implements Authenticator {
     };
   }
 
-  /** Device code flow — fires in the background, returns message immediately. */
+  /** Device code flow - fires in the background, returns message immediately. */
   private async loginWithDeviceCode(): Promise<LoginResult> {
     logger.info("starting device code login");
     const client = this.createClient();
@@ -273,7 +269,7 @@ export class MsalAuthenticator implements Authenticator {
       resolveMessage = resolve;
     });
 
-    // Start device code flow — runs in the background, caches tokens on completion
+    // Start device code flow - runs in the background, caches tokens on completion
     this.pendingLogin = client
       .acquireTokenByDeviceCode({
         scopes: this.scopes,
@@ -301,7 +297,7 @@ export class MsalAuthenticator implements Authenticator {
         this.pendingLogin = null;
       });
 
-    // Wait for the device code callback to fire (immediate — just the code URL)
+    // Wait for the device code callback to fire (immediate - just the code URL)
     const message = await messagePromise;
     return { message, completed: false };
   }
@@ -417,9 +413,7 @@ export class StaticAuthenticator implements Authenticator {
 
 export class AuthenticationRequiredError extends Error {
   constructor() {
-    super(
-      "Not logged in — use the login tool to authenticate with Microsoft",
-    );
+    super("Not logged in - use the login tool to authenticate with Microsoft");
     this.name = "AuthenticationRequiredError";
   }
 }

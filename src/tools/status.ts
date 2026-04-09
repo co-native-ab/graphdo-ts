@@ -1,4 +1,4 @@
-// Status tool — shows authentication state and account info.
+// Status tool - shows authentication state and account info.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -42,9 +42,7 @@ export function registerStatusTool(
           }
         } else {
           lines.push("Status: Not logged in");
-          lines.push(
-            'Use the "login" tool to authenticate with Microsoft.',
-          );
+          lines.push('Use the "login" tool to authenticate with Microsoft.');
         }
 
         lines.push("");
@@ -55,17 +53,14 @@ export function registerStatusTool(
           lines.push(`Todo list: ${cfg.todoListName} (${cfg.todoListId})`);
         } else {
           lines.push("Todo list: Not configured");
-          lines.push(
-            'Use the "todo_config" tool to select a todo list.',
-          );
+          lines.push('Use the "todo_config" tool to select a todo list.');
         }
 
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
         };
       } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         logger.error("status check failed", { error: message });
         return {
           content: [

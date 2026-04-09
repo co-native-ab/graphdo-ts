@@ -1,4 +1,4 @@
-// Mail tools — register mail-related MCP tools on a server instance.
+// Mail tools - register mail-related MCP tools on a server instance.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -22,10 +22,7 @@ export function registerMailTools(
       inputSchema: {
         subject: z.string().describe("Email subject line"),
         body: z.string().describe("Email body content"),
-        html: z
-          .boolean()
-          .default(false)
-          .describe("Whether the body is HTML"),
+        html: z.boolean().default(false).describe("Whether the body is HTML"),
       },
       annotations: {
         title: "Send Email",
@@ -41,7 +38,9 @@ export function registerMailTools(
         await sendMail(client, user.mail, subject, body, html);
         logger.info("mail sent", { to: user.mail, subject });
         return {
-          content: [{ type: "text" as const, text: `Email sent to ${user.mail}` }],
+          content: [
+            { type: "text" as const, text: `Email sent to ${user.mail}` },
+          ],
         };
       } catch (error: unknown) {
         if (error instanceof AuthenticationRequiredError) {

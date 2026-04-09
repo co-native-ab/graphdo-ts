@@ -71,10 +71,7 @@ export async function loadConfig(dir: string): Promise<Config | null> {
 }
 
 /** Writes config atomically: writes to a temp file then renames into place. */
-export async function saveConfig(
-  config: Config,
-  dir: string,
-): Promise<void> {
+export async function saveConfig(config: Config, dir: string): Promise<void> {
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
 
@@ -121,7 +118,7 @@ export async function loadAndValidateConfig(dir: string): Promise<Config> {
   const config = await loadConfig(dir);
   if (!validateConfig(config)) {
     throw new Error(
-      "todo list not configured — use the todo_config tool to select one",
+      "todo list not configured - use the todo_config tool to select one",
     );
   }
   return config;

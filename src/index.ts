@@ -1,14 +1,11 @@
-// graphdo-ts — MCP server providing AI agents with scoped access to Microsoft Graph.
+// graphdo-ts - MCP server providing AI agents with scoped access to Microsoft Graph.
 // Entry point: stdio-based MCP server with MSAL authentication (browser + device code fallback).
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import type { Authenticator } from "./auth.js";
-import {
-  MsalAuthenticator,
-  StaticAuthenticator,
-} from "./auth.js";
+import { MsalAuthenticator, StaticAuthenticator } from "./auth.js";
 import { configDir } from "./config.js";
 import { logger, setLogLevel } from "./logger.js";
 import { registerLoginTools } from "./tools/login.js";
@@ -38,7 +35,7 @@ export const SCOPES: readonly string[] = [
 // Server configuration
 // ---------------------------------------------------------------------------
 
-/** Configuration for the MCP server — all dependencies injected here. */
+/** Configuration for the MCP server - all dependencies injected here. */
 export interface ServerConfig {
   authenticator: Authenticator;
   graphBaseUrl: string;

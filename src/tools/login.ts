@@ -1,8 +1,8 @@
-// Login tools — authentication management via MCP tools.
+// Login tools - authentication management via MCP tools.
 //
 // Supports two login methods:
-// 1. Interactive browser login (preferred) — opens system browser, completes immediately
-// 2. Device code flow (fallback) — returns URL + code for manual entry
+// 1. Interactive browser login (preferred) - opens system browser, completes immediately
+// 2. Device code flow (fallback) - returns URL + code for manual entry
 //
 // When the client supports elicitation and device code is used, a form prompt
 // displays the URL + code and waits for the user to confirm.
@@ -54,7 +54,7 @@ export function registerLoginTools(
           };
         }
 
-        // Start login — may complete immediately (browser) or need user action (device code)
+        // Start login - may complete immediately (browser) or need user action (device code)
         const loginResult = await config.authenticator.login();
 
         // Browser login completed immediately
@@ -70,7 +70,7 @@ export function registerLoginTools(
           };
         }
 
-        // Device code flow — login is pending in the background
+        // Device code flow - login is pending in the background
         logger.info("device code flow initiated, waiting for user");
 
         // If the client supports elicitation, show a form prompt and wait
@@ -133,17 +133,19 @@ export function registerLoginTools(
           content: [
             {
               type: "text" as const,
-              text: loginResult.message +
+              text:
+                loginResult.message +
                 "\n\nOnce you've signed in, you can use the other tools.",
             },
           ],
         };
       } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         logger.error("login failed", { error: message });
         return {
-          content: [{ type: "text" as const, text: `Login failed: ${message}` }],
+          content: [
+            { type: "text" as const, text: `Login failed: ${message}` },
+          ],
           isError: true,
         };
       }
@@ -177,11 +179,12 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         logger.error("logout failed", { error: message });
         return {
-          content: [{ type: "text" as const, text: `Logout failed: ${message}` }],
+          content: [
+            { type: "text" as const, text: `Logout failed: ${message}` },
+          ],
           isError: true,
         };
       }
