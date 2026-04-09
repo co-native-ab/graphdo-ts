@@ -1,17 +1,13 @@
-// Mock authenticator for testing — controllable authentication state.
+// Mock authenticator for testing - controllable authentication state.
 
-import type {
-  Authenticator,
-  LoginResult,
-  AccountInfo,
-} from "../src/auth.js";
+import type { Authenticator, LoginResult, AccountInfo } from "../src/auth.js";
 import { AuthenticationRequiredError } from "../src/auth.js";
 
 /**
  * A mock authenticator that can be controlled from tests.
  *
  * Starts unauthenticated (unless configured otherwise). Login starts a
- * simulated flow — the caller can resolve/reject the pending login from
+ * simulated flow - the caller can resolve/reject the pending login from
  * outside to simulate user completion.
  *
  * The `browserLogin` option simulates browser login (completes immediately).
@@ -50,7 +46,7 @@ export class MockAuthenticator implements Authenticator {
       });
     }
 
-    // Simulate browser login — completes immediately
+    // Simulate browser login - completes immediately
     if (this._browserLogin) {
       this._token = "browser-token";
       return Promise.resolve({
@@ -59,7 +55,7 @@ export class MockAuthenticator implements Authenticator {
       });
     }
 
-    // Simulate device code flow — pending until resolved
+    // Simulate device code flow - pending until resolved
     let resolve!: (token: string) => void;
     let reject!: (err: Error) => void;
 
@@ -74,7 +70,7 @@ export class MockAuthenticator implements Authenticator {
 
     this.pendingLogin = { resolve, reject, promise: loginPromise };
 
-    // Don't catch — let the test observe failures naturally
+    // Don't catch - let the test observe failures naturally
     loginPromise.catch(() => {
       this.pendingLogin = null;
     });

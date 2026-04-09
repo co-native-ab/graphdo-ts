@@ -2,7 +2,7 @@
 
 A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents scoped, low-risk access to Microsoft Graph.
 
-The design intentionally limits blast radius — agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
+The design intentionally limits blast radius - agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
 
 This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration.
 
@@ -12,25 +12,25 @@ This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/
 
 graphdo-ts currently exposes **11 MCP tools**:
 
-| Tool | Description |
-|------|-------------|
-| `login` | Authenticate via browser login (with device code fallback) |
-| `logout` | Clear cached tokens and sign out |
-| `auth_status` | Check authentication status, current user, and configuration |
-| `mail_send` | Send an email to yourself (from and to your Microsoft account) |
-| `todo_config` | Configure which Microsoft To Do list to use (human-in-the-loop picker) |
-| `todo_list` | List todos with pagination |
-| `todo_show` | Show a single todo with full details |
-| `todo_create` | Create a new todo |
-| `todo_update` | Update an existing todo (title and/or body) |
-| `todo_complete` | Mark a todo as completed |
-| `todo_delete` | Delete a todo |
+| Tool            | Description                                                            |
+| --------------- | ---------------------------------------------------------------------- |
+| `login`         | Authenticate via browser login (with device code fallback)             |
+| `logout`        | Clear cached tokens and sign out                                       |
+| `auth_status`   | Check authentication status, current user, and configuration           |
+| `mail_send`     | Send an email to yourself (from and to your Microsoft account)         |
+| `todo_config`   | Configure which Microsoft To Do list to use (human-in-the-loop picker) |
+| `todo_list`     | List todos with pagination                                             |
+| `todo_show`     | Show a single todo with full details                                   |
+| `todo_create`   | Create a new todo                                                      |
+| `todo_update`   | Update an existing todo (title and/or body)                            |
+| `todo_complete` | Mark a todo as completed                                               |
+| `todo_delete`   | Delete a todo                                                          |
 
 ---
 
 ## Installation
 
-graphdo-ts is distributed as an [MCPB](https://github.com/anthropics/mcpb) bundle — a self-contained package that includes the server and a bundled Node.js runtime. No separate Node.js installation required.
+graphdo-ts is distributed as an [MCPB](https://github.com/anthropics/mcpb) bundle - a self-contained package that includes the server and a bundled Node.js runtime. No separate Node.js installation required.
 
 ### Download
 
@@ -59,13 +59,14 @@ Replace the path with the actual path to the downloaded bundle.
 
 graphdo-ts uses MSAL to authenticate with Microsoft. When the agent calls the `login` tool:
 
-1. The tool first tries **interactive browser login** — opens your default browser to Microsoft's sign-in page
+1. The tool first tries **interactive browser login** - opens your default browser to Microsoft's sign-in page
 2. You authenticate in the browser, which redirects to a local server that captures the auth code
-3. Login completes immediately — no manual code entry needed
+3. Login completes immediately - no manual code entry needed
 
 If a browser cannot be opened (headless environments, SSH, containers), the tool automatically falls back to **device code flow**:
+
 1. Returns a URL and code: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
-2. If the client supports [MCP elicitation](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/elicitation), a form prompt is shown with the URL and code — confirm once you've signed in
+2. If the client supports [MCP elicitation](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/elicitation), a form prompt is shown with the URL and code - confirm once you've signed in
 3. Otherwise the tool returns the message as text
 4. You authenticate in any browser on any device
 
@@ -79,12 +80,12 @@ The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into th
 
 These scopes reflect the current set of capabilities. Additional scopes may be required as new Graph surfaces are added.
 
-| Scope | Purpose |
-|-------|---------|
-| `Mail.Send` | Send emails as the signed-in user |
+| Scope             | Purpose                                         |
+| ----------------- | ----------------------------------------------- |
+| `Mail.Send`       | Send emails as the signed-in user               |
 | `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks |
-| `User.Read` | Read the signed-in user's basic profile |
-| `offline_access` | Enable refresh tokens for persistent sessions |
+| `User.Read`       | Read the signed-in user's basic profile         |
+| `offline_access`  | Enable refresh tokens for persistent sessions   |
 
 ### Todo List Selection
 
@@ -94,6 +95,7 @@ Before using todo tools, select which Microsoft To Do list to use. If the client
 2. Call `todo_config` with a `listId` → saves the selection
 
 The configuration is stored in the OS config directory:
+
 - **Linux:** `~/.config/graphdo-ts/config.json`
 - **macOS:** `~/Library/Application Support/graphdo-ts/config.json`
 - **Windows:** `%APPDATA%/graphdo-ts/config.json`
@@ -104,7 +106,7 @@ The configuration is stored in the OS config directory:
 
 > Personal Microsoft accounts (@outlook.com, @hotmail.com) can skip this section.
 
-For work or school accounts, your IT administrator may need to grant admin consent for the application. The app ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`, published by Co-native AB. See the [graphdo README](https://github.com/co-native-ab/graphdo#organization-setup) for detailed admin consent instructions — the same app registration is shared between both projects.
+For work or school accounts, your IT administrator may need to grant admin consent for the application. The app ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`, published by Co-native AB. See the [graphdo README](https://github.com/co-native-ab/graphdo#organization-setup) for detailed admin consent instructions - the same app registration is shared between both projects.
 
 ---
 
@@ -135,12 +137,12 @@ npm run mcpb        # Build + create MCPB bundle
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GRAPHDO_DEBUG` | Enable debug logging (`true`/`false`) | `false` |
-| `GRAPHDO_CONFIG_DIR` | Override config directory | OS default |
-| `GRAPHDO_GRAPH_URL` | Override Graph API base URL | `https://graph.microsoft.com/v1.0` |
-| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token | — |
+| Variable               | Description                                  | Default                            |
+| ---------------------- | -------------------------------------------- | ---------------------------------- |
+| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)        | `false`                            |
+| `GRAPHDO_CONFIG_DIR`   | Override config directory                    | OS default                         |
+| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                  | `https://graph.microsoft.com/v1.0` |
+| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token | -                                  |
 
 ---
 
@@ -164,10 +166,10 @@ MCP Server (StdioServerTransport)
   └─── Config (OS config dir)
 ```
 
-- **Stdio transport** — communicates via stdin/stdout JSON-RPC (designed for MCPB)
-- **MSAL authentication** — interactive browser login with device code fallback, tokens cached locally
-- **Graph client** — lightweight wrapper around `fetch` (no Microsoft Graph SDK)
-- **Minimal dependencies** — three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
+- **Stdio transport** - communicates via stdin/stdout JSON-RPC (designed for MCPB)
+- **MSAL authentication** - interactive browser login with device code fallback, tokens cached locally
+- **Graph client** - lightweight wrapper around `fetch` (no Microsoft Graph SDK)
+- **Minimal dependencies** - three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
 
 ---
 

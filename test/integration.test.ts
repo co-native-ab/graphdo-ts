@@ -1,7 +1,7 @@
 // In-process integration tests using InMemoryTransport + real MCP Client.
 //
 // Tests run the full MCP server in-process, with a mock Graph API and a mock
-// authenticator. No child processes, no stdio wiring — just linked transports.
+// authenticator. No child processes, no stdio wiring - just linked transports.
 
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
@@ -71,7 +71,7 @@ async function createTestClient(
   return c;
 }
 
-/** Elicitation response handler — returns the configured result. */
+/** Elicitation response handler - returns the configured result. */
 type ElicitHandler = (params: {
   message: string;
   requestedSchema?: unknown;
@@ -229,7 +229,7 @@ describe("integration", () => {
       expect(text).toContain("Logged in as");
       expect(text).toContain("test@example.com");
 
-      // No pending login — completed immediately
+      // No pending login - completed immediately
       expect(browserAuth.loginPending).toBe(false);
     });
 
@@ -499,9 +499,7 @@ describe("integration", () => {
 
       // Verify in mock state
       const remaining = graphState.getTodos("list-1");
-      expect(
-        remaining.find((t) => t.title === "Updated task"),
-      ).toBeUndefined();
+      expect(remaining.find((t) => t.title === "Updated task")).toBeUndefined();
     });
   });
 
@@ -663,7 +661,7 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Elicitation — login
+  // Elicitation - login
   // -----------------------------------------------------------------------
 
   describe("elicitation: login", () => {
@@ -773,7 +771,7 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Elicitation — config
+  // Elicitation - config
   // -----------------------------------------------------------------------
 
   describe("elicitation: config", () => {
