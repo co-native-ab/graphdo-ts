@@ -61,7 +61,9 @@ Replace `/path/to/graphdo.mcpb` with the actual path to the downloaded bundle.
 
 ### OAuth
 
-OAuth is handled entirely by the MCP client. graphdo-ts never sees or stores credentials — it receives Bearer tokens via the `Authorization` header and forwards them to Microsoft Graph API.
+OAuth is handled entirely by the MCP client. graphdo-ts never sees or stores credentials — it receives Bearer tokens via the `Authorization` header, validates them against Azure AD's JWKS (signature, expiry, issuer, audience, authorized party), and forwards them to Microsoft Graph API.
+
+When no token is present, the server returns `401` with a `WWW-Authenticate` header pointing to the Protected Resource Metadata endpoint (`/.well-known/oauth-protected-resource`), following the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) and [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728). The metadata tells the MCP client which authorization server to use and which scopes to request.
 
 The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into the server. No client-side configuration is needed unless your organization uses a custom app registration.
 
@@ -157,9 +159,11 @@ Microsoft Graph API (v1.0)
 
 - **HTTP server** — Express with cors middleware and session management
 - **Streamable HTTP transport** — MCP sessions tracked by `Mcp-Session-Id` header
-- **Per-request auth** — tokens extracted from the `Authorization` header, never stored
+- **Token validation** — JWT access tokens verified via `jose` against Azure AD JWKS (signature, expiry, issuer, audience, authorized party)
+- **Protected Resource Metadata** — `/.well-known/oauth-protected-resource` endpoint per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) and the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+- **Per-request auth** — tokens extracted from the `Authorization` header, validated, then forwarded to Graph; never stored
 - **Graph client** — lightweight wrapper around `fetch` (no Microsoft Graph SDK)
-- **Minimal dependencies** — four runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, and `cors`
+- **Minimal dependencies** — five runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`, and `jose`
 
 ---
 

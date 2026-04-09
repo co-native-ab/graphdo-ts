@@ -11,6 +11,7 @@ Repository: `github.com/co-native-ab/graphdo-ts`
 ```
 src/
   index.ts               HTTP server entry point (Streamable HTTP transport)
+  auth.ts                JWT token validation (jose + Azure AD JWKS), Protected Resource Metadata
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
   graph/
@@ -25,7 +26,9 @@ src/
 test/
   helpers.ts             createTestEnv() — standardized test setup
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
+  mock-oidc.ts           Mock OIDC provider — RSA key gen, JWKS endpoint, JWT signing
   config.test.ts         Config persistence unit tests
+  auth.test.ts           Token validation + Protected Resource Metadata endpoint tests
   graph/
     client.test.ts       GraphClient + GraphRequestError tests
     mail.test.ts         Mail operation tests
@@ -42,7 +45,7 @@ test/
 We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`. The client is created per-request with the token extracted from MCP `authInfo`.
 
 ### OAuth Delegated to MCP Client
-The server never handles OAuth flows. MCP clients provide Bearer tokens via the `Authorization` header. The server extracts the token from `extra.authInfo?.token` in tool handlers and creates a `GraphClient` per-call. If no token is present, tools return `isError: true` (never throw).
+The server never handles OAuth flows. MCP clients provide Bearer tokens via the `Authorization` header. The server validates tokens using `jose` against Azure AD's JWKS endpoint — checking signature, expiry, issuer pattern, audience (`https://graph.microsoft.com`), and authorized party (our client ID). Valid tokens are then forwarded to Graph API. If no token is present, the server returns 401 with a `WWW-Authenticate` header pointing to `/.well-known/oauth-protected-resource` (RFC 9728), which tells the client which authorization server and scopes to use.
 
 ### Streamable HTTP Transport
 The server uses MCP Streamable HTTP transport on `/mcp`. Sessions are tracked in a `Map<string, StreamableHTTPServerTransport>`. Each POST with an `initialize` request creates a new session; subsequent requests use the `Mcp-Session-Id` header. A new `McpServer` is created per session with all tools registered.
@@ -72,16 +75,19 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 - **Cross-platform** — use `node:path`, `node:os`, `node:crypto` for filesystem ops; handle win32/darwin/linux paths
 - **Atomic file writes** — write to temp file then rename into place (`saveConfig`)
 - **Comments** — only where clarification is needed, not on every function
-- **Minimal dependencies** — only 4 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`
+- **Minimal dependencies** — only 5 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`, `jose`
 
 ## Testing
 
 ### Test Architecture
-Tests use vitest with two layers:
+Tests use vitest with three layers:
 1. **Graph layer tests** (`test/graph/`) — test `GraphClient`, mail, and todo operations against the mock Graph API server
 2. **MCP tool integration tests** (`test/tools/`) — test full tool handlers via `InMemoryTransport` with mocked modules
+3. **Auth tests** (`test/auth.test.ts`) — test JWT validation and Protected Resource Metadata endpoint via mock OIDC provider
 
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state — no mocking libraries for HTTP.
+
+The mock OIDC provider (`test/mock-oidc.ts`) generates an RSA key pair, serves JWKS over HTTP, and provides a `signToken(overrides?)` helper. Tests cover valid tokens, expired tokens, wrong signing keys, wrong issuer/audience/azp, missing scopes, and malformed tokens.
 
 MCP tool tests use `vi.mock()` with `vi.hoisted()` to redirect `GRAPH_BASE_URL` and `configDir()` to test values. The `patchTransportAuth()` helper injects `AuthInfo` into the transport to simulate authenticated requests.
 
