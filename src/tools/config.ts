@@ -3,6 +3,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import type { Authenticator } from "../auth.js";
+import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
 import { configDir, saveConfig } from "../config.js";
@@ -17,7 +19,10 @@ function formatListOptions(lists: { id: string; displayName: string }[]): string
 }
 
 /** Register the todo_config tool on the given MCP server. */
-export function registerConfigTools(server: McpServer): void {
+export function registerConfigTools(
+  server: McpServer,
+  authenticator: Authenticator,
+): void {
   server.registerTool(
     "todo_config",
     {
@@ -29,18 +34,9 @@ export function registerConfigTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const client = new GraphClient(GRAPH_BASE_URL, token);
         const lists = await listTodoLists(client);
 
@@ -71,6 +67,9 @@ export function registerConfigTools(server: McpServer): void {
         });
         return { content: [{ type: "text", text }] };
       } catch (err: unknown) {
+        if (err instanceof AuthenticationRequiredError) {
+          return { content: [{ type: "text", text: err.message }], isError: true };
+        }
         const message =
           err instanceof GraphRequestError
             ? `Graph API error: ${err.message} (${String(err.statusCode)})`

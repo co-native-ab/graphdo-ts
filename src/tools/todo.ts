@@ -3,6 +3,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import type { Authenticator } from "../auth.js";
+import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import {
   listTodos,
@@ -24,8 +26,25 @@ function statusLabel(status: string): string {
   return status === "completed" ? "Completed" : "Not Started";
 }
 
+function formatError(toolName: string, err: unknown): { content: { type: "text"; text: string }[]; isError: true } {
+  if (err instanceof AuthenticationRequiredError) {
+    return { content: [{ type: "text", text: err.message }], isError: true };
+  }
+  const message =
+    err instanceof GraphRequestError
+      ? `Graph API error: ${err.message} (${String(err.statusCode)})`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  logger.error(`${toolName} failed`, { error: message });
+  return { content: [{ type: "text", text: message }], isError: true };
+}
+
 /** Register all To Do CRUD tools on the given MCP server. */
-export function registerTodoTools(server: McpServer): void {
+export function registerTodoTools(
+  server: McpServer,
+  authenticator: Authenticator,
+): void {
   // ---- todo_list ----
   server.registerTool(
     "todo_list",
@@ -41,18 +60,9 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -77,14 +87,7 @@ export function registerTodoTools(server: McpServer): void {
 
         return { content: [{ type: "text", text }] };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_list failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_list", err);
       }
     },
   );
@@ -101,18 +104,9 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -131,14 +125,7 @@ export function registerTodoTools(server: McpServer): void {
 
         return { content: [{ type: "text", text: lines.join("\n") }] };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_show failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_show", err);
       }
     },
   );
@@ -158,18 +145,9 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -183,14 +161,7 @@ export function registerTodoTools(server: McpServer): void {
         const text = `Created todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
         return { content: [{ type: "text", text }] };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_create failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_create", err);
       }
     },
   );
@@ -211,22 +182,12 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       if (!args.title && !args.body) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: "At least one of title or body must be provided.",
             },
           ],
@@ -235,6 +196,7 @@ export function registerTodoTools(server: McpServer): void {
       }
 
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -249,14 +211,7 @@ export function registerTodoTools(server: McpServer): void {
         const text = `Updated todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
         return { content: [{ type: "text", text }] };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_update failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_update", err);
       }
     },
   );
@@ -273,18 +228,9 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -299,14 +245,7 @@ export function registerTodoTools(server: McpServer): void {
           ],
         };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_complete failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_complete", err);
       }
     },
   );
@@ -324,18 +263,9 @@ export function registerTodoTools(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (args, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [
-            { type: "text", text: "Authentication required. Please sign in." },
-          ],
-          isError: true,
-        };
-      }
-
+    async (args) => {
       try {
+        const token = await authenticator.token();
         const cfgPath = configDir();
         const config = await loadAndValidateConfig(cfgPath);
         const client = new GraphClient(GRAPH_BASE_URL, token);
@@ -347,14 +277,7 @@ export function registerTodoTools(server: McpServer): void {
           ],
         };
       } catch (err: unknown) {
-        const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        logger.error("todo_delete failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return formatError("todo_delete", err);
       }
     },
   );

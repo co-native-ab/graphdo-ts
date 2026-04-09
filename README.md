@@ -4,16 +4,18 @@ A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents 
 
 The design intentionally limits blast radius — agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
 
-This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Unlike the Go version, graphdo-ts is a pure MCP server with HTTP transport — it has no CLI, no built-in OAuth flow, and no login command. OAuth is delegated entirely to the MCP client (e.g. Claude Desktop), which provides Bearer tokens that the server forwards to the Graph API.
+This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration and MSAL device code authentication flow.
 
 ---
 
 ## Features
 
-graphdo-ts currently exposes **8 MCP tools** covering email and task management:
+graphdo-ts currently exposes **10 MCP tools**:
 
 | Tool | Description |
 |------|-------------|
+| `login` | Authenticate via MSAL device code flow |
+| `logout` | Clear cached tokens and sign out |
 | `mail_send` | Send an email to yourself (from and to your Microsoft account) |
 | `todo_config` | Configure which Microsoft To Do list to use (human-in-the-loop picker) |
 | `todo_list` | List todos with pagination |
@@ -31,12 +33,7 @@ graphdo-ts is distributed as an [MCPB](https://github.com/anthropics/mcpb) bundl
 
 ### Download
 
-Download the latest MCPB bundle from [GitHub Releases](https://github.com/co-native-ab/graphdo-ts/releases/latest):
-
-- **macOS (Apple Silicon):** `graphdo-darwin-arm64.mcpb`
-- **macOS (Intel):** `graphdo-darwin-x64.mcpb`
-- **Linux (x64):** `graphdo-linux-x64.mcpb`
-- **Windows (x64):** `graphdo-win32-x64.mcpb`
+Download the latest MCPB bundle from [GitHub Releases](https://github.com/co-native-ab/graphdo-ts/releases/latest).
 
 ### Claude Desktop
 
@@ -47,23 +44,26 @@ Add the following to your Claude Desktop MCP configuration (`claude_desktop_conf
   "mcpServers": {
     "graphdo": {
       "type": "mcpb",
-      "bundle_path": "/path/to/graphdo.mcpb"
+      "bundle_path": "/path/to/graphdo-ts-v0.1.0.mcpb"
     }
   }
 }
 ```
 
-Replace `/path/to/graphdo.mcpb` with the actual path to the downloaded bundle.
+Replace the path with the actual path to the downloaded bundle.
 
 ---
 
-## Configuration
+## Authentication
 
-### OAuth
+graphdo-ts uses MSAL's [device code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) to authenticate. When the agent calls the `login` tool:
 
-OAuth is handled entirely by the MCP client. graphdo-ts never sees or stores credentials — it receives Bearer tokens via the `Authorization` header, validates them against Azure AD's JWKS (signature, expiry, issuer, audience, authorized party), and forwards them to Microsoft Graph API.
+1. The server initiates a device code request with Azure AD
+2. The tool returns a message: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
+3. You authenticate in any browser on any device
+4. Once complete, tokens are cached locally and used for all subsequent Graph API calls
 
-When no token is present, the server returns `401` with a `WWW-Authenticate` header pointing to the Protected Resource Metadata endpoint (`/.well-known/oauth-protected-resource`), following the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) and [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728). The metadata tells the MCP client which authorization server to use and which scopes to request.
+Tokens are automatically refreshed using the cached refresh token. To sign out and clear cached tokens, use the `logout` tool.
 
 The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into the server. No client-side configuration is needed unless your organization uses a custom app registration.
 
@@ -122,48 +122,44 @@ npm run lint        # ESLint (strict + stylistic)
 npm run typecheck   # tsc --noEmit
 npm run test        # Run tests via vitest
 npm run check       # lint + typecheck + test (all three)
+npm run mcpb        # Build + create MCPB bundle
 ```
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PORT` | HTTP server port | `3000` |
 | `GRAPHDO_DEBUG` | Enable debug logging (`true`/`false`) | `false` |
 | `GRAPHDO_CONFIG_DIR` | Override config directory | OS default |
 | `GRAPHDO_GRAPH_URL` | Override Graph API base URL | `https://graph.microsoft.com/v1.0` |
+| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token | — |
 
 ---
 
 ## Architecture
 
 ```
-MCP Client (Claude Desktop, etc.)
+Claude Desktop / MCP Client
   │
-  │  HTTP + Bearer token
+  │  stdio (JSON-RPC)
   ▼
-HTTP Server (Express)
+MCP Server (StdioServerTransport)
   │
-  │  Streamable HTTP transport (/mcp)
-  ▼
-MCP Server (@modelcontextprotocol/sdk)
+  ├─── MSAL Device Code Auth ──→ Azure AD
   │
-  │  Per-session server + tool registration
-  ▼
-Graph Client (native fetch)
+  ├─── Graph Client (native fetch)
+  │         │
+  │         │  Bearer token
+  │         ▼
+  │    Microsoft Graph API (v1.0)
   │
-  │  Bearer token forwarding
-  ▼
-Microsoft Graph API (v1.0)
+  └─── Config (OS config dir)
 ```
 
-- **HTTP server** — Express with cors middleware and session management
-- **Streamable HTTP transport** — MCP sessions tracked by `Mcp-Session-Id` header
-- **Token validation** — JWT access tokens verified via `jose` against Azure AD JWKS (signature, expiry, issuer, audience, authorized party)
-- **Protected Resource Metadata** — `/.well-known/oauth-protected-resource` endpoint per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) and the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
-- **Per-request auth** — tokens extracted from the `Authorization` header, validated, then forwarded to Graph; never stored
+- **Stdio transport** — communicates via stdin/stdout JSON-RPC (designed for MCPB)
+- **MSAL authentication** — device code flow via `@azure/msal-node`, tokens cached locally
 - **Graph client** — lightweight wrapper around `fetch` (no Microsoft Graph SDK)
-- **Minimal dependencies** — five runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`, and `jose`
+- **Minimal dependencies** — three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
 
 ---
 

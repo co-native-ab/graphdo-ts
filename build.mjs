@@ -17,4 +17,9 @@ await esbuild.build({
   },
   // Bundle all dependencies; only keep Node.js built-ins external
   external: ["node:*"],
+  // Inject a CJS-compatible `require` for MSAL's dependencies (safe-buffer,
+  // jsonwebtoken) that use require("buffer") and other bare built-in names.
+  banner: {
+    js: 'import { createRequire as __createRequire } from "node:module";\nconst require = __createRequire(import.meta.url);',
+  },
 });

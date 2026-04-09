@@ -1,8 +1,12 @@
-// Token validation for Azure AD JWT access tokens.
-// Uses jose (RFC 7515/7517/7519) for JWT verification against Azure AD JWKS.
+// Authentication module — MSAL-based token acquisition for Microsoft Graph.
+//
+// Mirrors the Go graphdo auth package: Authenticator interface with
+// DeviceCodeAuthenticator (production) and StaticAuthenticator (testing).
 
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import type { JWTPayload, JWTVerifyGetKey } from "jose";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
+import * as msal from "@azure/msal-node";
 
 import { logger } from "./logger.js";
 
@@ -10,135 +14,303 @@ import { logger } from "./logger.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-export const AUTHORIZATION_SERVER =
-  "https://login.microsoftonline.com/common/v2.0";
+const AUTHORITY_URL = "https://login.microsoftonline.com/common";
 
-export const JWKS_URL = new URL(
-  "https://login.microsoftonline.com/common/discovery/v2.0/keys",
-);
-
-export const GRAPH_AUDIENCE = "https://graph.microsoft.com";
-
-/** Azure AD app registration client ID. */
-export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
-
-/** Scopes for Protected Resource Metadata (excludes offline_access per spec). */
-export const RESOURCE_SCOPES: readonly string[] = [
-  "Mail.Send",
-  "Tasks.ReadWrite",
-  "User.Read",
-];
+const CACHE_FILE_NAME = "msal_cache.json";
+const ACCOUNT_FILE_NAME = "account.json";
 
 // ---------------------------------------------------------------------------
-// Types
+// Authenticator interface
 // ---------------------------------------------------------------------------
 
-export interface TokenClaims {
-  /** Subject (user ID) */
-  sub: string;
-  /** Issuer (Azure AD tenant-specific) */
-  iss: string;
-  /** Audience (should be https://graph.microsoft.com) */
-  aud: string;
-  /** Authorized party (client ID that requested the token) */
-  azp: string;
-  /** Scopes as space-separated string */
-  scp: string | undefined;
-  /** Expiration timestamp (seconds since epoch) */
-  exp: number;
-  /** Full JWT payload for additional claims */
-  raw: JWTPayload;
+/** Abstraction for login + token acquisition (mirrors Go's auth.Authenticator). */
+export interface Authenticator {
+  /**
+   * Perform an interactive login flow (device code).
+   * Returns the device code message for display to the user.
+   * The returned promise resolves when authentication is complete.
+   */
+  login(): Promise<LoginResult>;
+
+  /** Acquire a cached access token, refreshing silently if needed. */
+  token(): Promise<string>;
+
+  /** Clear cached tokens and account data. */
+  logout(): Promise<void>;
+
+  /** Check whether a valid cached token exists (without prompting). */
+  isAuthenticated(): Promise<boolean>;
 }
 
-export class TokenValidationError extends Error {
-  constructor(
-    message: string,
-    public readonly code: "invalid_token" | "insufficient_scope",
-  ) {
-    super(message);
-    this.name = "TokenValidationError";
+export interface LoginResult {
+  /** Human-readable message (e.g. "To sign in, use a web browser…"). */
+  message: string;
+  /** Promise that resolves when the user completes authentication. */
+  done: Promise<string>;
+}
+
+// ---------------------------------------------------------------------------
+// File-based MSAL cache (mirrors Go's tokencache.go)
+// ---------------------------------------------------------------------------
+
+/** MSAL cache plugin that persists token data to a JSON file. */
+function createFileCachePlugin(configDir: string): msal.ICachePlugin {
+  const cachePath = path.join(configDir, CACHE_FILE_NAME);
+
+  return {
+    async beforeCacheAccess(
+      context: msal.TokenCacheContext,
+    ): Promise<void> {
+      try {
+        const data = await fs.readFile(cachePath, "utf-8");
+        context.tokenCache.deserialize(data);
+        logger.debug("loaded token cache", { path: cachePath });
+      } catch (err: unknown) {
+        if (
+          err instanceof Error &&
+          "code" in err &&
+          (err as NodeJS.ErrnoException).code === "ENOENT"
+        ) {
+          logger.debug("token cache file not found, starting fresh", {
+            path: cachePath,
+          });
+          return;
+        }
+        throw err;
+      }
+    },
+
+    async afterCacheAccess(
+      context: msal.TokenCacheContext,
+    ): Promise<void> {
+      if (context.cacheHasChanged) {
+        await fs.mkdir(path.dirname(cachePath), {
+          recursive: true,
+          mode: 0o700,
+        });
+        await fs.writeFile(cachePath, context.tokenCache.serialize(), {
+          mode: 0o600,
+        });
+        logger.debug("exported token cache", { path: cachePath });
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Account persistence (mirrors Go's saveAccount/loadAccount)
+// ---------------------------------------------------------------------------
+
+async function saveAccount(
+  account: msal.AccountInfo,
+  configDir: string,
+): Promise<void> {
+  const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
+  await fs.mkdir(path.dirname(accountPath), {
+    recursive: true,
+    mode: 0o700,
+  });
+  await fs.writeFile(
+    accountPath,
+    JSON.stringify(account, undefined, 2) + "\n",
+    { mode: 0o600 },
+  );
+  logger.debug("saved account", { path: accountPath });
+}
+
+async function loadAccount(
+  configDir: string,
+): Promise<msal.AccountInfo | undefined> {
+  const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
+  try {
+    const data = await fs.readFile(accountPath, "utf-8");
+    const account = JSON.parse(data) as msal.AccountInfo;
+    logger.debug("loaded account", {
+      path: accountPath,
+      username: account.username,
+    });
+    return account;
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      logger.debug("account file not found", { path: accountPath });
+      return undefined;
+    }
+    throw err;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Validation
+// DeviceCodeAuthenticator
 // ---------------------------------------------------------------------------
 
-/** Azure AD v2.0 issuer: https://login.microsoftonline.com/{tenant}/v2.0 */
-const AZURE_AD_ISSUER_PATTERN =
-  /^https:\/\/login\.microsoftonline\.com\/[^/]+\/v2\.0$/;
+export class DeviceCodeAuthenticator implements Authenticator {
+  private readonly clientId: string;
+  private readonly configDir: string;
+  private readonly scopes: string[];
 
-export type ValidateTokenFn = (token: string) => Promise<TokenClaims>;
+  constructor(clientId: string, configDir: string, scopes: string[]) {
+    this.clientId = clientId;
+    this.configDir = configDir;
+    this.scopes = scopes;
+  }
 
-/**
- * Create a token validator backed by a JWKS key source.
- *
- * @param getKey   A JWKS key resolver (from createRemoteJWKSet or createLocalJWKSet).
- * @param clientId The expected `azp` claim value (our app registration).
- * @param options  Optional overrides for audience and issuer pattern (useful in tests).
- */
-export function createTokenValidator(
-  getKey: JWTVerifyGetKey,
-  clientId: string,
-  options?: {
-    audience?: string;
-    issuerPattern?: RegExp;
-  },
-): ValidateTokenFn {
-  const audience = options?.audience ?? GRAPH_AUDIENCE;
-  const issuerPattern = options?.issuerPattern ?? AZURE_AD_ISSUER_PATTERN;
+  private createClient(): msal.PublicClientApplication {
+    return new msal.PublicClientApplication({
+      auth: {
+        clientId: this.clientId,
+        authority: AUTHORITY_URL,
+      },
+      cache: {
+        cachePlugin: createFileCachePlugin(this.configDir),
+      },
+      system: {
+        loggerOptions: {
+          logLevel: msal.LogLevel.Warning,
+          piiLoggingEnabled: false,
+        },
+      },
+    });
+  }
 
-  return async function validateToken(token: string): Promise<TokenClaims> {
-    let payload: JWTPayload;
-    try {
-      const result = await jwtVerify(token, getKey, { audience });
-      payload = result.payload;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("token verification failed", { error: msg });
-      throw new TokenValidationError(
-        `Token verification failed: ${msg}`,
-        "invalid_token",
-      );
-    }
+  async login(): Promise<LoginResult> {
+    logger.info("starting device code login");
+    const client = this.createClient();
 
-    // Validate issuer pattern (tenant ID varies per user)
-    const iss = payload.iss;
-    if (typeof iss !== "string" || !issuerPattern.test(iss)) {
-      logger.warn("invalid issuer", { issuer: String(iss) });
-      throw new TokenValidationError(
-        `Invalid issuer: ${String(iss)}`,
-        "invalid_token",
-      );
-    }
+    let resolveMessage: (msg: string) => void;
+    const messagePromise = new Promise<string>((resolve) => {
+      resolveMessage = resolve;
+    });
 
-    // Validate authorized party matches our client ID
-    const azp = payload["azp"];
-    if (typeof azp !== "string" || azp !== clientId) {
-      logger.warn("invalid authorized party", {
-        expected: clientId,
-        actual: String(azp),
-      });
-      throw new TokenValidationError(
-        `Invalid authorized party: expected ${clientId}, got ${String(azp)}`,
-        "invalid_token",
-      );
-    }
+    const tokenPromise = client.acquireTokenByDeviceCode({
+      scopes: this.scopes,
+      deviceCodeCallback: (response) => {
+        resolveMessage(response.message);
+      },
+    });
+
+    // Wait for the device code callback to fire
+    const message = await messagePromise;
 
     return {
-      sub: payload.sub ?? "",
-      iss,
-      aud: Array.isArray(payload.aud) ? payload.aud.join(" ") : (payload.aud ?? ""),
-      azp,
-      scp: typeof payload["scp"] === "string" ? payload["scp"] : undefined,
-      exp: payload.exp ?? 0,
-      raw: payload,
+      message,
+      done: tokenPromise.then(async (result) => {
+        if (!result?.account) {
+          throw new Error("Device code authentication returned no result");
+        }
+
+        await saveAccount(result.account, this.configDir);
+        logger.info("login successful", {
+          username: result.account.username,
+        });
+
+        return result.accessToken;
+      }),
     };
-  };
+  }
+
+  async token(): Promise<string> {
+    const client = this.createClient();
+    const account = await loadAccount(this.configDir);
+
+    if (!account) {
+      throw new AuthenticationRequiredError();
+    }
+
+    logger.debug("acquiring token silently", {
+      username: account.username,
+    });
+
+    try {
+      const result = await client.acquireTokenSilent({
+        account,
+        scopes: this.scopes,
+      });
+
+      logger.debug("token acquired");
+      return result.accessToken;
+    } catch (err: unknown) {
+      if (err instanceof msal.InteractionRequiredAuthError) {
+        throw new AuthenticationRequiredError();
+      }
+      throw err;
+    }
+  }
+
+  async logout(): Promise<void> {
+    const files = [
+      path.join(this.configDir, CACHE_FILE_NAME),
+      path.join(this.configDir, ACCOUNT_FILE_NAME),
+    ];
+
+    for (const f of files) {
+      try {
+        await fs.unlink(f);
+        logger.debug("removed cache file", { path: f });
+      } catch (err: unknown) {
+        if (
+          err instanceof Error &&
+          "code" in err &&
+          (err as NodeJS.ErrnoException).code === "ENOENT"
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    logger.info("logged out, token cache cleared");
+  }
+
+  async isAuthenticated(): Promise<boolean> {
+    try {
+      await this.token();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
-/** Create a validator for the production Azure AD JWKS endpoint. */
-export function createAzureADValidator(clientId: string): ValidateTokenFn {
-  const jwks = createRemoteJWKSet(JWKS_URL);
-  return createTokenValidator(jwks, clientId);
+// ---------------------------------------------------------------------------
+// StaticAuthenticator (for testing / GRAPHDO_ACCESS_TOKEN)
+// ---------------------------------------------------------------------------
+
+export class StaticAuthenticator implements Authenticator {
+  constructor(private readonly accessToken: string) {}
+
+  login(): Promise<LoginResult> {
+    return Promise.resolve({
+      message: "Already authenticated with static token",
+      done: Promise.resolve(this.accessToken),
+    });
+  }
+
+  token(): Promise<string> {
+    return Promise.resolve(this.accessToken);
+  }
+
+  async logout(): Promise<void> {
+    // No-op for static authenticator
+  }
+
+  isAuthenticated(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super(
+      "Not logged in — use the login tool to authenticate with Microsoft",
+    );
+    this.name = "AuthenticationRequiredError";
+  }
 }

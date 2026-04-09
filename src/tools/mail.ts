@@ -3,13 +3,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import type { Authenticator } from "../auth.js";
+import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { getMe, sendMail } from "../graph/mail.js";
 import { GRAPH_BASE_URL } from "../index.js";
 import { logger } from "../logger.js";
 
 /** Register mail-related tools on the given MCP server. */
-export function registerMailTools(server: McpServer): void {
+export function registerMailTools(
+  server: McpServer,
+  authenticator: Authenticator,
+): void {
   server.registerTool(
     "mail_send",
     {
@@ -29,16 +34,9 @@ export function registerMailTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ subject, body, html }, extra) => {
-      const token = extra.authInfo?.token;
-      if (!token) {
-        return {
-          content: [{ type: "text" as const, text: "Unauthorized: no Bearer token provided" }],
-          isError: true,
-        };
-      }
-
+    async ({ subject, body, html }) => {
       try {
+        const token = await authenticator.token();
         const client = new GraphClient(GRAPH_BASE_URL, token);
         const user = await getMe(client);
         await sendMail(client, user.mail, subject, body, html);
@@ -47,6 +45,12 @@ export function registerMailTools(server: McpServer): void {
           content: [{ type: "text" as const, text: `Email sent to ${user.mail}` }],
         };
       } catch (error: unknown) {
+        if (error instanceof AuthenticationRequiredError) {
+          return {
+            content: [{ type: "text" as const, text: error.message }],
+            isError: true,
+          };
+        }
         const message =
           error instanceof GraphRequestError
             ? error.message

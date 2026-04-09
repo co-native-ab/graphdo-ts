@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A TypeScript MCP server that gives AI agents scoped, low-risk access to Microsoft Graph API. Current capabilities cover mail and Microsoft To Do; more Graph surfaces will be added over time. Pure server (no CLI) — distributed as an MCPB bundle. OAuth is delegated to the MCP client; the server receives Bearer tokens and forwards them to Graph API.
+A TypeScript MCP server that gives AI agents scoped, low-risk access to Microsoft Graph API. Current capabilities cover mail and Microsoft To Do; more Graph surfaces will be added over time. Uses stdio transport and MSAL device code authentication — distributed as an MCPB bundle.
 
 Repository: `github.com/co-native-ab/graphdo-ts`
 
@@ -10,8 +10,8 @@ Repository: `github.com/co-native-ab/graphdo-ts`
 
 ```
 src/
-  index.ts               HTTP server entry point (Streamable HTTP transport)
-  auth.ts                JWT token validation (jose + Azure AD JWKS), Protected Resource Metadata
+  index.ts               Stdio server entry point (StdioServerTransport)
+  auth.ts                MSAL device code authentication (Authenticator interface, token cache)
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
   graph/
@@ -20,16 +20,15 @@ src/
     mail.ts              getMe, sendMail
     todo.ts              TodoList/TodoItem CRUD + pagination ($top/$skip)
   tools/
+    login.ts             login (MSAL device code flow) and logout MCP tools
     mail.ts              mail_send MCP tool registration
     todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete
     config.ts            todo_config MCP tool (list picker with human-in-the-loop)
 test/
   helpers.ts             createTestEnv() — standardized test setup
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
-  mock-oidc.ts           Mock OIDC provider — RSA key gen, JWKS endpoint, JWT signing
   config.test.ts         Config persistence unit tests
-  auth.test.ts           Token validation unit tests (jose + mock OIDC)
-  integration.test.ts    Full e2e: real HTTP server + MCP client + mock Graph + mock OIDC
+  stdio.test.ts          Full e2e: real stdio server + mock Graph API
   graph/
     client.test.ts       GraphClient + GraphRequestError tests
     mail.test.ts         Mail operation tests
@@ -39,13 +38,18 @@ test/
 ## Key Design Decisions
 
 ### No Graph SDK
-We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`. The client is created per-request with the token extracted from MCP `authInfo`.
+We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`.
 
-### OAuth Delegated to MCP Client
-The server never handles OAuth flows. MCP clients provide Bearer tokens via the `Authorization` header. The server validates tokens using `jose` against Azure AD's JWKS endpoint — checking signature, expiry, issuer pattern, audience (`https://graph.microsoft.com`), and authorized party (our client ID). Valid tokens are then forwarded to Graph API. If no token is present, the server returns 401 with a `WWW-Authenticate` header pointing to `/.well-known/oauth-protected-resource` (RFC 9728), which tells the client which authorization server and scopes to use.
+### MSAL Device Code Authentication
+The server handles its own authentication using MSAL's device code flow (same as the Go `graphdo`). When the `login` tool is called, the server initiates a device code request with Azure AD, returns the user code and URL, and blocks until the user authenticates in a browser. Tokens are cached locally in the config directory (`msal_cache.json` + `account.json`) and refreshed automatically via `acquireTokenSilent`.
 
-### Streamable HTTP Transport
-The server uses MCP Streamable HTTP transport on `/mcp`. Sessions are tracked in a `Map<string, StreamableHTTPServerTransport>`. Each POST with an `initialize` request creates a new session; subsequent requests use the `Mcp-Session-Id` header. A new `McpServer` is created per session with all tools registered.
+### Authenticator Interface
+The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`. Two implementations:
+- `DeviceCodeAuthenticator` — production MSAL flow with file-based token cache
+- `StaticAuthenticator` — for testing with a fixed token (via `GRAPHDO_ACCESS_TOKEN` env var)
+
+### Stdio Transport
+The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin/stdout JSON-RPC. This is required for MCPB compatibility. Logs go to stderr.
 
 ### Config via MCP Tool
 The `todo_config` tool implements a two-step human-in-the-loop flow:
@@ -57,6 +61,7 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 ### Error Handling
 - **MCP tools never throw** — all errors are caught and returned as `{ isError: true, content: [{ type: "text", text: message }] }`
 - `GraphRequestError` provides structured error info: method, path, statusCode, code, graphMessage
+- `AuthenticationRequiredError` is thrown when no cached token is available — tools catch this and return a helpful error directing the agent to use the `login` tool
 - `loadAndValidateConfig()` throws with a clear user-friendly message if config is missing
 
 ### Scopes
@@ -72,21 +77,18 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 - **Cross-platform** — use `node:path`, `node:os`, `node:crypto` for filesystem ops; handle win32/darwin/linux paths
 - **Atomic file writes** — write to temp file then rename into place (`saveConfig`)
 - **Comments** — only where clarification is needed, not on every function
-- **Minimal dependencies** — only 5 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`, `jose`
+- **Minimal dependencies** — only 3 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
 
 ## Testing
 
 ### Test Architecture
-Tests use vitest with three layers:
+Tests use vitest with two layers:
 1. **Graph layer tests** (`test/graph/`) — test `GraphClient`, mail, and todo operations against the mock Graph API server
-2. **Integration tests** (`test/integration.test.ts`) — full end-to-end tests with real HTTP server, real MCP client (`StreamableHTTPClientTransport`), mock Graph API, and mock OIDC provider. Tests the entire flow: discovery, authentication, tool calls, and side-effects in mock state.
-3. **Auth unit tests** (`test/auth.test.ts`) — test JWT token validation in isolation via mock OIDC provider (expired tokens, wrong keys, wrong issuer/audience/azp, malformed tokens)
+2. **Stdio integration tests** (`test/stdio.test.ts`) — full end-to-end tests: spawns the actual server process with `StdioServerTransport`, communicates via JSON-RPC over stdin/stdout pipes, verifies all tool calls against the mock Graph API, and checks side-effects in mock state
 
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state — no mocking libraries for HTTP.
 
-The mock OIDC provider (`test/mock-oidc.ts`) generates an RSA key pair, serves JWKS over HTTP, and provides a `signToken(overrides?)` helper for creating valid and invalid JWTs.
-
-Integration tests set `GRAPHDO_GRAPH_URL` and `GRAPHDO_CONFIG_DIR` env vars before dynamically importing the server module, then start the server with a mock token validator. The MCP client connects over real HTTP with signed JWT tokens.
+Stdio tests set `GRAPHDO_ACCESS_TOKEN` (uses `StaticAuthenticator`), `GRAPHDO_GRAPH_URL`, and `GRAPHDO_CONFIG_DIR` env vars, then spawn the built `dist/index.js` as a child process. The `VITEST` env var is explicitly removed from the child so `main()` runs.
 
 ### Running Tests
 ```bash
@@ -109,9 +111,9 @@ npm run build                         # esbuild single-file bundle (dist/index.j
 
 ### Adding New Tests
 1. For Graph layer tests — use `createTestEnv()` from `test/helpers.ts`, which provides a `MockState` and running mock server
-2. For integration tests — add to `test/integration.test.ts`. Use `createAuthenticatedClient()` to get a connected MCP client. Call tools via `client.callTool()` and verify side-effects in `graphState`.
-3. Assert tool results via `client.callTool()` — check `result.isError` and text content
-4. Clean up with `afterAll` — close MCP clients, stop servers, remove temp dirs
+2. For stdio integration tests — add to `test/stdio.test.ts`. Use `sendAndReceive()` to send JSON-RPC requests and verify responses. Check side-effects in `graphState`.
+3. Assert tool results via the JSON-RPC response — check `result.isError` and text content
+4. Clean up with `afterAll` — kill server process, close mock graph, remove temp dirs
 
 ### Adding New Mock Endpoints
 Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: check auth → parse URL segments → read body if needed → update `MockState` → return JSON response. Always call `errorResponse()` for error cases.
@@ -120,9 +122,9 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 
 1. **Add Graph operations** in `src/graph/` — follow the pattern: validate inputs → call `client.request()` → parse response
 2. **Register tool** in `src/tools/` — use `server.registerTool(name, { description, inputSchema, annotations }, handler)`
-3. **Handler pattern**: extract token from `extra.authInfo?.token` → return error if missing → create `GraphClient` → call Graph operation → format response → catch all errors and return `isError: true`
-4. **Register in `src/index.ts`** — add `registerXxxTools(server)` call in `handlePost()` where the per-session server is created
-5. **Add tests** — both Graph layer tests and MCP tool integration tests
+3. **Handler pattern**: call `authenticator.token()` → create `GraphClient` → call Graph operation → format response → catch `AuthenticationRequiredError` and `GraphRequestError` and return `isError: true`
+4. **Register in `src/index.ts`** — add `registerXxxTools(server, authenticator)` call in `createMcpServer()`
+5. **Add tests** — both Graph layer tests and stdio integration tests
 6. **Input validation** — use `zod` schemas in `inputSchema` (the MCP SDK validates automatically)
 7. Run `npm run check` (lint + typecheck + test)
 
@@ -131,16 +133,21 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 ### CI (`ci.yml`)
 Runs on push/PR to main: `npm ci` → lint → typecheck → test → build
 
+### Release (`release.yml`)
+Triggered by `v*` tags. Stamps version (without `v` prefix) into `package.json` and `manifest.json`, runs full check + build, creates MCPB bundle, generates SHA-256 checksums, and publishes a GitHub Release with the bundle and checksums.
+
 ### Environment Variables
 - `GRAPHDO_GRAPH_URL` — override Graph API base URL (used in development)
 - `GRAPHDO_CONFIG_DIR` — override config directory (used in tests)
 - `GRAPHDO_DEBUG=true` — enable debug logging
-- `PORT` — HTTP server port (default: 3000)
+- `GRAPHDO_ACCESS_TOKEN` — skip MSAL auth and use a static Bearer token
 
 ## Config Files
 
 Stored in the config directory (`~/.config/graphdo-ts` on Linux, OS-appropriate elsewhere):
 - `config.json` — selected todo list ID and display name
+- `msal_cache.json` — MSAL token cache (managed by MSAL library)
+- `account.json` — cached MSAL account info for silent token acquisition
 
 The `GRAPHDO_CONFIG_DIR` env var overrides the directory (used in tests with temp dirs).
 
