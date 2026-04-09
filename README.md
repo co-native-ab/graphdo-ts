@@ -58,8 +58,8 @@ Replace the path with the actual path to the downloaded bundle.
 
 graphdo-ts uses MSAL's [device code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) to authenticate. When the agent calls the `login` tool:
 
-1. The server initiates a device code request with Azure AD
-2. The tool returns a message: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
+1. The tool returns immediately with a message: _"Visit https://microsoft.com/devicelogin and enter code: ABC123. Once you've signed in, you can use the other tools."_
+2. MSAL continues polling Azure AD in the background
 3. You authenticate in any browser on any device
 4. Once complete, tokens are cached locally and used for all subsequent Graph API calls
 

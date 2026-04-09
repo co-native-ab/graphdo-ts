@@ -3,12 +3,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { Authenticator } from "../auth.js";
 import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
-import { configDir, saveConfig } from "../config.js";
-import { GRAPH_BASE_URL } from "../index.js";
+import { saveConfig } from "../config.js";
+import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 function formatListOptions(lists: { id: string; displayName: string }[]): string {
@@ -21,7 +20,7 @@ function formatListOptions(lists: { id: string; displayName: string }[]): string
 /** Register the todo_config tool on the given MCP server. */
 export function registerConfigTools(
   server: McpServer,
-  authenticator: Authenticator,
+  config: ServerConfig,
 ): void {
   server.registerTool(
     "todo_config",
@@ -36,8 +35,8 @@ export function registerConfigTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const client = new GraphClient(GRAPH_BASE_URL, token);
+        const token = await config.authenticator.token();
+        const client = new GraphClient(config.graphBaseUrl, token);
         const lists = await listTodoLists(client);
 
         if (!args.listId) {
@@ -54,10 +53,9 @@ export function registerConfigTools(
           return { content: [{ type: "text", text }], isError: true };
         }
 
-        const cfgPath = configDir();
         await saveConfig(
           { todoListId: selected.id, todoListName: selected.displayName },
-          cfgPath,
+          config.configDir,
         );
 
         const text = `Todo list configured: ${selected.displayName} (${selected.id})`;

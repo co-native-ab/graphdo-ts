@@ -2,13 +2,13 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { Authenticator } from "../auth.js";
+import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 /** Register login/logout tools on the given MCP server. */
 export function registerLoginTools(
   server: McpServer,
-  authenticator: Authenticator,
+  config: ServerConfig,
 ): void {
   // ---- login ----
 
@@ -18,7 +18,7 @@ export function registerLoginTools(
       description:
         "Log in to Microsoft Graph using device code authentication. " +
         "Returns a URL and code — the user visits the URL in a browser and enters the code. " +
-        "This tool blocks until the user completes authentication.",
+        "Once signed in, the other tools will work automatically.",
       inputSchema: {},
       annotations: {
         title: "Login to Microsoft",
@@ -29,7 +29,7 @@ export function registerLoginTools(
     async () => {
       try {
         // Check if already authenticated
-        if (await authenticator.isAuthenticated()) {
+        if (await config.authenticator.isAuthenticated()) {
           return {
             content: [
               {
@@ -40,19 +40,17 @@ export function registerLoginTools(
           };
         }
 
-        const loginResult = await authenticator.login();
-
-        // Return the device code message immediately for display, then await completion
+        // Start device code flow — returns immediately with URL + code.
+        // MSAL continues polling Azure AD in the background.
+        const loginResult = await config.authenticator.login();
         logger.info("device code flow initiated, waiting for user");
-
-        // Block until the user completes authentication
-        await loginResult.done;
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `${loginResult.message}\n\nAuthentication successful! You can now use the other tools.`,
+              text: loginResult.message +
+                "\n\nOnce you've signed in, you can use the other tools.",
             },
           ],
         };
@@ -85,7 +83,7 @@ export function registerLoginTools(
     },
     async () => {
       try {
-        await authenticator.logout();
+        await config.authenticator.logout();
         return {
           content: [
             {

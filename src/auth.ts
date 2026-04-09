@@ -45,8 +45,6 @@ export interface Authenticator {
 export interface LoginResult {
   /** Human-readable message (e.g. "To sign in, use a web browser…"). */
   message: string;
-  /** Promise that resolves when the user completes authentication. */
-  done: Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +149,7 @@ export class DeviceCodeAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
+  private pendingLogin: Promise<void> | null = null;
 
   constructor(clientId: string, configDir: string, scopes: string[]) {
     this.clientId = clientId;
@@ -185,19 +184,15 @@ export class DeviceCodeAuthenticator implements Authenticator {
       resolveMessage = resolve;
     });
 
-    const tokenPromise = client.acquireTokenByDeviceCode({
-      scopes: this.scopes,
-      deviceCodeCallback: (response) => {
-        resolveMessage(response.message);
-      },
-    });
-
-    // Wait for the device code callback to fire
-    const message = await messagePromise;
-
-    return {
-      message,
-      done: tokenPromise.then(async (result) => {
+    // Start device code flow — runs in the background, caches tokens on completion
+    this.pendingLogin = client
+      .acquireTokenByDeviceCode({
+        scopes: this.scopes,
+        deviceCodeCallback: (response) => {
+          resolveMessage(response.message);
+        },
+      })
+      .then(async (result) => {
         if (!result?.account) {
           throw new Error("Device code authentication returned no result");
         }
@@ -206,13 +201,28 @@ export class DeviceCodeAuthenticator implements Authenticator {
         logger.info("login successful", {
           username: result.account.username,
         });
+      })
+      .catch((err: unknown) => {
+        logger.error("device code login failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      })
+      .finally(() => {
+        this.pendingLogin = null;
+      });
 
-        return result.accessToken;
-      }),
-    };
+    // Wait for the device code callback to fire (immediate — just the code URL)
+    const message = await messagePromise;
+    return { message };
   }
 
   async token(): Promise<string> {
+    // If a login is in progress, wait for it to complete first
+    if (this.pendingLogin) {
+      await this.pendingLogin;
+    }
+
     const client = this.createClient();
     const account = await loadAccount(this.configDir);
 
@@ -284,8 +294,7 @@ export class StaticAuthenticator implements Authenticator {
 
   login(): Promise<LoginResult> {
     return Promise.resolve({
-      message: "Already authenticated with static token",
-      done: Promise.resolve(this.accessToken),
+      message: "Already authenticated with static token.",
     });
   }
 

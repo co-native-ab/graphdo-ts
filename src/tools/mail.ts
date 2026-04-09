@@ -3,17 +3,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import type { Authenticator } from "../auth.js";
 import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { getMe, sendMail } from "../graph/mail.js";
-import { GRAPH_BASE_URL } from "../index.js";
+import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 /** Register mail-related tools on the given MCP server. */
 export function registerMailTools(
   server: McpServer,
-  authenticator: Authenticator,
+  config: ServerConfig,
 ): void {
   server.registerTool(
     "mail_send",
@@ -36,8 +35,8 @@ export function registerMailTools(
     },
     async ({ subject, body, html }) => {
       try {
-        const token = await authenticator.token();
-        const client = new GraphClient(GRAPH_BASE_URL, token);
+        const token = await config.authenticator.token();
+        const client = new GraphClient(config.graphBaseUrl, token);
         const user = await getMe(client);
         await sendMail(client, user.mail, subject, body, html);
         logger.info("mail sent", { to: user.mail, subject });

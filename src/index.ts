@@ -23,9 +23,6 @@ import { registerConfigTools } from "./tools/config.js";
 declare const __VERSION__: string;
 export const VERSION: string = __VERSION__;
 
-export const GRAPH_BASE_URL =
-  process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
-
 /** Azure AD app registration client ID (same as Go graphdo). */
 export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
 
@@ -37,20 +34,31 @@ export const SCOPES: readonly string[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Server configuration
+// ---------------------------------------------------------------------------
+
+/** Configuration for the MCP server — all dependencies injected here. */
+export interface ServerConfig {
+  authenticator: Authenticator;
+  graphBaseUrl: string;
+  configDir: string;
+}
+
+// ---------------------------------------------------------------------------
 // MCP Server
 // ---------------------------------------------------------------------------
 
 /** Create a configured McpServer instance with all tools registered. */
-export function createMcpServer(authenticator: Authenticator): McpServer {
+export function createMcpServer(config: ServerConfig): McpServer {
   const server = new McpServer(
     { name: "graphdo", version: VERSION },
     { capabilities: { logging: {} } },
   );
 
-  registerLoginTools(server, authenticator);
-  registerMailTools(server, authenticator);
-  registerTodoTools(server, authenticator);
-  registerConfigTools(server, authenticator);
+  registerLoginTools(server, config);
+  registerMailTools(server, config);
+  registerTodoTools(server, config);
+  registerConfigTools(server, config);
 
   return server;
 }
@@ -73,7 +81,14 @@ async function main(): Promise<void> {
     ? new StaticAuthenticator(staticToken)
     : new DeviceCodeAuthenticator(CLIENT_ID, cfgDir, [...SCOPES]);
 
-  const server = createMcpServer(authenticator);
+  const graphBaseUrl =
+    process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
+
+  const server = createMcpServer({
+    authenticator,
+    graphBaseUrl,
+    configDir: cfgDir,
+  });
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

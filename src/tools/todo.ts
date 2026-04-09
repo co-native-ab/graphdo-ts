@@ -3,7 +3,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { Authenticator } from "../auth.js";
 import { AuthenticationRequiredError } from "../auth.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import {
@@ -14,8 +13,8 @@ import {
   completeTodo,
   deleteTodo,
 } from "../graph/todo.js";
-import { configDir, loadAndValidateConfig } from "../config.js";
-import { GRAPH_BASE_URL } from "../index.js";
+import { loadAndValidateConfig } from "../config.js";
+import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 function statusEmoji(status: string): string {
@@ -43,7 +42,7 @@ function formatError(toolName: string, err: unknown): { content: { type: "text";
 /** Register all To Do CRUD tools on the given MCP server. */
 export function registerTodoTools(
   server: McpServer,
-  authenticator: Authenticator,
+  config: ServerConfig,
 ): void {
   // ---- todo_list ----
   server.registerTool(
@@ -62,13 +61,12 @@ export function registerTodoTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
         const items = await listTodos(
           client,
-          config.todoListId,
+          todoConfig.todoListId,
           args.top,
           args.skip,
         );
@@ -78,7 +76,7 @@ export function registerTodoTools(
             `${String(i + 1 + args.skip)}. ${statusEmoji(item.status)} ${item.title} (${item.id})`,
         );
 
-        const header = `Todos in "${config.todoListName}":\n`;
+        const header = `Todos in "${todoConfig.todoListName}":\n`;
         const footer = `\nShowing ${String(items.length)} items (skip: ${String(args.skip)}, top: ${String(args.top)})`;
         const text =
           items.length > 0
@@ -106,17 +104,16 @@ export function registerTodoTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
-        const item = await getTodo(client, config.todoListId, args.taskId);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        const item = await getTodo(client, todoConfig.todoListId, args.taskId);
 
         const lines = [
           `Title: ${item.title}`,
           `Status: ${statusLabel(item.status)}`,
           `ID: ${item.id}`,
-          `List: ${config.todoListName} (${config.todoListId})`,
+          `List: ${todoConfig.todoListName} (${todoConfig.todoListId})`,
         ];
 
         if (item.body?.content) {
@@ -147,13 +144,12 @@ export function registerTodoTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
         const item = await createTodo(
           client,
-          config.todoListId,
+          todoConfig.todoListId,
           args.title,
           args.body,
         );
@@ -196,13 +192,12 @@ export function registerTodoTools(
       }
 
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
         const item = await updateTodo(
           client,
-          config.todoListId,
+          todoConfig.todoListId,
           args.taskId,
           args.title,
           args.body,
@@ -230,11 +225,10 @@ export function registerTodoTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
-        await completeTodo(client, config.todoListId, args.taskId);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        await completeTodo(client, todoConfig.todoListId, args.taskId);
 
         return {
           content: [
@@ -265,11 +259,10 @@ export function registerTodoTools(
     },
     async (args) => {
       try {
-        const token = await authenticator.token();
-        const cfgPath = configDir();
-        const config = await loadAndValidateConfig(cfgPath);
-        const client = new GraphClient(GRAPH_BASE_URL, token);
-        await deleteTodo(client, config.todoListId, args.taskId);
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        await deleteTodo(client, todoConfig.todoListId, args.taskId);
 
         return {
           content: [
