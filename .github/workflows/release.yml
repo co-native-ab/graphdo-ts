@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check
+        run: npm run check
+      - name: Build
+        run: npm run build
+      - name: Create MCPB bundle
+        run: npx @anthropic-ai/mcpb@latest pack . "graphdo-ts-${{ github.ref_name }}.mcpb"
+      - name: Generate checksums
+        run: sha256sum graphdo-ts-*.mcpb > checksums-sha256.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            graphdo-ts-*.mcpb
+            checksums-sha256.txt
