@@ -1,12 +1,12 @@
 // graphdo-ts — MCP server providing AI agents with scoped access to Microsoft Graph.
-// Entry point: stdio-based MCP server with MSAL device code authentication.
+// Entry point: stdio-based MCP server with MSAL authentication (browser + device code fallback).
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import type { Authenticator } from "./auth.js";
 import {
-  DeviceCodeAuthenticator,
+  MsalAuthenticator,
   StaticAuthenticator,
 } from "./auth.js";
 import { configDir } from "./config.js";
@@ -15,6 +15,7 @@ import { registerLoginTools } from "./tools/login.js";
 import { registerMailTools } from "./tools/mail.js";
 import { registerTodoTools } from "./tools/todo.js";
 import { registerConfigTools } from "./tools/config.js";
+import { registerStatusTool } from "./tools/status.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -65,6 +66,7 @@ export function createMcpServer(
   registerMailTools(mcpServer, config);
   registerTodoTools(mcpServer, config);
   registerConfigTools(mcpServer, config);
+  registerStatusTool(mcpServer, config);
 
   return mcpServer;
 }
@@ -81,11 +83,11 @@ async function main(): Promise<void> {
   const cfgDir = configDir(process.env["GRAPHDO_CONFIG_DIR"]);
   logger.debug("config directory", { path: cfgDir });
 
-  // Use static token if provided, otherwise MSAL device code flow
+  // Use static token if provided, otherwise MSAL (browser + device code fallback)
   const staticToken = process.env["GRAPHDO_ACCESS_TOKEN"];
   const authenticator: Authenticator = staticToken
     ? new StaticAuthenticator(staticToken)
-    : new DeviceCodeAuthenticator(CLIENT_ID, cfgDir, [...SCOPES]);
+    : new MsalAuthenticator(CLIENT_ID, cfgDir, [...SCOPES]);
 
   const graphBaseUrl =
     process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A TypeScript MCP server that gives AI agents scoped, low-risk access to Microsoft Graph API. Current capabilities cover mail and Microsoft To Do; more Graph surfaces will be added over time. Uses stdio transport and MSAL device code authentication — distributed as an MCPB bundle.
+A TypeScript MCP server that gives AI agents scoped, low-risk access to Microsoft Graph API. Current capabilities cover mail and Microsoft To Do; more Graph surfaces will be added over time. Uses stdio transport and MSAL authentication (interactive browser login with device code fallback) — distributed as an MCPB bundle.
 
 Repository: `github.com/co-native-ab/graphdo-ts`
 
@@ -11,7 +11,7 @@ Repository: `github.com/co-native-ab/graphdo-ts`
 ```
 src/
   index.ts               Entry point, ServerConfig, createMcpServer()
-  auth.ts                MSAL device code auth (Authenticator interface, non-blocking login)
+  auth.ts                MSAL auth: browser login + device code fallback (Authenticator interface)
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
   graph/
@@ -20,10 +20,11 @@ src/
     mail.ts              getMe, sendMail
     todo.ts              TodoList/TodoItem CRUD + pagination ($top/$skip)
   tools/
-    login.ts             login (non-blocking device code flow) and logout MCP tools
+    login.ts             login (browser + device code fallback) and logout MCP tools
     mail.ts              mail_send MCP tool registration
     todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete
     config.ts            todo_config MCP tool (list picker with human-in-the-loop)
+    status.ts            auth_status MCP tool (authentication state + config info)
 test/
   helpers.ts             createTestEnv() — standardized test setup
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
@@ -44,18 +45,16 @@ All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, c
 ### No Graph SDK
 We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`.
 
-### MSAL Device Code Authentication (Non-Blocking) + Elicitation
-The `login` tool starts the device code flow and returns the URL + code **immediately** — it does not block waiting for the user to authenticate. MSAL polls Azure AD in the background. When the user completes auth in a browser, MSAL caches the tokens. Subsequent tool calls use `acquireTokenSilent()`. If a tool is called while login is still pending, `token()` awaits the pending login promise.
+### MSAL Authentication (Browser + Device Code Fallback) + Elicitation
+The `login` tool tries **interactive browser login** first — it opens the system browser via MSAL's `acquireTokenInteractive()` with a localhost loopback redirect. This completes immediately without any manual code entry. If the browser cannot be opened (headless/remote environments), it falls back to the **device code flow**, which returns a URL + code for the user to enter manually.
 
-When the client supports **form-based elicitation** (`capabilities.elicitation.form`), the login tool uses `mcpServer.server.elicitInput()` to display the device code URL + code in a structured form prompt. The user confirms when they've completed sign-in. If the client doesn't support elicitation, it falls back to returning the message as plain text.
-
-This is critical for Claude Desktop: if the login tool blocked, the device code message would never be shown to the user (the MCP response contains the message but isn't sent until the tool returns).
+When the client supports **form-based elicitation** (`capabilities.elicitation.form`) and device code is used, the login tool uses `mcpServer.server.elicitInput()` to display the device code URL + code in a structured form prompt. The user confirms when they've completed sign-in. If the client doesn't support elicitation, it falls back to returning the message as plain text.
 
 ### Authenticator Interface
-The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`. Three implementations:
-- `DeviceCodeAuthenticator` — production MSAL flow with file-based token cache, non-blocking login
+The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`, `accountInfo()`. Three implementations:
+- `MsalAuthenticator` — production MSAL flow with browser login + device code fallback, file-based token cache
 - `StaticAuthenticator` — for testing with a fixed token (via `GRAPHDO_ACCESS_TOKEN` env var)
-- `MockAuthenticator` (test-only) — controllable auth state, deferred login completion
+- `MockAuthenticator` (test-only) — controllable auth state, deferred login completion, configurable browser login simulation
 
 ### Stdio Transport
 The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin/stdout JSON-RPC. This is required for MCPB compatibility. Logs go to stderr.
@@ -99,7 +98,7 @@ The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server w
 
 The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with controllable state: start unauthenticated, call `completeLogin()` from the test to simulate the user completing the device code flow, verify `loginPending` state. Used to test the full login → use tools → logout → tools fail cycle.
 
-**Elicitation tests** use `createElicitingClient()` — creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for both login and config, fallback to text when client doesn't support elicitation, and that elicitation is skipped when not needed (already authenticated, listId provided).
+**Elicitation tests** use `createElicitingClient()` — creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for both login and config, fallback to text when client doesn't support elicitation, elicitation skipped when not needed (already authenticated, listId provided), and browser login skips elicitation entirely.
 
 ### Running Tests
 ```bash

@@ -167,6 +167,7 @@ describe("integration", () => {
       const names = tools.map((t) => t.name).sort();
 
       expect(names).toEqual([
+        "auth_status",
         "login",
         "logout",
         "mail_send",
@@ -212,6 +213,24 @@ describe("integration", () => {
 
       // Login should be pending
       expect(auth.loginPending).toBe(true);
+    });
+
+    it("completes immediately with browser login", async () => {
+      const browserAuth = new MockAuthenticator({ browserLogin: true });
+      const c = await createTestClient(browserAuth);
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Logged in as");
+      expect(text).toContain("test@example.com");
+
+      // No pending login — completed immediately
+      expect(browserAuth.loginPending).toBe(false);
     });
 
     it("reports already authenticated", async () => {
@@ -558,6 +577,92 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Status tool
+  // -----------------------------------------------------------------------
+
+  describe("auth status", () => {
+    it("shows not logged in when unauthenticated", async () => {
+      const noAuth = new MockAuthenticator();
+      const c = await createTestClient(noAuth);
+
+      const result = (await c.callTool({
+        name: "auth_status",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Not logged in");
+      expect(text).toContain("graphdo v");
+    });
+
+    it("shows logged in with username", async () => {
+      const authed = new MockAuthenticator({
+        token: "status-token",
+        username: "alice@example.com",
+      });
+      const c = await createTestClient(authed);
+
+      const result = (await c.callTool({
+        name: "auth_status",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Logged in");
+      expect(text).toContain("alice@example.com");
+    });
+
+    it("shows configured todo list", async () => {
+      const authed = new MockAuthenticator({ token: "status-token" });
+      const c = await createTestClient(authed);
+
+      // Config should still be set from earlier tests
+      const result = (await c.callTool({
+        name: "auth_status",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("My Tasks");
+    });
+
+    it("shows todo list not configured", async () => {
+      const emptyConfigDir = await mkdtemp(
+        path.join(tmpdir(), "graphdo-test-status-"),
+      );
+
+      try {
+        const authed = new MockAuthenticator({ token: "status-token" });
+
+        const server = createMcpServer({
+          authenticator: authed,
+          graphBaseUrl: graphUrl,
+          configDir: emptyConfigDir,
+        });
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "auth_status",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("Not configured");
+      } finally {
+        await rm(emptyConfigDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Elicitation — login
   // -----------------------------------------------------------------------
 
@@ -645,6 +750,24 @@ describe("integration", () => {
 
       expect(result.isError).toBeFalsy();
       expect(firstText(result)).toContain("Already logged in");
+      expect(elicitCalled).toBe(false);
+    });
+
+    it("skips elicitation when browser login completes immediately", async () => {
+      let elicitCalled = false;
+      const browserAuth = new MockAuthenticator({ browserLogin: true });
+      const c = await createElicitingClient(browserAuth, () => {
+        elicitCalled = true;
+        return { action: "accept", content: {} };
+      });
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Logged in as");
       expect(elicitCalled).toBe(false);
     });
   });

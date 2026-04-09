@@ -1,8 +1,11 @@
 // Login tools — authentication management via MCP tools.
 //
-// When the client supports elicitation, the login tool uses a form prompt
-// to display the device code URL + code and waits for the user to confirm.
-// Otherwise it falls back to returning the message as text.
+// Supports two login methods:
+// 1. Interactive browser login (preferred) — opens system browser, completes immediately
+// 2. Device code flow (fallback) — returns URL + code for manual entry
+//
+// When the client supports elicitation and device code is used, a form prompt
+// displays the URL + code and waits for the user to confirm.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -26,8 +29,9 @@ export function registerLoginTools(
     "login",
     {
       description:
-        "Log in to Microsoft Graph using device code authentication. " +
-        "Returns a URL and code — the user visits the URL in a browser and enters the code. " +
+        "Log in to Microsoft Graph. Opens a browser for interactive sign-in. " +
+        "If a browser is unavailable, falls back to device code authentication " +
+        "(returns a URL and code for manual entry). " +
         "Once signed in, the other tools will work automatically.",
       inputSchema: {},
       annotations: {
@@ -50,9 +54,23 @@ export function registerLoginTools(
           };
         }
 
-        // Start device code flow — returns immediately with URL + code.
-        // MSAL continues polling Azure AD in the background.
+        // Start login — may complete immediately (browser) or need user action (device code)
         const loginResult = await config.authenticator.login();
+
+        // Browser login completed immediately
+        if (loginResult.completed) {
+          logger.info("browser login completed");
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: loginResult.message,
+              },
+            ],
+          };
+        }
+
+        // Device code flow — login is pending in the background
         logger.info("device code flow initiated, waiting for user");
 
         // If the client supports elicitation, show a form prompt and wait

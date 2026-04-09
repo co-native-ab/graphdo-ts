@@ -1,9 +1,12 @@
 // Authentication module — MSAL-based token acquisition for Microsoft Graph.
 //
-// Mirrors the Go graphdo auth package: Authenticator interface with
-// DeviceCodeAuthenticator (production) and StaticAuthenticator (testing).
+// Supports two login methods:
+// 1. Interactive browser login (preferred) — opens system browser, handles redirect
+// 2. Device code flow (fallback) — for headless/remote environments
 
+import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { platform } from "node:os";
 import path from "node:path";
 
 import * as msal from "@azure/msal-node";
@@ -26,9 +29,9 @@ const ACCOUNT_FILE_NAME = "account.json";
 /** Abstraction for login + token acquisition (mirrors Go's auth.Authenticator). */
 export interface Authenticator {
   /**
-   * Perform an interactive login flow (device code).
-   * Returns the device code message for display to the user.
-   * The returned promise resolves when authentication is complete.
+   * Perform an interactive login flow.
+   * Returns a result indicating whether login completed immediately (browser)
+   * or requires user action (device code with a pending background flow).
    */
   login(): Promise<LoginResult>;
 
@@ -40,11 +43,21 @@ export interface Authenticator {
 
   /** Check whether a valid cached token exists (without prompting). */
   isAuthenticated(): Promise<boolean>;
+
+  /** Get info about the currently logged-in account, if any. */
+  accountInfo(): Promise<AccountInfo | null>;
 }
 
 export interface LoginResult {
-  /** Human-readable message (e.g. "To sign in, use a web browser…"). */
+  /** Human-readable message about the login attempt. */
   message: string;
+  /** Whether login has fully completed (browser flow completes immediately). */
+  completed: boolean;
+}
+
+/** Basic info about the logged-in account. */
+export interface AccountInfo {
+  username: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,10 +155,41 @@ async function loadAccount(
 }
 
 // ---------------------------------------------------------------------------
-// DeviceCodeAuthenticator
+// System browser opener
 // ---------------------------------------------------------------------------
 
-export class DeviceCodeAuthenticator implements Authenticator {
+/** Open a URL in the system browser. Throws on failure. */
+function openBrowser(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const os = platform();
+    let cmd: string;
+    if (os === "darwin") {
+      cmd = `open "${url}"`;
+    } else if (os === "win32") {
+      cmd = `start "" "${url}"`;
+    } else {
+      cmd = `xdg-open "${url}"`;
+    }
+
+    exec(cmd, (err) => {
+      if (err) {
+        reject(new Error(`Failed to open browser: ${err.message}`));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// MsalAuthenticator
+// ---------------------------------------------------------------------------
+
+/**
+ * MSAL-based authenticator supporting both interactive browser login
+ * and device code flow as a fallback.
+ */
+export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
@@ -175,7 +219,52 @@ export class DeviceCodeAuthenticator implements Authenticator {
     });
   }
 
+  /**
+   * Try interactive browser login first, fall back to device code.
+   */
   async login(): Promise<LoginResult> {
+    // Try browser login first
+    try {
+      return await this.loginWithBrowser();
+    } catch (err: unknown) {
+      logger.info("browser login failed, falling back to device code", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return this.loginWithDeviceCode();
+    }
+  }
+
+  /** Interactive browser login — opens system browser, handles redirect via loopback. */
+  private async loginWithBrowser(): Promise<LoginResult> {
+    logger.info("starting browser login");
+    const client = this.createClient();
+
+    const result = await client.acquireTokenInteractive({
+      scopes: this.scopes,
+      openBrowser,
+      successTemplate:
+        "<html><body><h1>Authentication successful</h1><p>You can close this window.</p></body></html>",
+      errorTemplate:
+        "<html><body><h1>Authentication failed</h1><p>Please close this window and try again.</p></body></html>",
+    });
+
+    if (!result.account) {
+      throw new Error("Browser authentication returned no account");
+    }
+
+    await saveAccount(result.account, this.configDir);
+    logger.info("browser login successful", {
+      username: result.account.username,
+    });
+
+    return {
+      message: `Logged in as ${result.account.username}`,
+      completed: true,
+    };
+  }
+
+  /** Device code flow — fires in the background, returns message immediately. */
+  private async loginWithDeviceCode(): Promise<LoginResult> {
     logger.info("starting device code login");
     const client = this.createClient();
 
@@ -198,7 +287,7 @@ export class DeviceCodeAuthenticator implements Authenticator {
         }
 
         await saveAccount(result.account, this.configDir);
-        logger.info("login successful", {
+        logger.info("device code login successful", {
           username: result.account.username,
         });
       })
@@ -214,7 +303,7 @@ export class DeviceCodeAuthenticator implements Authenticator {
 
     // Wait for the device code callback to fire (immediate — just the code URL)
     const message = await messagePromise;
-    return { message };
+    return { message, completed: false };
   }
 
   async token(): Promise<string> {
@@ -283,6 +372,12 @@ export class DeviceCodeAuthenticator implements Authenticator {
       return false;
     }
   }
+
+  async accountInfo(): Promise<AccountInfo | null> {
+    const account = await loadAccount(this.configDir);
+    if (!account) return null;
+    return { username: account.username };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +390,7 @@ export class StaticAuthenticator implements Authenticator {
   login(): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
+      completed: true,
     });
   }
 
@@ -308,6 +404,10 @@ export class StaticAuthenticator implements Authenticator {
 
   isAuthenticated(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  accountInfo(): Promise<AccountInfo | null> {
+    return Promise.resolve({ username: "static-token" });
   }
 }
 

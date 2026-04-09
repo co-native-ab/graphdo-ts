@@ -4,18 +4,19 @@ A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents 
 
 The design intentionally limits blast radius — agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
 
-This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration and MSAL device code authentication flow.
+This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration.
 
 ---
 
 ## Features
 
-graphdo-ts currently exposes **10 MCP tools**:
+graphdo-ts currently exposes **11 MCP tools**:
 
 | Tool | Description |
 |------|-------------|
-| `login` | Authenticate via MSAL device code flow |
+| `login` | Authenticate via browser login (with device code fallback) |
 | `logout` | Clear cached tokens and sign out |
+| `auth_status` | Check authentication status, current user, and configuration |
 | `mail_send` | Send an email to yourself (from and to your Microsoft account) |
 | `todo_config` | Configure which Microsoft To Do list to use (human-in-the-loop picker) |
 | `todo_list` | List todos with pagination |
@@ -56,13 +57,19 @@ Replace the path with the actual path to the downloaded bundle.
 
 ## Authentication
 
-graphdo-ts uses MSAL's [device code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) to authenticate. When the agent calls the `login` tool:
+graphdo-ts uses MSAL to authenticate with Microsoft. When the agent calls the `login` tool:
 
-1. The tool starts a device code request with Azure AD
+1. The tool first tries **interactive browser login** — opens your default browser to Microsoft's sign-in page
+2. You authenticate in the browser, which redirects to a local server that captures the auth code
+3. Login completes immediately — no manual code entry needed
+
+If a browser cannot be opened (headless environments, SSH, containers), the tool automatically falls back to **device code flow**:
+1. Returns a URL and code: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
 2. If the client supports [MCP elicitation](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/elicitation), a form prompt is shown with the URL and code — confirm once you've signed in
-3. Otherwise the tool returns the message as text: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
+3. Otherwise the tool returns the message as text
 4. You authenticate in any browser on any device
-5. Once complete, tokens are cached locally and used for all subsequent Graph API calls
+
+Use the `auth_status` tool to check whether you are logged in and see the current user and configuration.
 
 Tokens are automatically refreshed using the cached refresh token. To sign out and clear cached tokens, use the `logout` tool.
 
@@ -146,7 +153,7 @@ Claude Desktop / MCP Client
   ▼
 MCP Server (StdioServerTransport)
   │
-  ├─── MSAL Device Code Auth ──→ Azure AD
+  ├─── MSAL Auth (browser + device code) ──→ Azure AD
   │
   ├─── Graph Client (native fetch)
   │         │
@@ -158,7 +165,7 @@ MCP Server (StdioServerTransport)
 ```
 
 - **Stdio transport** — communicates via stdin/stdout JSON-RPC (designed for MCPB)
-- **MSAL authentication** — device code flow via `@azure/msal-node`, tokens cached locally
+- **MSAL authentication** — interactive browser login with device code fallback, tokens cached locally
 - **Graph client** — lightweight wrapper around `fetch` (no Microsoft Graph SDK)
 - **Minimal dependencies** — three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
 
