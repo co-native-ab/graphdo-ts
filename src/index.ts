@@ -1,14 +1,11 @@
 // graphdo-ts — MCP server for Microsoft Graph (email + todos).
-// Entry point: HTTP server with Streamable HTTP transport.
+// Entry point: Express server with Streamable HTTP transport.
 
 import { randomUUID } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type ServerResponse,
-  type Server as HttpServer,
-} from "node:http";
+import type { Server as HttpServer } from "node:http";
 
+import express from "express";
+import cors from "cors";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -24,7 +21,8 @@ import { registerConfigTools } from "./tools/config.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-export const VERSION = "0.1.0";
+declare const __VERSION__: string;
+export const VERSION: string = __VERSION__;
 
 export const GRAPH_BASE_URL =
   process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
@@ -53,59 +51,19 @@ export function createMcpServer(): McpServer {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP helpers
+// Helpers
 // ---------------------------------------------------------------------------
 
-type AuthenticatedRequest = IncomingMessage & { auth?: AuthInfo };
+interface AuthenticatedRequest extends express.Request {
+  auth?: AuthInfo;
+}
 
-function extractBearerToken(req: IncomingMessage): string | undefined {
+function extractBearerToken(req: express.Request): string | undefined {
   const header = req.headers.authorization;
   if (typeof header !== "string" || !header.startsWith("Bearer ")) {
     return undefined;
   }
   return header.slice(7);
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString("utf-8");
-}
-
-function sendJson(
-  res: ServerResponse,
-  status: number,
-  body: unknown,
-): void {
-  const json = JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(json);
-}
-
-function sendUnauthorized(res: ServerResponse): void {
-  res.writeHead(401, {
-    "WWW-Authenticate": `Bearer resource="${GRAPH_BASE_URL}"`,
-    "Content-Type": "application/json",
-  });
-  res.end(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      error: { code: -32001, message: "Unauthorized: Bearer token required" },
-      id: null,
-    }),
-  );
-}
-
-function setCorsHeaders(res: ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, Mcp-Session-Id",
-  );
-  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
 
 // ---------------------------------------------------------------------------
@@ -115,207 +73,166 @@ function setCorsHeaders(res: ServerResponse): void {
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
 // ---------------------------------------------------------------------------
-// Request handlers
+// Server lifecycle
 // ---------------------------------------------------------------------------
 
-async function handlePost(
-  req: AuthenticatedRequest,
-  res: ServerResponse,
-): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+/** Start the HTTP server with MCP Streamable HTTP transport. */
+export async function startServer(): Promise<HttpServer> {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    cors({
+      exposedHeaders: ["Mcp-Session-Id"],
+    }),
+  );
 
-  // Read and parse body
-  const raw = await readBody(req);
-  let parsedBody: unknown;
-  try {
-    parsedBody = JSON.parse(raw);
-  } catch {
-    sendJson(res, 400, {
-      jsonrpc: "2.0",
-      error: { code: -32700, message: "Parse error" },
-      id: null,
+  // POST /mcp — main MCP endpoint
+  app.post("/mcp", async (req: AuthenticatedRequest, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+    const token = extractBearerToken(req);
+    if (token) {
+      req.auth = { token, clientId: CLIENT_ID, scopes: [...SCOPES] };
+    }
+
+    // --- Existing session ---
+    if (sessionId) {
+      const transport = transports.get(sessionId);
+      if (!transport) {
+        res.status(404).json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Session not found" },
+          id: null,
+        });
+        return;
+      }
+      if (!token) {
+        res
+          .set("WWW-Authenticate", `Bearer resource="${GRAPH_BASE_URL}"`)
+          .status(401)
+          .json({
+            jsonrpc: "2.0",
+            error: {
+              code: -32001,
+              message: "Unauthorized: Bearer token required",
+            },
+            id: null,
+          });
+        return;
+      }
+      await transport.handleRequest(req, res, req.body as Record<string, unknown>);
+      return;
+    }
+
+    // --- New session (initialization) ---
+    if (!isInitializeRequest(req.body)) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Bad Request: expected initialization request",
+        },
+        id: null,
+      });
+      return;
+    }
+
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sid: string) => {
+        logger.info("session initialized", { sessionId: sid });
+        transports.set(sid, transport);
+      },
     });
-    return;
-  }
 
-  // Attach auth info
-  const token = extractBearerToken(req);
-  if (token) {
-    req.auth = { token, clientId: CLIENT_ID, scopes: [...SCOPES] };
-  }
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid) {
+        logger.info("session closed", { sessionId: sid });
+        transports.delete(sid);
+      }
+    };
 
-  // --- Existing session ---
-  if (sessionId) {
+    const server = createMcpServer();
+    registerMailTools(server);
+    registerTodoTools(server);
+    registerConfigTools(server);
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body as Record<string, unknown>);
+  });
+
+  // GET /mcp — SSE streams
+  app.get("/mcp", async (req: AuthenticatedRequest, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    if (!sessionId) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Missing session ID" },
+        id: null,
+      });
+      return;
+    }
+
     const transport = transports.get(sessionId);
     if (!transport) {
-      sendJson(res, 404, {
+      res.status(404).json({
         jsonrpc: "2.0",
         error: { code: -32000, message: "Session not found" },
         id: null,
       });
       return;
     }
-    if (!token) {
-      sendUnauthorized(res);
-      return;
-    }
-    await transport.handleRequest(req, res, parsedBody);
-    return;
-  }
 
-  // --- New session (initialization) ---
-  if (!isInitializeRequest(parsedBody)) {
-    sendJson(res, 400, {
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Bad Request: expected initialization request",
-      },
-      id: null,
-    });
-    return;
-  }
-
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (sid: string) => {
-      logger.info("session initialized", { sessionId: sid });
-      transports.set(sid, transport);
-    },
-  });
-
-  transport.onclose = () => {
-    const sid = transport.sessionId;
-    if (sid) {
-      logger.info("session closed", { sessionId: sid });
-      transports.delete(sid);
-    }
-  };
-
-  const server = createMcpServer();
-  registerMailTools(server);
-  registerTodoTools(server);
-  registerConfigTools(server);
-  await server.connect(transport);
-  await transport.handleRequest(req, res, parsedBody);
-}
-
-async function handleGet(
-  req: AuthenticatedRequest,
-  res: ServerResponse,
-): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId) {
-    sendJson(res, 400, {
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Missing session ID" },
-      id: null,
-    });
-    return;
-  }
-
-  const transport = transports.get(sessionId);
-  if (!transport) {
-    sendJson(res, 404, {
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Session not found" },
-      id: null,
-    });
-    return;
-  }
-
-  const token = extractBearerToken(req);
-  if (token) {
-    req.auth = { token, clientId: CLIENT_ID, scopes: [...SCOPES] };
-  } else {
-    sendUnauthorized(res);
-    return;
-  }
-
-  await transport.handleRequest(req, res);
-}
-
-async function handleDelete(
-  req: AuthenticatedRequest,
-  res: ServerResponse,
-): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId) {
-    sendJson(res, 400, {
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Missing session ID" },
-      id: null,
-    });
-    return;
-  }
-
-  const transport = transports.get(sessionId);
-  if (!transport) {
-    sendJson(res, 404, {
-      jsonrpc: "2.0",
-      error: { code: -32000, message: "Session not found" },
-      id: null,
-    });
-    return;
-  }
-
-  await transport.handleRequest(req, res);
-}
-
-// ---------------------------------------------------------------------------
-// Server lifecycle
-// ---------------------------------------------------------------------------
-
-/** Start the HTTP server with MCP Streamable HTTP transport. */
-export async function startServer(): Promise<HttpServer> {
-  const httpServer = createServer((req, res) => {
-    setCorsHeaders(res);
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    const url = new URL(
-      req.url ?? "/",
-      `http://${req.headers.host ?? "localhost"}`,
-    );
-    if (url.pathname !== "/mcp") {
-      res.writeHead(404);
-      res.end("Not Found");
-      return;
-    }
-
-    const handle = async (): Promise<void> => {
-      switch (req.method) {
-        case "POST":
-          await handlePost(req, res);
-          break;
-        case "GET":
-          await handleGet(req, res);
-          break;
-        case "DELETE":
-          await handleDelete(req, res);
-          break;
-        default:
-          res.writeHead(405);
-          res.end("Method Not Allowed");
-      }
-    };
-
-    handle().catch((err: unknown) => {
-      logger.error("request error", {
-        method: req.method,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      if (!res.headersSent) {
-        sendJson(res, 500, {
+    const token = extractBearerToken(req);
+    if (token) {
+      req.auth = { token, clientId: CLIENT_ID, scopes: [...SCOPES] };
+    } else {
+      res
+        .set("WWW-Authenticate", `Bearer resource="${GRAPH_BASE_URL}"`)
+        .status(401)
+        .json({
           jsonrpc: "2.0",
-          error: { code: -32603, message: "Internal server error" },
+          error: {
+            code: -32001,
+            message: "Unauthorized: Bearer token required",
+          },
           id: null,
         });
-      }
+      return;
+    }
+
+    await transport.handleRequest(req, res);
+  });
+
+  // DELETE /mcp — session termination
+  app.delete("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    if (!sessionId) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Missing session ID" },
+        id: null,
+      });
+      return;
+    }
+
+    const transport = transports.get(sessionId);
+    if (!transport) {
+      res.status(404).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Session not found" },
+        id: null,
+      });
+      return;
+    }
+
+    await transport.handleRequest(req, res);
+  });
+
+  const httpServer = await new Promise<HttpServer>((resolve) => {
+    const server = app.listen(PORT, () => {
+      logger.info("server started", { port: PORT });
+      resolve(server);
     });
   });
 
@@ -336,12 +253,7 @@ export async function startServer(): Promise<HttpServer> {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  return new Promise((resolve) => {
-    httpServer.listen(PORT, () => {
-      logger.info("server started", { port: PORT });
-      resolve(httpServer);
-    });
-  });
+  return httpServer;
 }
 
 // ---------------------------------------------------------------------------
