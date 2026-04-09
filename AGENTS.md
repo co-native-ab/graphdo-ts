@@ -28,15 +28,12 @@ test/
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
   mock-oidc.ts           Mock OIDC provider — RSA key gen, JWKS endpoint, JWT signing
   config.test.ts         Config persistence unit tests
-  auth.test.ts           Token validation + Protected Resource Metadata endpoint tests
+  auth.test.ts           Token validation unit tests (jose + mock OIDC)
+  integration.test.ts    Full e2e: real HTTP server + MCP client + mock Graph + mock OIDC
   graph/
     client.test.ts       GraphClient + GraphRequestError tests
     mail.test.ts         Mail operation tests
     todo.test.ts         Todo CRUD tests
-  tools/
-    config.test.ts       todo_config MCP tool integration tests
-    mail.test.ts         mail_send MCP tool integration tests
-    todo.test.ts         Todo tools integration tests
 ```
 
 ## Key Design Decisions
@@ -82,14 +79,14 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 ### Test Architecture
 Tests use vitest with three layers:
 1. **Graph layer tests** (`test/graph/`) — test `GraphClient`, mail, and todo operations against the mock Graph API server
-2. **MCP tool integration tests** (`test/tools/`) — test full tool handlers via `InMemoryTransport` with mocked modules
-3. **Auth tests** (`test/auth.test.ts`) — test JWT validation and Protected Resource Metadata endpoint via mock OIDC provider
+2. **Integration tests** (`test/integration.test.ts`) — full end-to-end tests with real HTTP server, real MCP client (`StreamableHTTPClientTransport`), mock Graph API, and mock OIDC provider. Tests the entire flow: discovery, authentication, tool calls, and side-effects in mock state.
+3. **Auth unit tests** (`test/auth.test.ts`) — test JWT token validation in isolation via mock OIDC provider (expired tokens, wrong keys, wrong issuer/audience/azp, malformed tokens)
 
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state — no mocking libraries for HTTP.
 
-The mock OIDC provider (`test/mock-oidc.ts`) generates an RSA key pair, serves JWKS over HTTP, and provides a `signToken(overrides?)` helper. Tests cover valid tokens, expired tokens, wrong signing keys, wrong issuer/audience/azp, missing scopes, and malformed tokens.
+The mock OIDC provider (`test/mock-oidc.ts`) generates an RSA key pair, serves JWKS over HTTP, and provides a `signToken(overrides?)` helper for creating valid and invalid JWTs.
 
-MCP tool tests use `vi.mock()` with `vi.hoisted()` to redirect `GRAPH_BASE_URL` and `configDir()` to test values. The `patchTransportAuth()` helper injects `AuthInfo` into the transport to simulate authenticated requests.
+Integration tests set `GRAPHDO_GRAPH_URL` and `GRAPHDO_CONFIG_DIR` env vars before dynamically importing the server module, then start the server with a mock token validator. The MCP client connects over real HTTP with signed JWT tokens.
 
 ### Running Tests
 ```bash
@@ -112,9 +109,9 @@ npm run build                         # esbuild single-file bundle (dist/index.j
 
 ### Adding New Tests
 1. For Graph layer tests — use `createTestEnv()` from `test/helpers.ts`, which provides a `MockState` and running mock server
-2. For MCP tool tests — use `vi.mock()` + `vi.hoisted()` to redirect `GRAPH_BASE_URL` and `configDir()`, create an `InMemoryTransport` pair, patch auth with `patchTransportAuth()`
+2. For integration tests — add to `test/integration.test.ts`. Use `createAuthenticatedClient()` to get a connected MCP client. Call tools via `client.callTool()` and verify side-effects in `graphState`.
 3. Assert tool results via `client.callTool()` — check `result.isError` and text content
-4. Clean up with `afterEach` — close MCP client/server, stop mock server, remove temp dirs
+4. Clean up with `afterAll` — close MCP clients, stop servers, remove temp dirs
 
 ### Adding New Mock Endpoints
 Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: check auth → parse URL segments → read body if needed → update `MockState` → return JSON response. Always call `errorResponse()` for error cases.

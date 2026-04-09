@@ -19,6 +19,9 @@ export const JWKS_URL = new URL(
 
 export const GRAPH_AUDIENCE = "https://graph.microsoft.com";
 
+/** Azure AD app registration client ID. */
+export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
+
 /** Scopes for Protected Resource Metadata (excludes offline_access per spec). */
 export const RESOURCE_SCOPES: readonly string[] = [
   "Mail.Send",

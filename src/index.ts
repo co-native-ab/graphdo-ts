@@ -13,6 +13,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   AUTHORIZATION_SERVER,
+  CLIENT_ID,
   RESOURCE_SCOPES,
   TokenValidationError,
   createAzureADValidator,
@@ -36,7 +37,8 @@ export const GRAPH_BASE_URL =
 
 export const PORT = parseInt(process.env["PORT"] ?? "3000", 10);
 
-export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
+// Re-export CLIENT_ID from auth.ts for backward compat
+export { CLIENT_ID } from "./auth.js";
 
 export const SCOPES: readonly string[] = [
   "Mail.Send",

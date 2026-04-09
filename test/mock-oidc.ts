@@ -6,8 +6,7 @@ import { createServer, type Server } from "node:http";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import type { JWK } from "jose";
 
-import { GRAPH_AUDIENCE } from "../src/auth.js";
-import { CLIENT_ID } from "../src/index.js";
+import { GRAPH_AUDIENCE, CLIENT_ID } from "../src/auth.js";
 
 // ---------------------------------------------------------------------------
 // Constants

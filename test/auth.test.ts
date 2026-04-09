@@ -1,18 +1,16 @@
-// Tests for token validation and Protected Resource Metadata.
+// Tests for token validation.
 // Uses mock-oidc.ts to generate RSA keys, serve JWKS, and sign test JWTs.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRemoteJWKSet, generateKeyPair } from "jose";
 
 import {
-  AUTHORIZATION_SERVER,
+  CLIENT_ID,
   GRAPH_AUDIENCE,
-  RESOURCE_SCOPES,
   TokenValidationError,
   createTokenValidator,
 } from "../src/auth.js";
 import type { ValidateTokenFn } from "../src/auth.js";
-import { CLIENT_ID } from "../src/index.js";
 import { createMockOIDC } from "./mock-oidc.js";
 import type { MockOIDC } from "./mock-oidc.js";
 
@@ -137,174 +135,5 @@ describe("validateToken", () => {
       const claims = await validate(token);
       expect(claims.iss).toContain(tenant);
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Protected Resource Metadata endpoint tests
-// ---------------------------------------------------------------------------
-
-describe("Protected Resource Metadata endpoint", () => {
-  let serverUrl: string;
-  let httpServer: import("node:http").Server;
-
-  /** Standard MCP headers for POST requests. */
-  const mcpHeaders = {
-    "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
-  };
-
-  /** Send an MCP initialize request and return the session ID. */
-  async function initSession(): Promise<string> {
-    const res = await fetch(`${serverUrl}/mcp`, {
-      method: "POST",
-      headers: mcpHeaders,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "test", version: "1.0" },
-        },
-        id: 1,
-      }),
-    });
-    const sid = res.headers.get("mcp-session-id");
-    if (!sid) throw new Error(`init failed: status=${res.status}`);
-    return sid;
-  }
-
-  beforeAll(async () => {
-    const { startServer } = await import("../src/index.js");
-    const jwks = createRemoteJWKSet(new URL(oidc.jwksUrl));
-    const mockValidator = createTokenValidator(jwks, CLIENT_ID);
-
-    process.env["PORT"] = "0";
-    httpServer = await startServer({ validateToken: mockValidator });
-    const addr = httpServer.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
-    serverUrl = `http://localhost:${String(port)}`;
-  });
-
-  afterAll(async () => {
-    await new Promise<void>((resolve) => {
-      httpServer.close(() => resolve());
-    });
-    delete process.env["PORT"];
-  });
-
-  it("serves metadata at /.well-known/oauth-protected-resource", async () => {
-    const res = await fetch(
-      `${serverUrl}/.well-known/oauth-protected-resource`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("application/json");
-
-    const metadata = (await res.json()) as Record<string, unknown>;
-    expect(metadata["resource"]).toBe(serverUrl);
-    expect(metadata["authorization_servers"]).toEqual([
-      AUTHORIZATION_SERVER,
-    ]);
-    expect(metadata["scopes_supported"]).toEqual([...RESOURCE_SCOPES]);
-    expect(metadata["bearer_methods_supported"]).toEqual(["header"]);
-  });
-
-  it("serves metadata at path-based variant /mcp", async () => {
-    const res = await fetch(
-      `${serverUrl}/.well-known/oauth-protected-resource/mcp`,
-    );
-    expect(res.status).toBe(200);
-
-    const metadata = (await res.json()) as Record<string, unknown>;
-    expect(metadata["authorization_servers"]).toEqual([
-      AUTHORIZATION_SERVER,
-    ]);
-  });
-
-  it("returns 401 with resource_metadata for missing token on existing session", async () => {
-    const sessionId = await initSession();
-
-    const res = await fetch(`${serverUrl}/mcp`, {
-      method: "POST",
-      headers: { ...mcpHeaders, "mcp-session-id": sessionId },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "tools/list",
-        id: 2,
-      }),
-    });
-
-    expect(res.status).toBe(401);
-    const wwwAuth = res.headers.get("www-authenticate");
-    expect(wwwAuth).toContain("resource_metadata=");
-    expect(wwwAuth).toContain("/.well-known/oauth-protected-resource");
-    expect(wwwAuth).toContain('scope="Mail.Send Tasks.ReadWrite User.Read"');
-    expect(wwwAuth).not.toContain("offline_access");
-  });
-
-  it("returns 401 with resource_metadata for invalid token", async () => {
-    const sessionId = await initSession();
-
-    const res = await fetch(`${serverUrl}/mcp`, {
-      method: "POST",
-      headers: {
-        ...mcpHeaders,
-        "mcp-session-id": sessionId,
-        Authorization: "Bearer invalid-token",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "tools/list",
-        id: 3,
-      }),
-    });
-
-    expect(res.status).toBe(401);
-    const wwwAuth = res.headers.get("www-authenticate");
-    expect(wwwAuth).toContain("resource_metadata=");
-    expect(wwwAuth).toContain('scope="Mail.Send Tasks.ReadWrite User.Read"');
-  });
-
-  it("accepts a valid token on existing session", async () => {
-    const sessionId = await initSession();
-    const validToken = await oidc.signToken();
-
-    // Send initialized notification
-    const res = await fetch(`${serverUrl}/mcp`, {
-      method: "POST",
-      headers: {
-        ...mcpHeaders,
-        "mcp-session-id": sessionId,
-        Authorization: `Bearer ${validToken}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-      }),
-    });
-
-    // Notifications return 202 Accepted
-    expect(res.status).toBe(202);
-  });
-
-  it("allows initialization without a token", async () => {
-    const res = await fetch(`${serverUrl}/mcp`, {
-      method: "POST",
-      headers: mcpHeaders,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "test", version: "1.0" },
-        },
-        id: 99,
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get("mcp-session-id")).toBeTruthy();
   });
 });
