@@ -1,0 +1,22 @@
+{
+  "manifest_version": "0.2",
+  "name": "graphdo",
+  "display_name": "graphdo",
+  "version": "0.1.0",
+  "description": "MCP server for Microsoft Graph — send emails and manage todos",
+  "author": {
+    "name": "co-native-ab"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {}
+    }
+  },
+  "license": "MIT"
+}

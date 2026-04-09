@@ -1,0 +1,33 @@
+{
+  "name": "graphdo-ts",
+  "version": "0.1.0",
+  "description": "MCP server for Microsoft Graph — send emails and manage todos",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "mcpb": "npm run build && npx @anthropic-ai/mcpb@latest create --name graphdo --display-name \"graphdo\" --entry-file dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "keywords": ["mcp", "microsoft-graph", "todo", "email"],
+  "author": "co-native-ab",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.2.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.1",
+    "vitest": "^4.1.4"
+  }
+}
