@@ -1,4 +1,4 @@
-// graphdo-ts — MCP server for Microsoft Graph (email + todos).
+// graphdo-ts — MCP server providing AI agents with scoped access to Microsoft Graph.
 // Entry point: Express server with Streamable HTTP transport.
 
 import { randomUUID } from "node:crypto";

@@ -1,8 +1,8 @@
-# graphdo-ts — Project Instructions
+# graphdo-ts — Scoped Microsoft Graph Access for AI Agents
 
 ## What This Is
 
-A TypeScript MCP server that wraps Microsoft Graph API for email sending and Microsoft To Do management. Pure server (no CLI) — distributed as an MCPB bundle. OAuth is delegated to the MCP client; the server receives Bearer tokens and forwards them to Graph API.
+A TypeScript MCP server that gives AI agents scoped, low-risk access to Microsoft Graph API. Current capabilities cover mail and Microsoft To Do; more Graph surfaces will be added over time. Pure server (no CLI) — distributed as an MCPB bundle. OAuth is delegated to the MCP client; the server receives Bearer tokens and forwards them to Graph API.
 
 Repository: `github.com/co-native-ab/graphdo-ts`
 
@@ -72,7 +72,7 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 - **Cross-platform** — use `node:path`, `node:os`, `node:crypto` for filesystem ops; handle win32/darwin/linux paths
 - **Atomic file writes** — write to temp file then rename into place (`saveConfig`)
 - **Comments** — only where clarification is needed, not on every function
-- **Minimal dependencies** — only 2 runtime deps: `@modelcontextprotocol/sdk`, `zod`
+- **Minimal dependencies** — only 4 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, `cors`
 
 ## Testing
 
@@ -101,8 +101,7 @@ npm run check                         # lint + typecheck + test (all three)
 
 ### Building
 ```bash
-npm run build                         # tsc (declaration + sourcemap)
-npm run bundle                        # esbuild single-file bundle (dist/bundle.mjs)
+npm run build                         # esbuild single-file bundle (dist/index.js)
 ```
 
 ### Adding New Tests

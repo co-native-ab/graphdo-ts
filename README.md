@@ -1,6 +1,8 @@
 # graphdo-ts
 
-A TypeScript [MCP server](https://modelcontextprotocol.io) for Microsoft Graph — send emails and manage your Microsoft To Do tasks from any MCP client.
+A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents scoped, low-risk access to Microsoft Graph.
+
+The design intentionally limits blast radius — agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
 
 This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Unlike the Go version, graphdo-ts is a pure MCP server with HTTP transport — it has no CLI, no built-in OAuth flow, and no login command. OAuth is delegated entirely to the MCP client (e.g. Claude Desktop), which provides Bearer tokens that the server forwards to the Graph API.
 
@@ -8,7 +10,7 @@ This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/
 
 ## Features
 
-graphdo-ts exposes **8 MCP tools**:
+graphdo-ts currently exposes **8 MCP tools** covering email and task management:
 
 | Tool | Description |
 |------|-------------|
@@ -64,6 +66,8 @@ OAuth is handled entirely by the MCP client. graphdo-ts never sees or stores cre
 The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into the server. No client-side configuration is needed unless your organization uses a custom app registration.
 
 ### Required Scopes
+
+These scopes reflect the current set of capabilities. Additional scopes may be required as new Graph surfaces are added.
 
 | Scope | Purpose |
 |-------|---------|
@@ -136,7 +140,7 @@ MCP Client (Claude Desktop, etc.)
   │
   │  HTTP + Bearer token
   ▼
-HTTP Server (node:http)
+HTTP Server (Express)
   │
   │  Streamable HTTP transport (/mcp)
   ▼
@@ -151,11 +155,11 @@ Graph Client (native fetch)
 Microsoft Graph API (v1.0)
 ```
 
-- **HTTP server** — plain `node:http` with CORS and session management
+- **HTTP server** — Express with cors middleware and session management
 - **Streamable HTTP transport** — MCP sessions tracked by `Mcp-Session-Id` header
 - **Per-request auth** — tokens extracted from the `Authorization` header, never stored
 - **Graph client** — lightweight wrapper around `fetch` (no Microsoft Graph SDK)
-- **Minimal dependencies** — only `@modelcontextprotocol/sdk` and `zod` at runtime
+- **Minimal dependencies** — four runtime deps: `@modelcontextprotocol/sdk`, `zod`, `express`, and `cors`
 
 ---
 
