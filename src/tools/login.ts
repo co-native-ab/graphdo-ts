@@ -1,9 +1,19 @@
 // Login tools — authentication management via MCP tools.
+//
+// When the client supports elicitation, the login tool uses a form prompt
+// to display the device code URL + code and waits for the user to confirm.
+// Otherwise it falls back to returning the message as text.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
+
+/** Check whether the connected client supports form-based elicitation. */
+function clientSupportsElicitation(config: ServerConfig): boolean {
+  const caps = config.mcpServer.server.getClientCapabilities();
+  return caps?.elicitation?.form !== undefined;
+}
 
 /** Register login/logout tools on the given MCP server. */
 export function registerLoginTools(
@@ -45,6 +55,62 @@ export function registerLoginTools(
         const loginResult = await config.authenticator.login();
         logger.info("device code flow initiated, waiting for user");
 
+        // If the client supports elicitation, show a form prompt and wait
+        // for the user to confirm they've completed sign-in.
+        if (clientSupportsElicitation(config)) {
+          const elicitResult = await config.mcpServer.server.elicitInput({
+            message: loginResult.message,
+            requestedSchema: {
+              type: "object" as const,
+              properties: {
+                confirmed: {
+                  type: "boolean" as const,
+                  title: "I've completed sign-in",
+                  description:
+                    "Check this after you've visited the URL and entered the code.",
+                  default: false,
+                },
+              },
+            },
+          });
+
+          if (elicitResult.action !== "accept") {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Login cancelled. Use the login tool when you're ready to sign in.",
+                },
+              ],
+            };
+          }
+
+          // Wait for the background MSAL flow to complete
+          try {
+            await config.authenticator.token();
+          } catch {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Sign-in not yet complete. Please visit the URL, enter the code, and try again.",
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Logged in successfully. You can now use the other tools.",
+              },
+            ],
+          };
+        }
+
+        // Fallback: return the device code message as text (non-blocking).
         return {
           content: [
             {

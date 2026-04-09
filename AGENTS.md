@@ -39,13 +39,15 @@ test/
 ## Key Design Decisions
 
 ### ServerConfig (Dependency Injection)
-All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, configDir }`. This is threaded through `createMcpServer()` and into all tool registration functions. No tool reads env vars or calls global functions — everything is injected. `main()` is the only place that reads env vars and constructs the config. This makes testing trivial: pass a `MockAuthenticator`, a mock Graph URL, and a temp config dir.
+All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, configDir, mcpServer }`. This is threaded through `createMcpServer()` and into all tool registration functions. No tool reads env vars or calls global functions — everything is injected. `main()` is the only place that reads env vars and constructs the config. This makes testing trivial: pass a `MockAuthenticator`, a mock Graph URL, and a temp config dir.
 
 ### No Graph SDK
 We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`.
 
-### MSAL Device Code Authentication (Non-Blocking)
+### MSAL Device Code Authentication (Non-Blocking) + Elicitation
 The `login` tool starts the device code flow and returns the URL + code **immediately** — it does not block waiting for the user to authenticate. MSAL polls Azure AD in the background. When the user completes auth in a browser, MSAL caches the tokens. Subsequent tool calls use `acquireTokenSilent()`. If a tool is called while login is still pending, `token()` awaits the pending login promise.
+
+When the client supports **form-based elicitation** (`capabilities.elicitation.form`), the login tool uses `mcpServer.server.elicitInput()` to display the device code URL + code in a structured form prompt. The user confirms when they've completed sign-in. If the client doesn't support elicitation, it falls back to returning the message as plain text.
 
 This is critical for Claude Desktop: if the login tool blocked, the device code message would never be shown to the user (the MCP response contains the message but isn't sent until the tool returns).
 
@@ -58,8 +60,8 @@ The `Authenticator` interface abstracts token acquisition: `login()`, `token()`,
 ### Stdio Transport
 The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin/stdout JSON-RPC. This is required for MCPB compatibility. Logs go to stderr.
 
-### Config via MCP Tool
-The `todo_config` tool implements a two-step human-in-the-loop flow:
+### Config via MCP Tool + Elicitation
+The `todo_config` tool configures which Microsoft To Do list to use. When the client supports form-based elicitation, it presents a dropdown picker (using `oneOf` enum schema) for the user to select a list directly. When elicitation is not available, it falls back to a two-step text flow:
 1. Call without `listId` → returns available lists for the user to choose
 2. Call with `listId` → saves selection to `config.json`
 
@@ -96,6 +98,8 @@ Tests use vitest with two layers:
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state — no mocking libraries for HTTP.
 
 The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with controllable state: start unauthenticated, call `completeLogin()` from the test to simulate the user completing the device code flow, verify `loginPending` state. Used to test the full login → use tools → logout → tools fail cycle.
+
+**Elicitation tests** use `createElicitingClient()` — creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for both login and config, fallback to text when client doesn't support elicitation, and that elicitation is skipped when not needed (already authenticated, listId provided).
 
 ### Running Tests
 ```bash

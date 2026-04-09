@@ -10,8 +10,10 @@ import { tmpdir } from "node:os";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 
-import { createMcpServer, type ServerConfig } from "../src/index.js";
+import { createMcpServer } from "../src/index.js";
 import { createMockGraphServer, MockState } from "./mock-graph.js";
 import { MockAuthenticator } from "./mock-auth.js";
 import { saveConfig } from "../src/config.js";
@@ -53,17 +55,59 @@ let auth: MockAuthenticator;
 async function createTestClient(
   authenticator: MockAuthenticator,
 ): Promise<Client> {
-  const config: ServerConfig = {
+  const server = createMcpServer({
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
-  };
-
-  const server = createMcpServer(config);
+  });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
   const c = new Client({ name: "test-client", version: "1.0.0" });
+
+  await server.connect(serverTransport);
+  await c.connect(clientTransport);
+
+  return c;
+}
+
+/** Elicitation response handler — returns the configured result. */
+type ElicitHandler = (params: {
+  message: string;
+  requestedSchema?: unknown;
+}) => ElicitResult;
+
+/**
+ * Create a client that supports form-based elicitation.
+ * The handler function is called for each elicitation request.
+ */
+async function createElicitingClient(
+  authenticator: MockAuthenticator,
+  handler: ElicitHandler,
+): Promise<Client> {
+  const server = createMcpServer({
+    authenticator,
+    graphBaseUrl: graphUrl,
+    configDir: configDirPath,
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+
+  const c = new Client(
+    { name: "test-client", version: "1.0.0" },
+    { capabilities: { elicitation: { form: {} } } },
+  );
+
+  c.setRequestHandler(ElicitRequestSchema, (request) => {
+    const params = request.params;
+    return Promise.resolve(
+      handler({
+        message: params.message,
+        requestedSchema:
+          "requestedSchema" in params ? params.requestedSchema : undefined,
+      }),
+    );
+  });
 
   await server.connect(serverTransport);
   await c.connect(clientTransport);
@@ -488,13 +532,12 @@ describe("integration", () => {
 
       try {
         const emptyAuth = new MockAuthenticator({ token: "token" });
-        const emptyConfig: ServerConfig = {
+
+        const server = createMcpServer({
           authenticator: emptyAuth,
           graphBaseUrl: graphUrl,
           configDir: emptyConfigDir,
-        };
-
-        const server = createMcpServer(emptyConfig);
+        });
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
 
@@ -511,6 +554,173 @@ describe("integration", () => {
       } finally {
         await rm(emptyConfigDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Elicitation — login
+  // -----------------------------------------------------------------------
+
+  describe("elicitation: login", () => {
+    it("uses form elicitation when client supports it", async () => {
+      const elicitAuth = new MockAuthenticator();
+      let elicitMessage = "";
+
+      const c = await createElicitingClient(elicitAuth, (params) => {
+        elicitMessage = params.message;
+        // Simulate user completing sign-in
+        elicitAuth.completeLogin("elicit-token");
+        return { action: "accept", content: { confirmed: true } };
+      });
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Logged in successfully");
+      expect(elicitMessage).toContain("microsoft.com/devicelogin");
+      expect(elicitMessage).toContain("MOCK1234");
+    });
+
+    it("handles elicitation decline", async () => {
+      const elicitAuth = new MockAuthenticator();
+      const c = await createElicitingClient(elicitAuth, () => {
+        return { action: "decline" };
+      });
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("cancelled");
+    });
+
+    it("handles elicitation cancel", async () => {
+      const elicitAuth = new MockAuthenticator();
+      const c = await createElicitingClient(elicitAuth, () => {
+        return { action: "cancel" };
+      });
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("cancelled");
+    });
+
+    it("falls back to text when client lacks elicitation", async () => {
+      // createTestClient does NOT declare elicitation capability
+      const noElicitAuth = new MockAuthenticator();
+      const c = await createTestClient(noElicitAuth);
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("microsoft.com/devicelogin");
+      expect(text).toContain("Once you've signed in");
+    });
+
+    it("skips elicitation when already authenticated", async () => {
+      let elicitCalled = false;
+      const authedAuth = new MockAuthenticator({ token: "already-authed" });
+      const c = await createElicitingClient(authedAuth, () => {
+        elicitCalled = true;
+        return { action: "accept", content: {} };
+      });
+
+      const result = (await c.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Already logged in");
+      expect(elicitCalled).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Elicitation — config
+  // -----------------------------------------------------------------------
+
+  describe("elicitation: config", () => {
+    it("uses form elicitation to pick a todo list", async () => {
+      const cfgAuth = new MockAuthenticator({ token: "config-elicit-token" });
+      let elicitMessage = "";
+
+      const c = await createElicitingClient(cfgAuth, (params) => {
+        elicitMessage = params.message;
+        return { action: "accept", content: { listId: "list-1" } };
+      });
+
+      const result = (await c.callTool({
+        name: "todo_config",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("configured");
+      expect(text).toContain("My Tasks");
+      expect(elicitMessage).toContain("Select");
+    });
+
+    it("handles elicitation cancel for config", async () => {
+      const cfgAuth = new MockAuthenticator({ token: "config-cancel-token" });
+      const c = await createElicitingClient(cfgAuth, () => {
+        return { action: "cancel" };
+      });
+
+      const result = (await c.callTool({
+        name: "todo_config",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("cancelled");
+    });
+
+    it("falls back to text list when client lacks elicitation", async () => {
+      const cfgAuth = new MockAuthenticator({ token: "config-noelicit-token" });
+      const c = await createTestClient(cfgAuth);
+
+      const result = (await c.callTool({
+        name: "todo_config",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Available todo lists");
+      expect(text).toContain("Call todo_config again");
+    });
+
+    it("still accepts listId directly with elicitation client", async () => {
+      const cfgAuth = new MockAuthenticator({ token: "config-direct-token" });
+      let elicitCalled = false;
+      const c = await createElicitingClient(cfgAuth, () => {
+        elicitCalled = true;
+        return { action: "accept", content: {} };
+      });
+
+      const result = (await c.callTool({
+        name: "todo_config",
+        arguments: { listId: "list-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("configured");
+      expect(elicitCalled).toBe(false);
     });
   });
 });

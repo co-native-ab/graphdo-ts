@@ -42,6 +42,8 @@ export interface ServerConfig {
   authenticator: Authenticator;
   graphBaseUrl: string;
   configDir: string;
+  /** McpServer instance for elicitation and capability checks. */
+  mcpServer: McpServer;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,18 +51,22 @@ export interface ServerConfig {
 // ---------------------------------------------------------------------------
 
 /** Create a configured McpServer instance with all tools registered. */
-export function createMcpServer(config: ServerConfig): McpServer {
-  const server = new McpServer(
+export function createMcpServer(
+  opts: Omit<ServerConfig, "mcpServer">,
+): McpServer {
+  const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
     { capabilities: { logging: {} } },
   );
 
-  registerLoginTools(server, config);
-  registerMailTools(server, config);
-  registerTodoTools(server, config);
-  registerConfigTools(server, config);
+  const config: ServerConfig = { ...opts, mcpServer };
 
-  return server;
+  registerLoginTools(mcpServer, config);
+  registerMailTools(mcpServer, config);
+  registerTodoTools(mcpServer, config);
+  registerConfigTools(mcpServer, config);
+
+  return mcpServer;
 }
 
 // ---------------------------------------------------------------------------
