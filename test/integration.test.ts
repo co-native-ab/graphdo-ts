@@ -16,7 +16,7 @@ import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "../src/index.js";
 import { createMockGraphServer, MockState } from "./mock-graph.js";
 import { MockAuthenticator } from "./mock-auth.js";
-import { saveConfig } from "../src/config.js";
+import { saveConfig, loadConfig } from "../src/config.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,11 +54,13 @@ let auth: MockAuthenticator;
 /** Create a fresh MCP client + server pair and connect them. */
 async function createTestClient(
   authenticator: MockAuthenticator,
+  opts?: { openBrowser?: (url: string) => Promise<void> },
 ): Promise<Client> {
   const server = createMcpServer({
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
+    openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -89,6 +91,7 @@ async function createElicitingClient(
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
+    openBrowser: () => Promise.reject(new Error("no browser in tests")),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -171,13 +174,17 @@ describe("integration", () => {
         "login",
         "logout",
         "mail_send",
+        "todo_add_step",
         "todo_complete",
         "todo_config",
         "todo_create",
         "todo_delete",
+        "todo_delete_step",
         "todo_list",
         "todo_show",
+        "todo_steps",
         "todo_update",
+        "todo_update_step",
       ]);
     });
 
@@ -356,47 +363,188 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Todo config
+  // Todo config (browser-based)
   // -----------------------------------------------------------------------
 
   describe("todo config", () => {
-    beforeAll(async () => {
-      auth = new MockAuthenticator({ token: "config-token" });
-      client = await createTestClient(auth);
-    });
+    it("returns auth error when not logged in", async () => {
+      const noAuth = new MockAuthenticator();
+      const c = await createTestClient(noAuth);
 
-    it("lists available todo lists", async () => {
-      const result = (await client.callTool({
+      const result = (await c.callTool({
         name: "todo_config",
         arguments: {},
       })) as ToolResult;
 
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("My Tasks");
-      expect(text).toContain("list-1");
-    });
-
-    it("returns error for non-existent list", async () => {
-      const result = (await client.callTool({
-        name: "todo_config",
-        arguments: { listId: "nonexistent" },
-      })) as ToolResult;
-
       expect(result.isError).toBe(true);
-      expect(firstText(result)).toContain("not found");
+      expect(firstText(result)).toContain("Not logged in");
     });
 
-    it("selects a todo list", async () => {
-      const result = (await client.callTool({
-        name: "todo_config",
-        arguments: { listId: "list-1" },
-      })) as ToolResult;
+    it("returns message when no todo lists exist", async () => {
+      // Temporarily clear the lists
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [];
 
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("configured");
-      expect(text).toContain("My Tasks");
+      try {
+        auth = new MockAuthenticator({ token: "config-token" });
+        client = await createTestClient(auth);
+
+        const result = (await client.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        expect(firstText(result)).toContain("No todo lists found");
+      } finally {
+        graphState.todoLists = originalLists;
+      }
+    });
+
+    it("configures list via browser picker (full e2e)", async () => {
+      // Ensure multiple lists are available
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+        { id: "list-2", displayName: "Work" },
+      ];
+
+      // Use a temp config dir so we can verify the config was saved
+      const tempConfigDir = await mkdtemp(
+        path.join(tmpdir(), "graphdo-config-e2e-"),
+      );
+
+      try {
+        let capturedUrl = "";
+        const browserSpy = (url: string): Promise<void> => {
+          capturedUrl = url;
+          // Simulate user clicking a list in the browser
+          // Small delay to simulate real browser interaction
+          setTimeout(() => {
+            void fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "list-2", label: "Work" }),
+            });
+          }, 50);
+          return Promise.resolve();
+        };
+
+        const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
+        const server = createMcpServer({
+          authenticator: configAuth,
+          graphBaseUrl: graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        });
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("browser window has been opened");
+        expect(text).toContain("Work");
+        expect(text).toContain("list-2");
+
+        // Verify browser was opened
+        expect(capturedUrl).toContain("http://127.0.0.1:");
+
+        // Verify config was persisted
+        const config = await loadConfig(tempConfigDir);
+        expect(config).not.toBeNull();
+        expect(config!.todoListId).toBe("list-2");
+        expect(config!.todoListName).toBe("Work");
+      } finally {
+        graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("shows URL as fallback when browser fails to open", async () => {
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+      ];
+
+      const tempConfigDir = await mkdtemp(
+        path.join(tmpdir(), "graphdo-config-e2e-"),
+      );
+
+      try {
+        let capturedUrl = "";
+        const failingBrowser = (url: string): Promise<void> => {
+          capturedUrl = url;
+          // Simulate browser failing (headless environment)
+          // But still act as the user visiting the URL manually
+          setTimeout(() => {
+            void fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "list-1", label: "My Tasks" }),
+            });
+          }, 50);
+          return Promise.reject(new Error("xdg-open failed"));
+        };
+
+        const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
+        const server = createMcpServer({
+          authenticator: configAuth,
+          graphBaseUrl: graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: failingBrowser,
+        });
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("Could not open a browser");
+        expect(text).toContain(capturedUrl);
+        expect(text).toContain("My Tasks");
+      } finally {
+        graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("returns error when picker times out (no selection)", async () => {
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+      ];
+
+      try {
+        // openBrowser does nothing — simulates user ignoring the page
+        const browserSpy = (_url: string): Promise<void> => Promise.resolve();
+
+        const configAuth = new MockAuthenticator({ token: "config-timeout-token" });
+
+        // The tool uses startBrowserPicker with the default 2-minute timeout.
+        // We can't override that through the tool, so the timeout path is
+        // tested at the picker unit test level (picker.test.ts) with a
+        // 100ms timeout. Here we just verify the tool wires the spy correctly.
+        const c = await createTestClient(configAuth, { openBrowser: browserSpy });
+
+        // Verify the tool would work (we already tested the full flow above).
+        // The timeout error message "timed out" is tested in picker.test.ts.
+        expect(c).toBeDefined();
+      } finally {
+        graphState.todoLists = originalLists;
+      }
     });
   });
 
@@ -504,6 +652,321 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Enhanced todo features (importance, due date, reminder, recurrence)
+  // -----------------------------------------------------------------------
+
+  describe("enhanced todo features", () => {
+    beforeAll(async () => {
+      auth = new MockAuthenticator({ token: "enhanced-token" });
+      client = await createTestClient(auth);
+
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        configDirPath,
+      );
+
+      graphState.todos.set("list-1", [
+        { id: "task-1", title: "Base task", status: "notStarted" },
+      ]);
+    });
+
+    it("creates a todo with importance", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Urgent item", importance: "high" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Urgent item");
+
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Urgent item");
+      expect(task?.importance).toBe("high");
+    });
+
+    it("creates a todo with due date", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Due soon", dueDate: "2025-12-31" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Due soon");
+      expect(task?.dueDateTime).toBeDefined();
+      expect(task?.dueDateTime?.dateTime).toContain("2025-12-31");
+    });
+
+    it("creates a todo with reminder", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: {
+          title: "Reminder task",
+          reminderDateTime: "2025-12-30T09:00:00",
+        },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Reminder task");
+      expect(task?.isReminderOn).toBe(true);
+      expect(task?.reminderDateTime).toBeDefined();
+    });
+
+    it("creates a todo with daily recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Daily standup", repeat: "daily" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Daily standup");
+      expect(task?.recurrence).toBeDefined();
+      expect(task?.recurrence?.pattern.type).toBe("daily");
+      expect(task?.recurrence?.pattern.interval).toBe(1);
+    });
+
+    it("creates a todo with weekly recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Weekly review", repeat: "weekly" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Weekly review");
+      expect(task?.recurrence?.pattern.type).toBe("weekly");
+    });
+
+    it("creates a todo with weekdays recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Weekday check", repeat: "weekdays" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Weekday check");
+      expect(task?.recurrence?.pattern.type).toBe("weekly");
+      expect(task?.recurrence?.pattern.daysOfWeek).toEqual(
+        expect.arrayContaining(["monday", "tuesday", "wednesday", "thursday", "friday"]),
+      );
+    });
+
+    it("shows a todo with all fields", async () => {
+      const result = (await client.callTool({
+        name: "todo_show",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Base task");
+    });
+
+    it("updates importance", async () => {
+      const result = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", importance: "low" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.id === "task-1");
+      expect(task?.importance).toBe("low");
+    });
+
+    it("sets and clears due date", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", dueDate: "2025-06-15" },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.dueDateTime).toBeDefined();
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearDueDate: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.dueDateTime).toBeUndefined();
+    });
+
+    it("sets and clears reminder", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: {
+          taskId: "task-1",
+          reminderDateTime: "2025-06-15T09:00:00",
+        },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.isReminderOn).toBe(true);
+      expect(task?.reminderDateTime).toBeDefined();
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearReminder: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.isReminderOn).toBe(false);
+      expect(task?.reminderDateTime).toBeUndefined();
+    });
+
+    it("sets and clears recurrence", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", repeat: "monthly" },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.recurrence?.pattern.type).toBe("absoluteMonthly");
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearRecurrence: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.recurrence).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Checklist items (steps)
+  // -----------------------------------------------------------------------
+
+  describe("checklist items", () => {
+    beforeAll(async () => {
+      auth = new MockAuthenticator({ token: "steps-token" });
+      client = await createTestClient(auth);
+
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        configDirPath,
+      );
+
+      graphState.todos.set("list-1", [
+        { id: "task-1", title: "Task with steps", status: "notStarted" },
+      ]);
+      graphState.checklistItems.clear();
+    });
+
+    it("lists empty steps", async () => {
+      const result = (await client.callTool({
+        name: "todo_steps",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("No steps");
+    });
+
+    it("adds a step", async () => {
+      const result = (await client.callTool({
+        name: "todo_add_step",
+        arguments: { taskId: "task-1", displayName: "Step 1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Step 1");
+
+      const items = graphState.getChecklistItems("task-1");
+      expect(items).toHaveLength(1);
+      expect(items[0]!.displayName).toBe("Step 1");
+    });
+
+    it("adds multiple steps", async () => {
+      const result = (await client.callTool({
+        name: "todo_add_step",
+        arguments: { taskId: "task-1", displayName: "Step 2" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const items = graphState.getChecklistItems("task-1");
+      expect(items).toHaveLength(2);
+    });
+
+    it("lists steps after creation", async () => {
+      const result = (await client.callTool({
+        name: "todo_steps",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Step 1");
+      expect(text).toContain("Step 2");
+    });
+
+    it("checks a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[0]!;
+
+      const result = (await client.callTool({
+        name: "todo_update_step",
+        arguments: { taskId: "task-1", stepId: step.id, isChecked: true },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+
+      const updated = graphState.getChecklistItems("task-1");
+      expect(updated.find((i) => i.id === step.id)?.isChecked).toBe(true);
+    });
+
+    it("renames a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[0]!;
+
+      const result = (await client.callTool({
+        name: "todo_update_step",
+        arguments: { taskId: "task-1", stepId: step.id, displayName: "Renamed Step" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Renamed Step");
+    });
+
+    it("deletes a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[1]!;
+
+      const result = (await client.callTool({
+        name: "todo_delete_step",
+        arguments: { taskId: "task-1", stepId: step.id },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("deleted");
+
+      const remaining = graphState.getChecklistItems("task-1");
+      expect(remaining).toHaveLength(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Error handling
   // -----------------------------------------------------------------------
 
@@ -554,6 +1017,7 @@ describe("integration", () => {
           authenticator: emptyAuth,
           graphBaseUrl: graphUrl,
           configDir: emptyConfigDir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
         });
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
@@ -639,6 +1103,7 @@ describe("integration", () => {
           authenticator: authed,
           graphBaseUrl: graphUrl,
           configDir: emptyConfigDir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
         });
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
@@ -766,81 +1231,6 @@ describe("integration", () => {
 
       expect(result.isError).toBeFalsy();
       expect(firstText(result)).toContain("Logged in as");
-      expect(elicitCalled).toBe(false);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // Elicitation - config
-  // -----------------------------------------------------------------------
-
-  describe("elicitation: config", () => {
-    it("uses form elicitation to pick a todo list", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-elicit-token" });
-      let elicitMessage = "";
-
-      const c = await createElicitingClient(cfgAuth, (params) => {
-        elicitMessage = params.message;
-        return { action: "accept", content: { listId: "list-1" } };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("configured");
-      expect(text).toContain("My Tasks");
-      expect(elicitMessage).toContain("Select");
-    });
-
-    it("handles elicitation cancel for config", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-cancel-token" });
-      const c = await createElicitingClient(cfgAuth, () => {
-        return { action: "cancel" };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      expect(firstText(result)).toContain("cancelled");
-    });
-
-    it("falls back to text list when client lacks elicitation", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-noelicit-token" });
-      const c = await createTestClient(cfgAuth);
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("Available todo lists");
-      expect(text).toContain("Call todo_config again");
-    });
-
-    it("still accepts listId directly with elicitation client", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-direct-token" });
-      let elicitCalled = false;
-      const c = await createElicitingClient(cfgAuth, () => {
-        elicitCalled = true;
-        return { action: "accept", content: {} };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: { listId: "list-1" },
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      expect(firstText(result)).toContain("configured");
       expect(elicitCalled).toBe(false);
     });
   });

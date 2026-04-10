@@ -4,6 +4,7 @@ import type {
   User,
   TodoItem,
   TodoList,
+  ChecklistItem,
   SendMailRequest,
   GraphErrorEnvelope,
 } from "../src/graph/types.js";
@@ -19,6 +20,7 @@ export class MockState {
   user: User;
   todoLists: TodoList[];
   todos: Map<string, TodoItem[]>;
+  checklistItems: Map<string, ChecklistItem[]>;
   sentMails: SentMail[];
   private nextId: number;
 
@@ -26,6 +28,7 @@ export class MockState {
     this.user = { id: "", displayName: "", mail: "", userPrincipalName: "" };
     this.todoLists = [];
     this.todos = new Map();
+    this.checklistItems = new Map();
     this.sentMails = [];
     this.nextId = 1;
   }
@@ -42,6 +45,10 @@ export class MockState {
 
   getTodos(listId: string): TodoItem[] {
     return [...(this.todos.get(listId) ?? [])];
+  }
+
+  getChecklistItems(taskId: string): ChecklistItem[] {
+    return [...(this.checklistItems.get(taskId) ?? [])];
   }
 }
 
@@ -207,6 +214,50 @@ async function handleRequest(
           return handleDeleteTask(state, listId, taskId, res);
         }
       }
+
+      // Checklist items: /me/todo/lists/:listId/tasks/:taskId/checklistItems[/:itemId]
+      if (segments.length >= 7 && segments[6] === "checklistItems") {
+        const taskId = segments[5];
+        if (taskId === undefined) {
+          errorResponse(res, 404, "NotFound", "missing task ID");
+          return;
+        }
+
+        // Verify task exists
+        const tasks = state.todos.get(listId) ?? [];
+        if (!tasks.some((t) => t.id === taskId)) {
+          errorResponse(res, 404, "NotFound", `task ${taskId} not found`);
+          return;
+        }
+
+        // GET/POST /me/todo/lists/:listId/tasks/:taskId/checklistItems
+        if (segments.length === 7) {
+          if (method === "GET") {
+            return handleListChecklistItems(state, taskId, res);
+          }
+          if (method === "POST") {
+            return await handleCreateChecklistItem(state, taskId, req, res);
+          }
+        }
+
+        // GET/PATCH/DELETE /me/todo/lists/:listId/tasks/:taskId/checklistItems/:itemId
+        if (segments.length === 8) {
+          const itemId = segments[7];
+          if (itemId === undefined) {
+            errorResponse(res, 404, "NotFound", "missing checklist item ID");
+            return;
+          }
+          if (method === "GET") {
+            return handleGetChecklistItem(state, taskId, itemId, res);
+          }
+          if (method === "PATCH") {
+            return await handleUpdateChecklistItem(state, taskId, itemId, req, res);
+          }
+          if (method === "DELETE") {
+            return handleDeleteChecklistItem(state, taskId, itemId, res);
+          }
+        }
+      }
     }
 
     errorResponse(res, 404, "NotFound", `no route for ${method} ${parsed.pathname}`);
@@ -251,6 +302,11 @@ async function handleCreateTask(
     title: payload.title ?? "",
     status: "notStarted",
     body: payload.body,
+    importance: payload.importance ?? "normal",
+    isReminderOn: payload.isReminderOn,
+    reminderDateTime: payload.reminderDateTime,
+    dueDateTime: payload.dueDateTime,
+    recurrence: payload.recurrence,
   };
 
   const existing = state.todos.get(listId) ?? [];
@@ -292,15 +348,15 @@ async function handleUpdateTask(
   const raw = await readBody(req);
   const patch = JSON.parse(raw) as Partial<TodoItem>;
 
-  if (patch.title !== undefined) {
-    task.title = patch.title;
-  }
-  if (patch.status !== undefined) {
-    task.status = patch.status;
-  }
-  if (patch.body !== undefined) {
-    task.body = patch.body;
-  }
+  if (patch.title !== undefined) task.title = patch.title;
+  if (patch.status !== undefined) task.status = patch.status;
+  if (patch.body !== undefined) task.body = patch.body;
+  if (patch.importance !== undefined) task.importance = patch.importance;
+  if (patch.isReminderOn !== undefined) task.isReminderOn = patch.isReminderOn;
+  // null clears the field, undefined means no change
+  if ("reminderDateTime" in patch) task.reminderDateTime = patch.reminderDateTime ?? undefined;
+  if ("dueDateTime" in patch) task.dueDateTime = patch.dueDateTime ?? undefined;
+  if ("recurrence" in patch) task.recurrence = patch.recurrence ?? undefined;
 
   jsonResponse(res, 200, task);
 }
@@ -319,6 +375,105 @@ function handleDeleteTask(
   }
   items.splice(index, 1);
   state.todos.set(listId, items);
+
+  // Also clean up any checklist items for this task
+  state.checklistItems.delete(taskId);
+
+  res.writeHead(204);
+  res.end();
+}
+
+// ---------------------------------------------------------------------------
+// Checklist item handlers
+// ---------------------------------------------------------------------------
+
+function handleListChecklistItems(
+  state: MockState,
+  taskId: string,
+  res: http.ServerResponse,
+): void {
+  const items = state.checklistItems.get(taskId) ?? [];
+  jsonResponse(res, 200, { value: items });
+}
+
+async function handleCreateChecklistItem(
+  state: MockState,
+  taskId: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<void> {
+  const raw = await readBody(req);
+  const payload = JSON.parse(raw) as Partial<ChecklistItem>;
+
+  const newItem: ChecklistItem = {
+    id: state.genId(),
+    displayName: payload.displayName ?? "",
+    isChecked: false,
+    createdDateTime: new Date().toISOString(),
+  };
+
+  const existing = state.checklistItems.get(taskId) ?? [];
+  existing.push(newItem);
+  state.checklistItems.set(taskId, existing);
+
+  jsonResponse(res, 201, newItem);
+}
+
+function handleGetChecklistItem(
+  state: MockState,
+  taskId: string,
+  itemId: string,
+  res: http.ServerResponse,
+): void {
+  const items = state.checklistItems.get(taskId) ?? [];
+  const item = items.find((i) => i.id === itemId);
+  if (!item) {
+    errorResponse(res, 404, "NotFound", `checklist item ${itemId} not found`);
+    return;
+  }
+  jsonResponse(res, 200, item);
+}
+
+async function handleUpdateChecklistItem(
+  state: MockState,
+  taskId: string,
+  itemId: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<void> {
+  const items = state.checklistItems.get(taskId) ?? [];
+  const item = items.find((i) => i.id === itemId);
+  if (!item) {
+    errorResponse(res, 404, "NotFound", `checklist item ${itemId} not found`);
+    return;
+  }
+
+  const raw = await readBody(req);
+  const patch = JSON.parse(raw) as Partial<ChecklistItem>;
+
+  if (patch.displayName !== undefined) item.displayName = patch.displayName;
+  if (patch.isChecked !== undefined) {
+    item.isChecked = patch.isChecked;
+    item.checkedDateTime = patch.isChecked ? new Date().toISOString() : undefined;
+  }
+
+  jsonResponse(res, 200, item);
+}
+
+function handleDeleteChecklistItem(
+  state: MockState,
+  taskId: string,
+  itemId: string,
+  res: http.ServerResponse,
+): void {
+  const items = state.checklistItems.get(taskId) ?? [];
+  const index = items.findIndex((i) => i.id === itemId);
+  if (index === -1) {
+    errorResponse(res, 404, "NotFound", `checklist item ${itemId} not found`);
+    return;
+  }
+  items.splice(index, 1);
+  state.checklistItems.set(taskId, items);
 
   res.writeHead(204);
   res.end();

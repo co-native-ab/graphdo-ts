@@ -21,12 +21,58 @@ export interface ItemBody {
   contentType: string;
 }
 
+/** Date and time with timezone (Graph API pattern). */
+export interface DateTimeTimeZone {
+  dateTime: string;
+  timeZone: string;
+}
+
+/** Recurrence pattern (daily, weekly, monthly, yearly). */
+export interface RecurrencePattern {
+  type: string;
+  interval: number;
+  daysOfWeek?: string[];
+  dayOfMonth?: number;
+  month?: number;
+  firstDayOfWeek?: string;
+  index?: string;
+}
+
+/** Recurrence range (end condition). */
+export interface RecurrenceRange {
+  type: string;
+  startDate: string;
+  endDate?: string;
+  numberOfOccurrences?: number;
+}
+
+/** Patterned recurrence combining pattern + range. */
+export interface PatternedRecurrence {
+  pattern: RecurrencePattern;
+  range: RecurrenceRange;
+}
+
+/** A checklist item (step) within a todo task. */
+export interface ChecklistItem {
+  id: string;
+  displayName: string;
+  isChecked: boolean;
+  createdDateTime?: string;
+  checkedDateTime?: string;
+}
+
 /** A single task in a Microsoft To Do list. */
 export interface TodoItem {
   id: string;
   title: string;
   status: string;
   body?: ItemBody;
+  importance?: string;
+  isReminderOn?: boolean;
+  reminderDateTime?: DateTimeTimeZone;
+  dueDateTime?: DateTimeTimeZone;
+  recurrence?: PatternedRecurrence;
+  checklistItems?: ChecklistItem[];
 }
 
 /** Wrapper for Graph API collection responses. */
