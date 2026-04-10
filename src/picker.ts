@@ -1,4 +1,4 @@
-// Generic browser-based picker — local HTTP server serving an HTML selection page.
+// Generic browser-based picker - local HTTP server serving an HTML selection page.
 //
 // Serves a page with clickable options. When the user selects one, the callback
 // is invoked and the server shuts down. Reusable for any browser-based selection
@@ -24,7 +24,7 @@ export interface PickerConfig {
   options: PickerOption[];
   /** Called when the user selects an option. Errors are surfaced to the browser. */
   onSelect: (option: PickerOption) => Promise<void>;
-  /** Timeout in milliseconds (default: 120 000 — 2 minutes). */
+  /** Timeout in milliseconds (default: 120 000 - 2 minutes). */
   timeoutMs?: number;
 }
 
@@ -48,7 +48,9 @@ export interface PickerHandle {
  * Start a local picker server. Returns the URL immediately and a promise
  * that resolves when the user picks an option.
  */
-export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> {
+export function startBrowserPicker(
+  config: PickerConfig,
+): Promise<PickerHandle> {
   const timeoutMs = config.timeoutMs ?? 120_000;
 
   return new Promise<PickerHandle>((resolveHandle, rejectHandle) => {
@@ -86,7 +88,7 @@ export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> 
       server.close();
       onError(
         new Error(
-          "Selection timed out — no choice made within the time limit. Please try again.",
+          "Selection timed out - no choice made within the time limit. Please try again.",
         ),
       );
     }, timeoutMs);
@@ -137,7 +139,7 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>graphdo — ${escapeHtml(config.title)}</title>
+  <title>graphdo - ${escapeHtml(config.title)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -186,6 +188,7 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
       <p>Selected: <strong id="selected-label"></strong></p>
       <p style="margin-top: 24px;">You can switch back to your AI assistant now.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
+      <p id="manual-close" style="display:none; margin-top: 16px; color: #666; font-size: 0.9rem;">If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
   </div>
@@ -211,7 +214,14 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
           const tick = setInterval(() => {
             remaining--;
             el.textContent = String(remaining);
-            if (remaining <= 0) { clearInterval(tick); window.close(); }
+            if (remaining <= 0) {
+              clearInterval(tick);
+              window.close();
+              setTimeout(() => {
+                document.getElementById('countdown').parentElement.style.display = 'none';
+                document.getElementById('manual-close').style.display = 'block';
+              }, 500);
+            }
           }, 1000);
         } catch (err) {
           document.getElementById('error').style.display = 'block';
@@ -258,7 +268,10 @@ function handleSelection(
 
         await config.onSelect(match);
 
-        logger.info("picker selection made", { id: match.id, label: match.label });
+        logger.info("picker selection made", {
+          id: match.id,
+          label: match.label,
+        });
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));

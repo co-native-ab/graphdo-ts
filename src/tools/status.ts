@@ -16,9 +16,9 @@ export function registerStatusTool(
     "auth_status",
     {
       description:
-        "Check authentication status and server configuration. " +
-        "Shows whether you are logged in, the current user, the configured todo list, " +
-        "and the server version.",
+        "Check current authentication status, logged-in user, configured todo list, " +
+        "and server version. A good first tool to call when diagnosing issues or " +
+        "understanding what is set up.",
       inputSchema: {},
       annotations: {
         title: "Authentication Status",

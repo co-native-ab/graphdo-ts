@@ -1,7 +1,7 @@
 // MCP tool for configuring the active To Do list via browser.
 //
 // Opens a local web server with a list picker in the user's browser.
-// The AI agent cannot change the list — only a human can make this selection.
+// The AI agent cannot change the list - only a human can make this selection.
 // If the browser cannot be opened, the tool shows the URL for manual access.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -23,9 +23,11 @@ export function registerConfigTools(
     "todo_config",
     {
       description:
-        "Configure which Microsoft To Do list to use. " +
-        "Opens a browser window where you select a list. " +
-        "This is a human-only action — the AI agent cannot change the list.",
+        "Select which Microsoft To Do list to use. Call this tool directly when " +
+        "a todo list has not been configured yet - do not ask the user which list " +
+        "they want, this tool opens a browser picker where the user makes the " +
+        "selection themselves. This is a human-only action - the AI agent cannot " +
+        "choose the list programmatically.",
       inputSchema: {},
       annotations: {
         title: "Configure Todo List",
@@ -95,9 +97,7 @@ export function registerConfigTools(
       } catch (err: unknown) {
         if (err instanceof AuthenticationRequiredError) {
           return {
-            content: [
-              { type: "text" as const, text: err.message },
-            ],
+            content: [{ type: "text" as const, text: err.message }],
             isError: true,
           };
         }
@@ -108,12 +108,18 @@ export function registerConfigTools(
               ? err.message
               : String(err);
         logger.error("todo_config failed", { error: message });
+
+        const isTimeout = message.toLowerCase().includes("timed out");
+        const retryHint = isTimeout
+          ? "\n\nThe user did not make a selection in time. " +
+            "You can call this tool again if the user would like to retry."
+          : "\n\nYou can call this tool again if the user would like to retry.";
+
         return {
-          content: [{ type: "text" as const, text: message }],
+          content: [{ type: "text" as const, text: message + retryHint }],
           isError: true,
         };
       }
     },
   );
 }
-

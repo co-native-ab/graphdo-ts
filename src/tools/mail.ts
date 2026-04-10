@@ -18,7 +18,9 @@ export function registerMailTools(
     "mail_send",
     {
       description:
-        "Send an email to yourself. The email will be sent from and to your Microsoft account.",
+        "Send an email to yourself via Outlook. The email is sent from and to " +
+        "your Microsoft account. Useful for notes, reminders, and forwarding " +
+        "information to your inbox.",
       inputSchema: {
         subject: z.string().describe("Email subject line"),
         body: z.string().describe("Email body content"),

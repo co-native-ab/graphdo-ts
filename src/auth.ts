@@ -9,8 +9,8 @@ import path from "node:path";
 
 import * as msal from "@azure/msal-node";
 
-import { openBrowser } from "./browser.js";
 import { logger } from "./logger.js";
+import { LoginLoopbackClient } from "./loopback.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,6 +20,9 @@ const AUTHORITY_URL = "https://login.microsoftonline.com/common";
 
 const CACHE_FILE_NAME = "msal_cache.json";
 const ACCOUNT_FILE_NAME = "account.json";
+
+/** Timeout for the browser login flow (user must complete OAuth within this). */
+const LOGIN_TIMEOUT_MS = 120_000; // 2 minutes
 
 // ---------------------------------------------------------------------------
 // Authenticator interface
@@ -161,12 +164,19 @@ export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
+  private readonly openBrowser: (url: string) => Promise<void>;
   private pendingLogin: Promise<void> | null = null;
 
-  constructor(clientId: string, configDir: string, scopes: string[]) {
+  constructor(
+    clientId: string,
+    configDir: string,
+    scopes: string[],
+    openBrowser: (url: string) => Promise<void>,
+  ) {
     this.clientId = clientId;
     this.configDir = configDir;
     this.scopes = scopes;
+    this.openBrowser = openBrowser;
   }
 
   private createClient(): msal.PublicClientApplication {
@@ -202,33 +212,53 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  /** Interactive browser login - opens system browser, handles redirect via loopback. */
+  /** Interactive browser login - shows landing page, handles redirect via custom loopback. */
   private async loginWithBrowser(): Promise<LoginResult> {
     logger.info("starting browser login");
     const client = this.createClient();
+    const loopback = new LoginLoopbackClient();
 
-    const result = await client.acquireTokenInteractive({
-      scopes: this.scopes,
-      openBrowser,
-      successTemplate:
-        "<html><body><h1>Authentication successful</h1><p>You can close this window.</p></body></html>",
-      errorTemplate:
-        "<html><body><h1>Authentication failed</h1><p>Please close this window and try again.</p></body></html>",
-    });
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    if (!result.account) {
-      throw new Error("Browser authentication returned no account");
+    try {
+      const result = await Promise.race([
+        client.acquireTokenInteractive({
+          scopes: this.scopes,
+          prompt: "select_account",
+          loopbackClient: loopback,
+          openBrowser: async (authUrl: string) => {
+            loopback.setAuthUrl(authUrl);
+            await this.openBrowser(loopback.getRedirectUri());
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(
+              new Error(
+                "Browser login timed out — sign-in was not completed within the time limit.",
+              ),
+            );
+          }, LOGIN_TIMEOUT_MS);
+        }),
+      ]);
+
+      if (!result.account) {
+        throw new Error("Browser authentication returned no account");
+      }
+
+      await saveAccount(result.account, this.configDir);
+      logger.info("browser login successful", {
+        username: result.account.username,
+      });
+
+      return {
+        message: `Logged in as ${result.account.username}`,
+        completed: true,
+      };
+    } finally {
+      clearTimeout(timeoutId);
+      loopback.closeServer();
     }
-
-    await saveAccount(result.account, this.configDir);
-    logger.info("browser login successful", {
-      username: result.account.username,
-    });
-
-    return {
-      message: `Logged in as ${result.account.username}`,
-      completed: true,
-    };
   }
 
   /** Device code flow - fires in the background, returns message immediately. */

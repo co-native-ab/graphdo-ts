@@ -15,7 +15,8 @@ src/
   browser.ts             Cross-platform openBrowser() utility
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
-  picker.ts              Generic browser picker — local HTTP server with clickable options
+  loopback.ts            Custom MSAL loopback client - branded login landing page + success page
+  picker.ts              Generic browser picker - local HTTP server with clickable options
   graph/
     client.ts            Lightweight HTTP client (native fetch, no Graph SDK), GraphRequestError
     types.ts             TypeScript interfaces for Graph API entities
@@ -30,8 +31,9 @@ src/
 test/
   helpers.ts             createTestEnv() - standardized test setup
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
-  mock-auth.ts           MockAuthenticator — controllable auth state for tests (browser/device code)
+  mock-auth.ts           MockAuthenticator - controllable auth state for tests (browser/device code)
   config.test.ts         Config persistence unit tests
+  loopback.test.ts       Custom loopback client tests (landing page, redirect, auth code, success/error)
   picker.test.ts         Browser picker unit tests (HTML, selection, timeout, XSS, onSelect errors)
   integration.test.ts    Full e2e: in-process MCP server + real Client + mock Graph API
   graph/
@@ -43,7 +45,8 @@ test/
 ## Key Design Decisions
 
 ### ServerConfig (Dependency Injection)
-All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, configDir, mcpServer, openBrowser }`. This is threaded through `createMcpServer()` and into all tool registration functions. No tool reads env vars or calls global functions — everything is injected. `main()` is the only place that reads env vars and constructs the config. This makes testing trivial: pass a `MockAuthenticator`, a mock Graph URL, a temp config dir, and a no-op `openBrowser` spy.
+
+All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, configDir, mcpServer, openBrowser }`. This is threaded through `createMcpServer()` and into all tool registration functions. No tool reads env vars or calls global functions - everything is injected. `main()` is the only place that reads env vars and constructs the config. This makes testing trivial: pass a `MockAuthenticator`, a mock Graph URL, a temp config dir, and a no-op `openBrowser` spy.
 
 ### No Graph SDK
 
@@ -51,7 +54,15 @@ We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` clas
 
 ### MSAL Authentication (Browser + Device Code Fallback) + Elicitation
 
-The `login` tool tries **interactive browser login** first - it opens the system browser via MSAL's `acquireTokenInteractive()` with a localhost loopback redirect. This completes immediately without any manual code entry. If the browser cannot be opened (headless/remote environments), it falls back to the **device code flow**, which returns a URL + code for the user to enter manually.
+The `login` tool tries **interactive browser login** first - using a **custom loopback client** (`LoginLoopbackClient` in `src/loopback.ts`) that replaces MSAL's default loopback server. Instead of opening the Microsoft login page directly, the custom loopback:
+
+1. Starts a local HTTP server with a branded landing page showing "Sign in with Microsoft"
+2. When the user clicks the button, redirects to Microsoft's OAuth page via `/redirect`
+3. After authentication, captures the auth code redirect and shows a success page with auto-close countdown
+
+This implements MSAL's `ILoopbackClient` interface with custom `openBrowser` wrapping: MSAL calls `openBrowser(authUrl)` which stores the auth URL and opens the landing page instead.
+
+If the browser cannot be opened (headless/remote environments), it falls back to the **device code flow**, which returns a URL + code for the user to enter manually.
 
 When the client supports **form-based elicitation** (`capabilities.elicitation.form`) and device code is used, the login tool uses `mcpServer.server.elicitInput()` to display the device code URL + code in a structured form prompt. The user confirms when they've completed sign-in. If the client doesn't support elicitation, it falls back to returning the message as plain text.
 
@@ -59,7 +70,7 @@ When the client supports **form-based elicitation** (`capabilities.elicitation.f
 
 The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`, `accountInfo()`. Three implementations:
 
-- `MsalAuthenticator` - production MSAL flow with browser login + device code fallback, file-based token cache
+- `MsalAuthenticator` - production MSAL flow with custom loopback client (branded login page) + device code fallback, file-based token cache. Constructor takes `(clientId, configDir, scopes, openBrowser)`.
 - `StaticAuthenticator` - for testing with a fixed token (via `GRAPHDO_ACCESS_TOKEN` env var)
 - `MockAuthenticator` (test-only) - controllable auth state, deferred login completion, configurable browser login simulation
 
@@ -68,15 +79,17 @@ The `Authenticator` interface abstracts token acquisition: `login()`, `token()`,
 The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin/stdout JSON-RPC. This is required for MCPB compatibility. Logs go to stderr.
 
 ### Config via Browser (Human-Only)
-The `todo_config` tool uses the generic browser picker (`src/picker.ts`) to let the user select a todo list. This is a deliberate security design: the AI agent **cannot** programmatically change which list it operates on — only a human can make this selection via the browser UI.
+
+The `todo_config` tool uses the generic browser picker (`src/picker.ts`) to let the user select a todo list. This is a deliberate security design: the AI agent **cannot** programmatically change which list it operates on - only a human can make this selection via the browser UI.
 
 The picker (`startBrowserPicker()`) is a reusable component:
+
 1. Starts a local HTTP server on `127.0.0.1` with a random port
 2. Serves an HTML page with clickable option buttons (title, subtitle, options are all configurable)
 3. When the user clicks an option, JS POSTs to `/select`
 4. The `onSelect` callback is invoked (e.g., saves config), server returns success HTML with auto-close countdown, then shuts down
 
-Browser opening is injected via `ServerConfig.openBrowser`, making it testable — tests pass a spy that captures the URL instead of launching a real browser. If the browser cannot be opened (headless/remote), the tool returns the URL as text for manual access. The tool blocks until the user makes a selection (2-minute timeout).
+Browser opening is injected via `ServerConfig.openBrowser`, making it testable - tests pass a spy that captures the URL instead of launching a real browser. If the browser cannot be opened (headless/remote), the tool returns the URL as text for manual access. The tool blocks until the user makes a selection (2-minute timeout).
 
 Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `~/Library/Application Support/graphdo-ts/` on macOS, `%APPDATA%/graphdo-ts` on Windows). The `GRAPHDO_CONFIG_DIR` env var overrides this (used in tests).
 
@@ -106,16 +119,18 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 ## Testing
 
 ### Test Architecture
+
 Tests use vitest with three layers:
-1. **Graph layer tests** (`test/graph/`) — test `GraphClient`, mail, and todo operations against the mock Graph API server
-2. **Picker tests** (`test/picker.test.ts`) — test the generic browser picker directly: HTML rendering, option selection, callback invocation, timeout, XSS escaping, onSelect error handling
-3. **Integration tests** (`test/integration.test.ts`) — full in-process end-to-end tests using `InMemoryTransport.createLinkedPair()` from the MCP SDK and the real `Client` class. Tests create a `MockAuthenticator` and `MockState`, wire up the server in-process (no child processes or stdio), and verify all tool calls against the mock Graph API.
+
+1. **Graph layer tests** (`test/graph/`) - test `GraphClient`, mail, and todo operations against the mock Graph API server
+2. **Picker tests** (`test/picker.test.ts`) - test the generic browser picker directly: HTML rendering, option selection, callback invocation, timeout, XSS escaping, onSelect error handling
+3. **Integration tests** (`test/integration.test.ts`) - full in-process end-to-end tests using `InMemoryTransport.createLinkedPair()` from the MCP SDK and the real `Client` class. Tests create a `MockAuthenticator` and `MockState`, wire up the server in-process (no child processes or stdio), and verify all tool calls against the mock Graph API.
 
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state - no mocking libraries for HTTP.
 
 The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with controllable state: start unauthenticated, call `completeLogin()` from the test to simulate the user completing the device code flow, verify `loginPending` state. Supports `browserLogin: true` for simulating immediate browser login. Used to test the full login → use tools → logout → tools fail cycle.
 
-**Elicitation tests** use `createElicitingClient()` — creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for login, fallback to text when client doesn't support elicitation, elicitation skipped when not needed (already authenticated, browser login), and browser login skips elicitation entirely.
+**Elicitation tests** use `createElicitingClient()` - creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for login, fallback to text when client doesn't support elicitation, elicitation skipped when not needed (already authenticated, browser login), and browser login skips elicitation entirely.
 
 **Config E2E tests** use the injectable `openBrowser` to capture the picker URL without launching a real browser. The spy function schedules an HTTP POST to `/select` on the captured URL, simulating a user clicking a list. Tests verify the full flow: tool call → picker starts → browser spy captures URL → POST selection → tool returns success → config persisted on disk.
 
@@ -197,7 +212,7 @@ The `GRAPHDO_CONFIG_DIR` env var overrides the directory (used in tests with tem
 - `PATCH` supports partial updates (omit fields to keep unchanged; `null` clears a field)
 - Errors in `{"error": {"code": "...", "message": "..."}}` → parsed into `GraphRequestError`
 - TodoTask fields: `importance` ("low"/"normal"/"high"), `isReminderOn`, `reminderDateTime`, `dueDateTime`, `recurrence` (PatternedRecurrence)
-- Checklist items: sub-resource at `/tasks/{taskId}/checklistItems` — full CRUD
+- Checklist items: sub-resource at `/tasks/{taskId}/checklistItems` - full CRUD
 - `ChecklistItem`: `{ id, displayName, isChecked, createdDateTime?, checkedDateTime? }`
-- Recurrence uses `PatternedRecurrence { pattern: RecurrencePattern, range: RecurrenceRange }` — tools accept simplified `repeat` string ("daily"/"weekly"/"weekdays"/"monthly"/"yearly")
+- Recurrence uses `PatternedRecurrence { pattern: RecurrencePattern, range: RecurrenceRange }` - tools accept simplified `repeat` string ("daily"/"weekly"/"weekdays"/"monthly"/"yearly")
 - Graph API v1.0 does NOT support `assignees`/`assignedTo` on todoTask or "My Day" field

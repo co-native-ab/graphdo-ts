@@ -1,4 +1,4 @@
-// System browser opener — cross-platform utility.
+// System browser opener - cross-platform utility.
 
 import { exec } from "node:child_process";
 import { platform } from "node:os";
