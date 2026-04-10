@@ -35,7 +35,7 @@ describe("LoginLoopbackClient", () => {
     const { client: c, uri, authPromise } = await startClient();
     client = c;
 
-    expect(uri).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(uri).toMatch(/^http:\/\/localhost:\d+$/);
 
     // Simulate an auth code to resolve the promise
     await fetch(`${uri}/?code=test&state=test`, { redirect: "manual" });
@@ -224,7 +224,7 @@ describe("LoginLoopbackClient", () => {
     const { client: c, uri: redirectUri, authPromise } = await startClient();
     client = c;
 
-    expect(redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(redirectUri).toMatch(/^http:\/\/localhost:\d+$/);
 
     // Step 3: MSAL calls openBrowser(authUrl) — we intercept and set auth URL
     const microsoftAuthUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test&redirect_uri=${encodeURIComponent(redirectUri)}&scope=Mail.Send`;

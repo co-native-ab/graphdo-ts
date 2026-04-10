@@ -79,7 +79,7 @@ export class LoginLoopbackClient implements ILoopbackClient {
       throw new Error("Invalid loopback server address");
     }
 
-    return `http://127.0.0.1:${String(address.port)}`;
+    return `http://localhost:${String(address.port)}`;
   }
 
   closeServer(): void {
