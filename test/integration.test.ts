@@ -60,7 +60,9 @@ async function createTestClient(
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
-    openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
+    openBrowser:
+      opts?.openBrowser ??
+      (() => Promise.reject(new Error("no browser in tests"))),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -469,9 +471,7 @@ describe("integration", () => {
 
     it("shows URL as fallback when browser fails to open", async () => {
       const originalLists = graphState.todoLists;
-      graphState.todoLists = [
-        { id: "list-1", displayName: "My Tasks" },
-      ];
+      graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
       const tempConfigDir = await mkdtemp(
         path.join(tmpdir(), "graphdo-config-e2e-"),
@@ -523,21 +523,23 @@ describe("integration", () => {
 
     it("returns error when picker times out (no selection)", async () => {
       const originalLists = graphState.todoLists;
-      graphState.todoLists = [
-        { id: "list-1", displayName: "My Tasks" },
-      ];
+      graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
       try {
-        // openBrowser does nothing — simulates user ignoring the page
+        // openBrowser does nothing - simulates user ignoring the page
         const browserSpy = (_url: string): Promise<void> => Promise.resolve();
 
-        const configAuth = new MockAuthenticator({ token: "config-timeout-token" });
+        const configAuth = new MockAuthenticator({
+          token: "config-timeout-token",
+        });
 
         // The tool uses startBrowserPicker with the default 2-minute timeout.
         // We can't override that through the tool, so the timeout path is
         // tested at the picker unit test level (picker.test.ts) with a
         // 100ms timeout. Here we just verify the tool wires the spy correctly.
-        const c = await createTestClient(configAuth, { openBrowser: browserSpy });
+        const c = await createTestClient(configAuth, {
+          openBrowser: browserSpy,
+        });
 
         // Verify the tool would work (we already tested the full flow above).
         // The timeout error message "timed out" is tested in picker.test.ts.
@@ -750,7 +752,13 @@ describe("integration", () => {
       const task = tasks.find((t) => t.title === "Weekday check");
       expect(task?.recurrence?.pattern.type).toBe("weekly");
       expect(task?.recurrence?.pattern.daysOfWeek).toEqual(
-        expect.arrayContaining(["monday", "tuesday", "wednesday", "thursday", "friday"]),
+        expect.arrayContaining([
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+        ]),
       );
     });
 
@@ -942,7 +950,11 @@ describe("integration", () => {
 
       const result = (await client.callTool({
         name: "todo_update_step",
-        arguments: { taskId: "task-1", stepId: step.id, displayName: "Renamed Step" },
+        arguments: {
+          taskId: "task-1",
+          stepId: step.id,
+          displayName: "Renamed Step",
+        },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();

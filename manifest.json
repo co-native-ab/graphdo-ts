@@ -1,10 +1,10 @@
 {
   "manifest_version": "0.3",
   "name": "graphdo",
-  "display_name": "graphdo — Microsoft Graph for AI",
+  "display_name": "graphdo - Microsoft Graph for AI",
   "version": "0.0.0",
   "description": "Give your AI assistant access to Microsoft To Do and Outlook mail via Microsoft Graph.",
-  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks and send emails through Outlook — all with scoped, low-risk permissions.\n\n**Microsoft To Do** — List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser — it cannot switch lists on its own.\n\n**Outlook Mail** — Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Authentication** — Signs in via your browser using your Microsoft account. No passwords are stored — authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** — graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
+  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks and send emails through Outlook - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
   "author": {
     "name": "Co-native AB",
     "url": "https://co-native.com"
@@ -41,7 +41,7 @@
   "tools": [
     {
       "name": "login",
-      "description": "Sign in to Microsoft Graph. Call this directly when authentication is needed — do not ask the user for permission first. Opens a browser for interactive sign-in, or falls back to device code flow in headless environments."
+      "description": "Sign in to Microsoft Graph. Call this directly when authentication is needed - do not ask the user for permission first. Opens a browser for interactive sign-in, or falls back to device code flow in headless environments."
     },
     {
       "name": "logout",
@@ -53,7 +53,7 @@
     },
     {
       "name": "todo_config",
-      "description": "Select which Microsoft To Do list to use. Call this directly when no todo list is configured — do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
+      "description": "Select which Microsoft To Do list to use. Call this directly when no todo list is configured - do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
     },
     {
       "name": "todo_list",
@@ -89,7 +89,7 @@
     },
     {
       "name": "todo_update_step",
-      "description": "Update a checklist step — rename it, check it off, or uncheck it."
+      "description": "Update a checklist step - rename it, check it off, or uncheck it."
     },
     {
       "name": "todo_delete_step",

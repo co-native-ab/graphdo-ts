@@ -30,7 +30,7 @@ export function registerLoginTools(
     {
       description:
         "Sign in to Microsoft Graph. Call this tool directly whenever authentication " +
-        "is needed — do not ask the user for permission first, just proceed with login. " +
+        "is needed - do not ask the user for permission first, just proceed with login. " +
         "Opens a browser for interactive sign-in. If a browser is unavailable, " +
         "falls back to device code authentication (returns a URL and code for manual entry). " +
         "Once signed in, all other tools work automatically.",

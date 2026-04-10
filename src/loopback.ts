@@ -1,4 +1,4 @@
-// Custom MSAL loopback client — serves a branded login landing page.
+// Custom MSAL loopback client - serves a branded login landing page.
 //
 // Replaces MSAL's default loopback server with our own that shows a nice
 // landing page with a "Sign in with Microsoft" button, handles the OAuth
@@ -127,7 +127,12 @@ function handleRequest(
   // Error redirect from Microsoft: /?error=...
   if (pathname === "/" && parsedUrl.searchParams.has("error")) {
     const authResponse = parseAuthResponse(parsedUrl.searchParams);
-    serveErrorPage(res, parsedUrl.searchParams.get("error_description") ?? parsedUrl.searchParams.get("error") ?? "Unknown error");
+    serveErrorPage(
+      res,
+      parsedUrl.searchParams.get("error_description") ??
+        parsedUrl.searchParams.get("error") ??
+        "Unknown error",
+    );
     resolve(authResponse);
     return;
   }
@@ -143,7 +148,9 @@ function handleRequest(
     const authUrl = client.getAuthUrl();
     if (!authUrl) {
       res.writeHead(503, { "Content-Type": "text/plain" });
-      res.end("Authentication URL not yet available. Please wait a moment and refresh.");
+      res.end(
+        "Authentication URL not yet available. Please wait a moment and refresh.",
+      );
       return;
     }
     res.writeHead(302, { Location: authUrl });
@@ -196,7 +203,10 @@ const BASE_STYLE = `
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     }`;
 
-function serveLandingPage(res: ServerResponse, authUrl: string | undefined): void {
+function serveLandingPage(
+  res: ServerResponse,
+  authUrl: string | undefined,
+): void {
   const buttonDisabled = authUrl ? "" : "disabled";
   const buttonStyle = authUrl
     ? "background: #0078d4; cursor: pointer;"
@@ -207,7 +217,7 @@ function serveLandingPage(res: ServerResponse, authUrl: string | undefined): voi
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>graphdo — Sign In</title>
+  <title>graphdo - Sign In</title>
   <style>
     ${BASE_STYLE}
     .logo { font-size: 1.8rem; font-weight: 700; color: #0078d4; margin-bottom: 8px; }
@@ -256,7 +266,7 @@ function serveSuccessPage(res: ServerResponse): void {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>graphdo — Signed In</title>
+  <title>graphdo - Signed In</title>
   <style>
     ${BASE_STYLE}
     .checkmark { font-size: 3rem; color: #107c10; margin-bottom: 16px; }
@@ -313,7 +323,7 @@ function serveErrorPage(res: ServerResponse, errorMessage: string): void {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>graphdo — Sign In Failed</title>
+  <title>graphdo - Sign In Failed</title>
   <style>
     ${BASE_STYLE}
     .icon { font-size: 3rem; color: #d13438; margin-bottom: 16px; }

@@ -5,7 +5,11 @@ import { describe, it, expect, afterEach } from "vitest";
 import { LoginLoopbackClient } from "../src/loopback.js";
 
 // Helper: start the loopback client and wait for it to be ready.
-async function startClient(): Promise<{ client: LoginLoopbackClient; uri: string; authPromise: Promise<import("@azure/msal-node").AuthorizeResponse> }> {
+async function startClient(): Promise<{
+  client: LoginLoopbackClient;
+  uri: string;
+  authPromise: Promise<import("@azure/msal-node").AuthorizeResponse>;
+}> {
   const client = new LoginLoopbackClient();
   const authPromise = client.listenForAuthCode();
   await client.waitForReady();
@@ -96,7 +100,8 @@ describe("LoginLoopbackClient", () => {
     const { client: c, uri } = await startClient();
     client = c;
 
-    const authUrl = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test";
+    const authUrl =
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test";
     c.setAuthUrl(authUrl);
 
     const res = await request(`${uri}/redirect`, { redirect: "manual" });
@@ -226,7 +231,7 @@ describe("LoginLoopbackClient", () => {
 
     expect(redirectUri).toMatch(/^http:\/\/localhost:\d+$/);
 
-    // Step 3: MSAL calls openBrowser(authUrl) — we intercept and set auth URL
+    // Step 3: MSAL calls openBrowser(authUrl) - we intercept and set auth URL
     const microsoftAuthUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test&redirect_uri=${encodeURIComponent(redirectUri)}&scope=Mail.Send`;
     c.setAuthUrl(microsoftAuthUrl);
 

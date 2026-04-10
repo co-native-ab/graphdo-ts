@@ -5,10 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import type { Authenticator } from "./auth.js";
-import {
-  MsalAuthenticator,
-  StaticAuthenticator,
-} from "./auth.js";
+import { MsalAuthenticator, StaticAuthenticator } from "./auth.js";
 import { openBrowser } from "./browser.js";
 import { configDir } from "./config.js";
 import { logger, setLogLevel } from "./logger.js";
@@ -65,10 +62,10 @@ export function createMcpServer(
       instructions:
         "graphdo gives you access to Microsoft To Do and Outlook mail.\n\n" +
         "IMPORTANT BEHAVIOR RULES:\n" +
-        "- When a tool returns an authentication error, call the login tool immediately — " +
+        "- When a tool returns an authentication error, call the login tool immediately - " +
         "do not ask the user whether they want to log in.\n" +
         "- When a tool returns a 'todo list not configured' error, call the todo_config " +
-        "tool immediately — do not ask the user which list to use, the tool opens a " +
+        "tool immediately - do not ask the user which list to use, the tool opens a " +
         "browser picker where the user selects the list themselves.\n" +
         "- Use auth_status as a first step when diagnosing issues.\n\n" +
         "WORKFLOW: On first use, call login (automatic browser sign-in), then " +

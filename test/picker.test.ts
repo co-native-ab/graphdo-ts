@@ -14,7 +14,9 @@ const sampleOptions: PickerOption[] = [
 
 describe("browser picker", () => {
   it("serves HTML page with options", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Pick Something",
@@ -47,7 +49,9 @@ describe("browser picker", () => {
   });
 
   it("calls onSelect and resolves with the selected option", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -70,7 +74,9 @@ describe("browser picker", () => {
   });
 
   it("rejects invalid selection", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -88,7 +94,7 @@ describe("browser picker", () => {
     expect(response.status).toBe(400);
     expect(onSelect).not.toHaveBeenCalled();
 
-    // Clean up — post a valid selection
+    // Clean up - post a valid selection
     await fetch(`${handle.url}/select`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -98,7 +104,9 @@ describe("browser picker", () => {
   });
 
   it("returns 404 for unknown paths", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -121,7 +129,9 @@ describe("browser picker", () => {
   });
 
   it("times out when no selection is made", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -139,7 +149,9 @@ describe("browser picker", () => {
     const xssOptions: PickerOption[] = [
       { id: "xss", label: '<script>alert("xss")</script>' },
     ];
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -158,15 +170,18 @@ describe("browser picker", () => {
     await fetch(`${handle.url}/select`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: "xss", label: '<script>alert("xss")</script>' }),
+      body: JSON.stringify({
+        id: "xss",
+        label: '<script>alert("xss")</script>',
+      }),
     });
     await handle.waitForSelection;
   });
 
   it("returns 500 when onSelect throws", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockRejectedValue(
-      new Error("save failed"),
-    );
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockRejectedValue(new Error("save failed"));
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -185,7 +200,7 @@ describe("browser picker", () => {
     const text = await response.text();
     expect(text).toContain("save failed");
 
-    // Server should still be running — post again with working callback
+    // Server should still be running - post again with working callback
     onSelect.mockResolvedValue(undefined);
     await fetch(`${handle.url}/select`, {
       method: "POST",
