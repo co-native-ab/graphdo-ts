@@ -108,8 +108,15 @@ export function registerConfigTools(
               ? err.message
               : String(err);
         logger.error("todo_config failed", { error: message });
+
+        const isTimeout = message.toLowerCase().includes("timed out");
+        const retryHint = isTimeout
+          ? "\n\nThe user did not make a selection in time. " +
+            "You can call this tool again if the user would like to retry."
+          : "\n\nYou can call this tool again if the user would like to retry.";
+
         return {
-          content: [{ type: "text" as const, text: message }],
+          content: [{ type: "text" as const, text: message + retryHint }],
           isError: true,
         };
       }

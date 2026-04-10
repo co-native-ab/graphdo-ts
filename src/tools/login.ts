@@ -145,7 +145,12 @@ export function registerLoginTools(
         logger.error("login failed", { error: message });
         return {
           content: [
-            { type: "text" as const, text: `Login failed: ${message}` },
+            {
+              type: "text" as const,
+              text:
+                `Login failed: ${message}\n\n` +
+                "You can call this tool again if the user would like to retry.",
+            },
           ],
           isError: true,
         };

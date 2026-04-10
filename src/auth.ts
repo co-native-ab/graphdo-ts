@@ -21,6 +21,9 @@ const AUTHORITY_URL = "https://login.microsoftonline.com/common";
 const CACHE_FILE_NAME = "msal_cache.json";
 const ACCOUNT_FILE_NAME = "account.json";
 
+/** Timeout for the browser login flow (user must complete OAuth within this). */
+const LOGIN_TIMEOUT_MS = 120_000; // 2 minutes
+
 // ---------------------------------------------------------------------------
 // Authenticator interface
 // ---------------------------------------------------------------------------
@@ -215,29 +218,47 @@ export class MsalAuthenticator implements Authenticator {
     const client = this.createClient();
     const loopback = new LoginLoopbackClient();
 
-    const result = await client.acquireTokenInteractive({
-      scopes: this.scopes,
-      prompt: "select_account",
-      loopbackClient: loopback,
-      openBrowser: async (authUrl: string) => {
-        loopback.setAuthUrl(authUrl);
-        await this.openBrowser(loopback.getRedirectUri());
-      },
-    });
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    if (!result.account) {
-      throw new Error("Browser authentication returned no account");
+    try {
+      const result = await Promise.race([
+        client.acquireTokenInteractive({
+          scopes: this.scopes,
+          prompt: "select_account",
+          loopbackClient: loopback,
+          openBrowser: async (authUrl: string) => {
+            loopback.setAuthUrl(authUrl);
+            await this.openBrowser(loopback.getRedirectUri());
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(
+              new Error(
+                "Browser login timed out — sign-in was not completed within the time limit.",
+              ),
+            );
+          }, LOGIN_TIMEOUT_MS);
+        }),
+      ]);
+
+      if (!result.account) {
+        throw new Error("Browser authentication returned no account");
+      }
+
+      await saveAccount(result.account, this.configDir);
+      logger.info("browser login successful", {
+        username: result.account.username,
+      });
+
+      return {
+        message: `Logged in as ${result.account.username}`,
+        completed: true,
+      };
+    } finally {
+      clearTimeout(timeoutId);
+      loopback.closeServer();
     }
-
-    await saveAccount(result.account, this.configDir);
-    logger.info("browser login successful", {
-      username: result.account.username,
-    });
-
-    return {
-      message: `Logged in as ${result.account.username}`,
-      completed: true,
-    };
   }
 
   /** Device code flow - fires in the background, returns message immediately. */
