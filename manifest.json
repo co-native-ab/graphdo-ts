@@ -17,18 +17,6 @@
   "documentation": "https://github.com/co-native-ab/graphdo-ts#readme",
   "support": "https://github.com/co-native-ab/graphdo-ts/issues",
   "icon": "assets/icon.png",
-  "icons": [
-    {
-      "src": "assets/icon-light.png",
-      "size": "203x78",
-      "theme": "light"
-    },
-    {
-      "src": "assets/icon-dark.png",
-      "size": "203x78",
-      "theme": "dark"
-    }
-  ],
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
