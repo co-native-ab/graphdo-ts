@@ -15,6 +15,7 @@ src/
   browser.ts             Cross-platform openBrowser() utility
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
+  loopback.ts            Custom MSAL loopback client — branded login landing page + success page
   picker.ts              Generic browser picker — local HTTP server with clickable options
   graph/
     client.ts            Lightweight HTTP client (native fetch, no Graph SDK), GraphRequestError
@@ -32,6 +33,7 @@ test/
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
   mock-auth.ts           MockAuthenticator — controllable auth state for tests (browser/device code)
   config.test.ts         Config persistence unit tests
+  loopback.test.ts       Custom loopback client tests (landing page, redirect, auth code, success/error)
   picker.test.ts         Browser picker unit tests (HTML, selection, timeout, XSS, onSelect errors)
   integration.test.ts    Full e2e: in-process MCP server + real Client + mock Graph API
   graph/
@@ -51,7 +53,15 @@ We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` clas
 
 ### MSAL Authentication (Browser + Device Code Fallback) + Elicitation
 
-The `login` tool tries **interactive browser login** first - it opens the system browser via MSAL's `acquireTokenInteractive()` with a localhost loopback redirect. This completes immediately without any manual code entry. If the browser cannot be opened (headless/remote environments), it falls back to the **device code flow**, which returns a URL + code for the user to enter manually.
+The `login` tool tries **interactive browser login** first — using a **custom loopback client** (`LoginLoopbackClient` in `src/loopback.ts`) that replaces MSAL's default loopback server. Instead of opening the Microsoft login page directly, the custom loopback:
+
+1. Starts a local HTTP server with a branded landing page showing "Sign in with Microsoft"
+2. When the user clicks the button, redirects to Microsoft's OAuth page via `/redirect`
+3. After authentication, captures the auth code redirect and shows a success page with auto-close countdown
+
+This implements MSAL's `ILoopbackClient` interface with custom `openBrowser` wrapping: MSAL calls `openBrowser(authUrl)` which stores the auth URL and opens the landing page instead.
+
+If the browser cannot be opened (headless/remote environments), it falls back to the **device code flow**, which returns a URL + code for the user to enter manually.
 
 When the client supports **form-based elicitation** (`capabilities.elicitation.form`) and device code is used, the login tool uses `mcpServer.server.elicitInput()` to display the device code URL + code in a structured form prompt. The user confirms when they've completed sign-in. If the client doesn't support elicitation, it falls back to returning the message as plain text.
 
@@ -59,7 +69,7 @@ When the client supports **form-based elicitation** (`capabilities.elicitation.f
 
 The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`, `accountInfo()`. Three implementations:
 
-- `MsalAuthenticator` - production MSAL flow with browser login + device code fallback, file-based token cache
+- `MsalAuthenticator` - production MSAL flow with custom loopback client (branded login page) + device code fallback, file-based token cache. Constructor takes `(clientId, configDir, scopes, openBrowser)`.
 - `StaticAuthenticator` - for testing with a fixed token (via `GRAPHDO_ACCESS_TOKEN` env var)
 - `MockAuthenticator` (test-only) - controllable auth state, deferred login completion, configurable browser login simulation
 

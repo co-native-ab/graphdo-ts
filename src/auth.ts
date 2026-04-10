@@ -9,8 +9,8 @@ import path from "node:path";
 
 import * as msal from "@azure/msal-node";
 
-import { openBrowser } from "./browser.js";
 import { logger } from "./logger.js";
+import { LoginLoopbackClient } from "./loopback.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -161,12 +161,19 @@ export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
+  private readonly openBrowser: (url: string) => Promise<void>;
   private pendingLogin: Promise<void> | null = null;
 
-  constructor(clientId: string, configDir: string, scopes: string[]) {
+  constructor(
+    clientId: string,
+    configDir: string,
+    scopes: string[],
+    openBrowser: (url: string) => Promise<void>,
+  ) {
     this.clientId = clientId;
     this.configDir = configDir;
     this.scopes = scopes;
+    this.openBrowser = openBrowser;
   }
 
   private createClient(): msal.PublicClientApplication {
@@ -202,18 +209,19 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  /** Interactive browser login - opens system browser, handles redirect via loopback. */
+  /** Interactive browser login - shows landing page, handles redirect via custom loopback. */
   private async loginWithBrowser(): Promise<LoginResult> {
     logger.info("starting browser login");
     const client = this.createClient();
+    const loopback = new LoginLoopbackClient();
 
     const result = await client.acquireTokenInteractive({
       scopes: this.scopes,
-      openBrowser,
-      successTemplate:
-        "<html><body><h1>Authentication successful</h1><p>You can close this window.</p></body></html>",
-      errorTemplate:
-        "<html><body><h1>Authentication failed</h1><p>Please close this window and try again.</p></body></html>",
+      loopbackClient: loopback,
+      openBrowser: async (authUrl: string) => {
+        loopback.setAuthUrl(authUrl);
+        await this.openBrowser(loopback.getRedirectUri());
+      },
     });
 
     if (!result.account) {

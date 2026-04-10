@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   const staticToken = process.env["GRAPHDO_ACCESS_TOKEN"];
   const authenticator: Authenticator = staticToken
     ? new StaticAuthenticator(staticToken)
-    : new MsalAuthenticator(CLIENT_ID, cfgDir, [...SCOPES]);
+    : new MsalAuthenticator(CLIENT_ID, cfgDir, [...SCOPES], openBrowser);
 
   const graphBaseUrl =
     process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
