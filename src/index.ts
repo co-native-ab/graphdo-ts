@@ -60,7 +60,20 @@ export function createMcpServer(
 ): McpServer {
   const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
-    { capabilities: { logging: {} } },
+    {
+      capabilities: { logging: {} },
+      instructions:
+        "graphdo gives you access to Microsoft To Do and Outlook mail.\n\n" +
+        "IMPORTANT BEHAVIOR RULES:\n" +
+        "- When a tool returns an authentication error, call the login tool immediately — " +
+        "do not ask the user whether they want to log in.\n" +
+        "- When a tool returns a 'todo list not configured' error, call the todo_config " +
+        "tool immediately — do not ask the user which list to use, the tool opens a " +
+        "browser picker where the user selects the list themselves.\n" +
+        "- Use auth_status as a first step when diagnosing issues.\n\n" +
+        "WORKFLOW: On first use, call login (automatic browser sign-in), then " +
+        "todo_config (browser-based list selection), then the user's requested action.",
+    },
   );
 
   const config: ServerConfig = { ...opts, mcpServer };

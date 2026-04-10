@@ -23,9 +23,11 @@ export function registerConfigTools(
     "todo_config",
     {
       description:
-        "Configure which Microsoft To Do list to use. " +
-        "Opens a browser window where you select a list. " +
-        "This is a human-only action — the AI agent cannot change the list.",
+        "Select which Microsoft To Do list to use. Call this tool directly when " +
+        "a todo list has not been configured yet — do not ask the user which list " +
+        "they want, this tool opens a browser picker where the user makes the " +
+        "selection themselves. This is a human-only action — the AI agent cannot " +
+        "choose the list programmatically.",
       inputSchema: {},
       annotations: {
         title: "Configure Todo List",

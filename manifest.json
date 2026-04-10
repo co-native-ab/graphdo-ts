@@ -1,22 +1,119 @@
 {
-  "manifest_version": "0.2",
+  "manifest_version": "0.3",
   "name": "graphdo",
-  "display_name": "graphdo",
+  "display_name": "graphdo — Microsoft Graph for AI",
   "version": "0.0.0",
-  "description": "MCP server providing AI agents with scoped access to Microsoft Graph",
+  "description": "Give your AI assistant access to Microsoft To Do and Outlook mail via Microsoft Graph.",
+  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks and send emails through Outlook — all with scoped, low-risk permissions.\n\n**Microsoft To Do** — List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser — it cannot switch lists on its own.\n\n**Outlook Mail** — Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Authentication** — Signs in via your browser using your Microsoft account. No passwords are stored — authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** — graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
   "author": {
-    "name": "co-native-ab"
+    "name": "Co-native AB",
+    "url": "https://co-native.com"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/co-native-ab/graphdo-ts.git"
+  },
+  "homepage": "https://github.com/co-native-ab/graphdo-ts",
+  "documentation": "https://github.com/co-native-ab/graphdo-ts#readme",
+  "support": "https://github.com/co-native-ab/graphdo-ts/issues",
+  "icon": "assets/icon.png",
+  "icons": [
+    {
+      "src": "assets/icon-light.png",
+      "size": "203x78",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icon-dark.png",
+      "size": "203x78",
+      "theme": "dark"
+    }
+  ],
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": [
-        "${__dirname}/dist/index.js"
-      ],
+      "args": ["${__dirname}/dist/index.js"],
       "env": {}
     }
   },
-  "license": "MIT"
+  "tools": [
+    {
+      "name": "login",
+      "description": "Sign in to Microsoft Graph. Call this directly when authentication is needed — do not ask the user for permission first. Opens a browser for interactive sign-in, or falls back to device code flow in headless environments."
+    },
+    {
+      "name": "logout",
+      "description": "Sign out of Microsoft Graph and clear cached tokens."
+    },
+    {
+      "name": "auth_status",
+      "description": "Check authentication status, current user, configured todo list, and server version. Use this as a first step to diagnose issues or understand current state."
+    },
+    {
+      "name": "todo_config",
+      "description": "Select which Microsoft To Do list to use. Call this directly when no todo list is configured — do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
+    },
+    {
+      "name": "todo_list",
+      "description": "List todos from the configured Microsoft To Do list with pagination support."
+    },
+    {
+      "name": "todo_show",
+      "description": "Show full details for a single todo including body, due date, importance, reminder, recurrence, and checklist steps."
+    },
+    {
+      "name": "todo_create",
+      "description": "Create a new todo in the configured list. Supports title, body, due date, importance, reminder, and recurrence."
+    },
+    {
+      "name": "todo_update",
+      "description": "Update an existing todo. Change title, body, importance, due date, reminder, or recurrence. Fields can also be cleared."
+    },
+    {
+      "name": "todo_complete",
+      "description": "Mark a todo as completed."
+    },
+    {
+      "name": "todo_delete",
+      "description": "Permanently delete a todo."
+    },
+    {
+      "name": "todo_steps",
+      "description": "List all checklist steps (sub-items) within a todo."
+    },
+    {
+      "name": "todo_add_step",
+      "description": "Add a new checklist step to a todo."
+    },
+    {
+      "name": "todo_update_step",
+      "description": "Update a checklist step — rename it, check it off, or uncheck it."
+    },
+    {
+      "name": "todo_delete_step",
+      "description": "Delete a checklist step from a todo."
+    },
+    {
+      "name": "mail_send",
+      "description": "Send an email to yourself via Outlook. The email is sent from and to your Microsoft account. Useful for notes, reminders, and forwarding information to your inbox."
+    }
+  ],
+  "keywords": [
+    "microsoft",
+    "graph",
+    "todo",
+    "tasks",
+    "mail",
+    "outlook",
+    "productivity"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
 }

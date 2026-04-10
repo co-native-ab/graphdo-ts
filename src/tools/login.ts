@@ -29,10 +29,11 @@ export function registerLoginTools(
     "login",
     {
       description:
-        "Log in to Microsoft Graph. Opens a browser for interactive sign-in. " +
-        "If a browser is unavailable, falls back to device code authentication " +
-        "(returns a URL and code for manual entry). " +
-        "Once signed in, the other tools will work automatically.",
+        "Sign in to Microsoft Graph. Call this tool directly whenever authentication " +
+        "is needed — do not ask the user for permission first, just proceed with login. " +
+        "Opens a browser for interactive sign-in. If a browser is unavailable, " +
+        "falls back to device code authentication (returns a URL and code for manual entry). " +
+        "Once signed in, all other tools work automatically.",
       inputSchema: {},
       annotations: {
         title: "Login to Microsoft",
@@ -158,7 +159,7 @@ export function registerLoginTools(
     "logout",
     {
       description:
-        "Log out of Microsoft Graph by clearing cached tokens. " +
+        "Sign out of Microsoft Graph and clear all cached tokens. " +
         "After logging out, the login tool must be used to re-authenticate.",
       inputSchema: {},
       annotations: {

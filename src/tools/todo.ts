@@ -142,10 +142,13 @@ export function registerTodoTools(
   server.registerTool(
     "todo_list",
     {
-      description: "List todos with pagination",
+      description:
+        "List todos from the configured Microsoft To Do list. " +
+        "Returns task titles, status, importance, and due dates. " +
+        "Supports pagination via top (page size) and skip (offset).",
       inputSchema: {
-        top: z.number().optional().default(25),
-        skip: z.number().optional().default(0),
+        top: z.number().optional().default(25).describe("Maximum number of todos to return (default: 25)"),
+        skip: z.number().optional().default(0).describe("Number of todos to skip for pagination (default: 0)"),
       },
       annotations: {
         title: "List Todos",
@@ -191,8 +194,10 @@ export function registerTodoTools(
   server.registerTool(
     "todo_show",
     {
-      description: "Show a single todo with all details",
-      inputSchema: { taskId: z.string() },
+      description:
+        "Show full details for a single todo — title, body, status, importance, " +
+        "due date, reminder, recurrence, and checklist steps.",
+      inputSchema: { taskId: z.string().describe("The ID of the todo task to show") },
       annotations: {
         title: "Show Todo",
         readOnlyHint: true,
@@ -251,7 +256,9 @@ export function registerTodoTools(
     "todo_create",
     {
       description:
-        "Create a new todo. Supports optional due date, importance, reminder, and recurrence.",
+        "Create a new todo in the configured list. Supports title, body, " +
+        "due date, importance (low/normal/high), reminder, and recurrence " +
+        "(daily/weekly/weekdays/monthly/yearly).",
       inputSchema: {
         title: z.string(),
         body: z.string().optional().default(""),
@@ -324,10 +331,11 @@ export function registerTodoTools(
     "todo_update",
     {
       description:
-        "Update an existing todo. Set fields to change; omit to keep current values. " +
-        "Set clearDueDate/clearReminder/clearRecurrence to true to remove those.",
+        "Update an existing todo. Provide only the fields to change — omitted fields " +
+        "keep their current values. Set clearDueDate, clearReminder, or clearRecurrence " +
+        "to true to remove those fields.",
       inputSchema: {
-        taskId: z.string(),
+        taskId: z.string().describe("The ID of the todo task to update"),
         title: z.string().optional().default(""),
         body: z.string().optional().default(""),
         importance: importanceSchema,
@@ -414,8 +422,8 @@ export function registerTodoTools(
   server.registerTool(
     "todo_complete",
     {
-      description: "Mark a todo as completed",
-      inputSchema: { taskId: z.string() },
+      description: "Mark a todo as completed. Sets its status to 'completed'.",
+      inputSchema: { taskId: z.string().describe("The ID of the todo task to complete") },
       annotations: {
         title: "Complete Todo",
         readOnlyHint: false,
@@ -447,8 +455,8 @@ export function registerTodoTools(
   server.registerTool(
     "todo_delete",
     {
-      description: "Delete a todo",
-      inputSchema: { taskId: z.string() },
+      description: "Permanently delete a todo from the configured list.",
+      inputSchema: { taskId: z.string().describe("The ID of the todo task to delete") },
       annotations: {
         title: "Delete Todo",
         readOnlyHint: false,
@@ -478,8 +486,10 @@ export function registerTodoTools(
   server.registerTool(
     "todo_steps",
     {
-      description: "List checklist steps for a todo",
-      inputSchema: { taskId: z.string() },
+      description:
+        "List all checklist steps (sub-items) within a todo. Each step can be " +
+        "checked or unchecked independently.",
+      inputSchema: { taskId: z.string().describe("The ID of the parent todo task") },
       annotations: {
         title: "List Steps",
         readOnlyHint: true,
@@ -523,10 +533,10 @@ export function registerTodoTools(
   server.registerTool(
     "todo_add_step",
     {
-      description: "Add a checklist step to a todo",
+      description: "Add a new checklist step (sub-item) to a todo.",
       inputSchema: {
-        taskId: z.string(),
-        displayName: z.string(),
+        taskId: z.string().describe("The ID of the parent todo task"),
+        displayName: z.string().describe("The text label for the new step"),
       },
       annotations: {
         title: "Add Step",
@@ -565,12 +575,12 @@ export function registerTodoTools(
     "todo_update_step",
     {
       description:
-        "Update a checklist step — rename, check, or uncheck",
+        "Update a checklist step — rename it, check it off, or uncheck it.",
       inputSchema: {
-        taskId: z.string(),
-        stepId: z.string(),
-        displayName: z.string().optional(),
-        isChecked: z.boolean().optional(),
+        taskId: z.string().describe("The ID of the parent todo task"),
+        stepId: z.string().describe("The ID of the checklist step to update"),
+        displayName: z.string().optional().describe("New text label for the step"),
+        isChecked: z.boolean().optional().describe("Set to true to check off, false to uncheck"),
       },
       annotations: {
         title: "Update Step",
@@ -625,10 +635,10 @@ export function registerTodoTools(
   server.registerTool(
     "todo_delete_step",
     {
-      description: "Delete a checklist step from a todo",
+      description: "Permanently delete a checklist step from a todo.",
       inputSchema: {
-        taskId: z.string(),
-        stepId: z.string(),
+        taskId: z.string().describe("The ID of the parent todo task"),
+        stepId: z.string().describe("The ID of the checklist step to delete"),
       },
       annotations: {
         title: "Delete Step",
