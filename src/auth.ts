@@ -4,13 +4,12 @@
 // 1. Interactive browser login (preferred) - opens system browser, handles redirect
 // 2. Device code flow (fallback) - for headless/remote environments
 
-import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { platform } from "node:os";
 import path from "node:path";
 
 import * as msal from "@azure/msal-node";
 
+import { openBrowser } from "./browser.js";
 import { logger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -148,33 +147,6 @@ async function loadAccount(
     }
     throw err;
   }
-}
-
-// ---------------------------------------------------------------------------
-// System browser opener
-// ---------------------------------------------------------------------------
-
-/** Open a URL in the system browser. Throws on failure. */
-function openBrowser(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const os = platform();
-    let cmd: string;
-    if (os === "darwin") {
-      cmd = `open "${url}"`;
-    } else if (os === "win32") {
-      cmd = `start "" "${url}"`;
-    } else {
-      cmd = `xdg-open "${url}"`;
-    }
-
-    exec(cmd, (err) => {
-      if (err) {
-        reject(new Error(`Failed to open browser: ${err.message}`));
-      } else {
-        resolve();
-      }
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,30 +1,18 @@
-// MCP tool handler for configuring the active To Do list.
+// MCP tool for configuring the active To Do list via browser.
 //
-// When the client supports elicitation, presents a dropdown picker for the
-// user to select a list. Otherwise falls back to a two-step text flow.
+// Opens a local web server with a list picker in the user's browser.
+// The AI agent cannot change the list — only a human can make this selection.
+// If the browser cannot be opened, the tool shows the URL for manual access.
 
-import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { AuthenticationRequiredError } from "../auth.js";
+import { openBrowser } from "../browser.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
-import { saveConfig } from "../config.js";
+import { startConfigServer } from "./config-server.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
-
-function formatListOptions(lists: { id: string; displayName: string }[]): string {
-  const lines = lists.map(
-    (l, i) => `${String(i + 1)}. ${l.displayName} (${l.id})`,
-  );
-  return lines.join("\n");
-}
-
-/** Check whether the connected client supports form-based elicitation. */
-function clientSupportsElicitation(config: ServerConfig): boolean {
-  const caps = config.mcpServer.server.getClientCapabilities();
-  return caps?.elicitation?.form !== undefined;
-}
 
 /** Register the todo_config tool on the given MCP server. */
 export function registerConfigTools(
@@ -34,15 +22,18 @@ export function registerConfigTools(
   server.registerTool(
     "todo_config",
     {
-      description: "Configure which todo list to use",
-      inputSchema: { listId: z.string().optional() },
+      description:
+        "Configure which Microsoft To Do list to use. " +
+        "Opens a browser window where you select a list. " +
+        "This is a human-only action — the AI agent cannot change the list.",
+      inputSchema: {},
       annotations: {
         title: "Configure Todo List",
         readOnlyHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
-    async (args) => {
+    async () => {
       try {
         const token = await config.authenticator.token();
         const client = new GraphClient(config.graphBaseUrl, token);
@@ -50,87 +41,56 @@ export function registerConfigTools(
 
         if (lists.length === 0) {
           return {
-            content: [{ type: "text", text: "No todo lists found in your account." }],
+            content: [
+              {
+                type: "text" as const,
+                text: "No todo lists found in your Microsoft account.",
+              },
+            ],
           };
         }
 
-        // If no listId provided and client supports elicitation, show a picker
-        if (!args.listId && clientSupportsElicitation(config)) {
-          const elicitResult = await config.mcpServer.server.elicitInput({
-            message: "Select which Microsoft To Do list to use:",
-            requestedSchema: {
-              type: "object" as const,
-              properties: {
-                listId: {
-                  type: "string" as const,
-                  title: "Todo List",
-                  description: "Select a list",
-                  oneOf: lists.map((l) => ({
-                    const: l.id,
-                    title: l.displayName,
-                  })),
-                },
-              },
-              required: ["listId"],
+        // Start local config server
+        const handle = await startConfigServer(lists, config.configDir);
+
+        // Try to open the browser
+        let browserOpened = false;
+        try {
+          await openBrowser(handle.url);
+          browserOpened = true;
+          logger.info("config browser opened", { url: handle.url });
+        } catch (err: unknown) {
+          logger.warn("could not open browser for config", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        const instruction = browserOpened
+          ? "A browser window has been opened to configure your todo list. " +
+            "Waiting for you to make a selection..."
+          : "Could not open a browser automatically. " +
+            `Please visit this URL to configure your todo list:\n\n${handle.url}\n\n` +
+            "Waiting for you to make a selection...";
+
+        // Wait for the user to make a selection (blocks until done or timeout)
+        const result = await handle.waitForSelection;
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `${instruction}\n\nTodo list configured: ${result.listName} (${result.listId})`,
             },
-          });
-
-          if (elicitResult.action !== "accept" || !elicitResult.content) {
-            return {
-              content: [
-                { type: "text", text: "Configuration cancelled." },
-              ],
-            };
-          }
-
-          const selectedId = elicitResult.content["listId"] as string;
-          const selected = lists.find((l) => l.id === selectedId);
-          if (!selected) {
-            return {
-              content: [{ type: "text", text: "Selected list not found." }],
-              isError: true,
-            };
-          }
-
-          await saveConfig(
-            { todoListId: selected.id, todoListName: selected.displayName },
-            config.configDir,
-          );
-
-          const text = `Todo list configured: ${selected.displayName} (${selected.id})`;
-          logger.info("todo list configured", {
-            listId: selected.id,
-            listName: selected.displayName,
-          });
-          return { content: [{ type: "text", text }] };
-        }
-
-        // Fallback: two-step text flow (no elicitation or listId provided)
-        if (!args.listId) {
-          const text = `Available todo lists:\n\n${formatListOptions(lists)}\n\nCall todo_config again with a listId to select one.`;
-          return { content: [{ type: "text", text }] };
-        }
-
-        const selected = lists.find((l) => l.id === args.listId);
-        if (!selected) {
-          const text = `List "${args.listId}" not found. Available lists:\n\n${formatListOptions(lists)}\n\nCall todo_config with one of the above list IDs.`;
-          return { content: [{ type: "text", text }], isError: true };
-        }
-
-        await saveConfig(
-          { todoListId: selected.id, todoListName: selected.displayName },
-          config.configDir,
-        );
-
-        const text = `Todo list configured: ${selected.displayName} (${selected.id})`;
-        logger.info("todo list configured", {
-          listId: selected.id,
-          listName: selected.displayName,
-        });
-        return { content: [{ type: "text", text }] };
+          ],
+        };
       } catch (err: unknown) {
         if (err instanceof AuthenticationRequiredError) {
-          return { content: [{ type: "text", text: err.message }], isError: true };
+          return {
+            content: [
+              { type: "text" as const, text: err.message },
+            ],
+            isError: true,
+          };
         }
         const message =
           err instanceof GraphRequestError
@@ -139,8 +99,12 @@ export function registerConfigTools(
               ? err.message
               : String(err);
         logger.error("todo_config failed", { error: message });
-        return { content: [{ type: "text", text: message }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: message }],
+          isError: true,
+        };
       }
     },
   );
 }
+

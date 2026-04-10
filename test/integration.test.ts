@@ -356,47 +356,42 @@ describe("integration", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Todo config
+  // Todo config (browser-based)
   // -----------------------------------------------------------------------
 
   describe("todo config", () => {
-    beforeAll(async () => {
-      auth = new MockAuthenticator({ token: "config-token" });
-      client = await createTestClient(auth);
-    });
+    it("returns auth error when not logged in", async () => {
+      const noAuth = new MockAuthenticator();
+      const c = await createTestClient(noAuth);
 
-    it("lists available todo lists", async () => {
-      const result = (await client.callTool({
+      const result = (await c.callTool({
         name: "todo_config",
         arguments: {},
       })) as ToolResult;
 
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("My Tasks");
-      expect(text).toContain("list-1");
-    });
-
-    it("returns error for non-existent list", async () => {
-      const result = (await client.callTool({
-        name: "todo_config",
-        arguments: { listId: "nonexistent" },
-      })) as ToolResult;
-
       expect(result.isError).toBe(true);
-      expect(firstText(result)).toContain("not found");
+      expect(firstText(result)).toContain("Not logged in");
     });
 
-    it("selects a todo list", async () => {
-      const result = (await client.callTool({
-        name: "todo_config",
-        arguments: { listId: "list-1" },
-      })) as ToolResult;
+    it("returns message when no todo lists exist", async () => {
+      // Temporarily clear the lists
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [];
 
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("configured");
-      expect(text).toContain("My Tasks");
+      try {
+        auth = new MockAuthenticator({ token: "config-token" });
+        client = await createTestClient(auth);
+
+        const result = (await client.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        expect(firstText(result)).toContain("No todo lists found");
+      } finally {
+        graphState.todoLists = originalLists;
+      }
     });
   });
 
@@ -766,81 +761,6 @@ describe("integration", () => {
 
       expect(result.isError).toBeFalsy();
       expect(firstText(result)).toContain("Logged in as");
-      expect(elicitCalled).toBe(false);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // Elicitation - config
-  // -----------------------------------------------------------------------
-
-  describe("elicitation: config", () => {
-    it("uses form elicitation to pick a todo list", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-elicit-token" });
-      let elicitMessage = "";
-
-      const c = await createElicitingClient(cfgAuth, (params) => {
-        elicitMessage = params.message;
-        return { action: "accept", content: { listId: "list-1" } };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("configured");
-      expect(text).toContain("My Tasks");
-      expect(elicitMessage).toContain("Select");
-    });
-
-    it("handles elicitation cancel for config", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-cancel-token" });
-      const c = await createElicitingClient(cfgAuth, () => {
-        return { action: "cancel" };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      expect(firstText(result)).toContain("cancelled");
-    });
-
-    it("falls back to text list when client lacks elicitation", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-noelicit-token" });
-      const c = await createTestClient(cfgAuth);
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      const text = firstText(result);
-      expect(text).toContain("Available todo lists");
-      expect(text).toContain("Call todo_config again");
-    });
-
-    it("still accepts listId directly with elicitation client", async () => {
-      const cfgAuth = new MockAuthenticator({ token: "config-direct-token" });
-      let elicitCalled = false;
-      const c = await createElicitingClient(cfgAuth, () => {
-        elicitCalled = true;
-        return { action: "accept", content: {} };
-      });
-
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: { listId: "list-1" },
-      })) as ToolResult;
-
-      expect(result.isError).toBeFalsy();
-      expect(firstText(result)).toContain("configured");
       expect(elicitCalled).toBe(false);
     });
   });

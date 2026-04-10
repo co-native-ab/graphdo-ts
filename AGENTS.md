@@ -23,13 +23,15 @@ src/
     login.ts             login (browser + device code fallback) and logout MCP tools
     mail.ts              mail_send MCP tool registration
     todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete
-    config.ts            todo_config MCP tool (list picker with human-in-the-loop)
+    config.ts            todo_config MCP tool (opens browser for human-only list selection)
+    config-server.ts     Local HTTP server for todo list picker UI
     status.ts            auth_status MCP tool (authentication state + config info)
 test/
   helpers.ts             createTestEnv() - standardized test setup
   mock-graph.ts          MockState class + in-memory Graph API server (node:http)
-  mock-auth.ts           MockAuthenticator - controllable auth state for tests
+  mock-auth.ts           MockAuthenticator — controllable auth state for tests (browser/device code)
   config.test.ts         Config persistence unit tests
+  config-server.test.ts  Config server unit tests (HTTP flow, selection, timeout, XSS)
   integration.test.ts    Full e2e: in-process MCP server + real Client + mock Graph API
   graph/
     client.test.ts       GraphClient + GraphRequestError tests
@@ -65,12 +67,16 @@ The `Authenticator` interface abstracts token acquisition: `login()`, `token()`,
 
 The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin/stdout JSON-RPC. This is required for MCPB compatibility. Logs go to stderr.
 
-### Config via MCP Tool + Elicitation
+### Config via Browser (Human-Only)
+The `todo_config` tool opens a local web server and launches the user's browser to select a todo list. This is a deliberate security design: the AI agent **cannot** programmatically change which list it operates on — only a human can make this selection via the browser UI.
 
-The `todo_config` tool configures which Microsoft To Do list to use. When the client supports form-based elicitation, it presents a dropdown picker (using `oneOf` enum schema) for the user to select a list directly. When elicitation is not available, it falls back to a two-step text flow:
+The config server:
+1. Starts on `127.0.0.1` with a random port
+2. Serves an HTML page with clickable list buttons
+3. When the user clicks a list, JS POSTs to `/select`
+4. The server saves config, returns success HTML ("you can close this tab"), and shuts down
 
-1. Call without `listId` → returns available lists for the user to choose
-2. Call with `listId` → saves selection to `config.json`
+If the browser cannot be opened (headless/remote), the tool returns the URL as text for manual access. The tool blocks until the user makes a selection (2-minute timeout).
 
 Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `~/Library/Application Support/graphdo-ts/` on macOS, `%APPDATA%/graphdo-ts` on Windows). The `GRAPHDO_CONFIG_DIR` env var overrides this (used in tests).
 
@@ -100,17 +106,16 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 ## Testing
 
 ### Test Architecture
-
-Tests use vitest with two layers:
-
-1. **Graph layer tests** (`test/graph/`) - test `GraphClient`, mail, and todo operations against the mock Graph API server
-2. **Integration tests** (`test/integration.test.ts`) - full in-process end-to-end tests using `InMemoryTransport.createLinkedPair()` from the MCP SDK and the real `Client` class. Tests create a `MockAuthenticator` and `MockState`, wire up the server in-process (no child processes or stdio), and verify all tool calls against the mock Graph API.
+Tests use vitest with three layers:
+1. **Graph layer tests** (`test/graph/`) — test `GraphClient`, mail, and todo operations against the mock Graph API server
+2. **Config server tests** (`test/config-server.test.ts`) — test the browser-based config server directly: HTML rendering, list selection, config persistence, timeout, XSS escaping
+3. **Integration tests** (`test/integration.test.ts`) — full in-process end-to-end tests using `InMemoryTransport.createLinkedPair()` from the MCP SDK and the real `Client` class. Tests create a `MockAuthenticator` and `MockState`, wire up the server in-process (no child processes or stdio), and verify all tool calls against the mock Graph API.
 
 The mock Graph API server (`test/mock-graph.ts`) is a plain `node:http` server with `MockState` for in-memory state - no mocking libraries for HTTP.
 
-The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with controllable state: start unauthenticated, call `completeLogin()` from the test to simulate the user completing the device code flow, verify `loginPending` state. Used to test the full login → use tools → logout → tools fail cycle.
+The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with controllable state: start unauthenticated, call `completeLogin()` from the test to simulate the user completing the device code flow, verify `loginPending` state. Supports `browserLogin: true` for simulating immediate browser login. Used to test the full login → use tools → logout → tools fail cycle.
 
-**Elicitation tests** use `createElicitingClient()` - creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for both login and config, fallback to text when client doesn't support elicitation, elicitation skipped when not needed (already authenticated, listId provided), and browser login skips elicitation entirely.
+**Elicitation tests** use `createElicitingClient()` — creates a `Client` with `{ capabilities: { elicitation: { form: {} } } }` and a `setRequestHandler(ElicitRequestSchema, handler)` that returns controlled responses. Tests verify: elicitation accept/decline/cancel for login, fallback to text when client doesn't support elicitation, elicitation skipped when not needed (already authenticated, browser login), and browser login skips elicitation entirely.
 
 ### Running Tests
 

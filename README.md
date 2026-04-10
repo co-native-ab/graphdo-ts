@@ -12,19 +12,19 @@ This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/
 
 graphdo-ts currently exposes **11 MCP tools**:
 
-| Tool            | Description                                                            |
-| --------------- | ---------------------------------------------------------------------- |
-| `login`         | Authenticate via browser login (with device code fallback)             |
-| `logout`        | Clear cached tokens and sign out                                       |
-| `auth_status`   | Check authentication status, current user, and configuration           |
-| `mail_send`     | Send an email to yourself (from and to your Microsoft account)         |
-| `todo_config`   | Configure which Microsoft To Do list to use (human-in-the-loop picker) |
-| `todo_list`     | List todos with pagination                                             |
-| `todo_show`     | Show a single todo with full details                                   |
-| `todo_create`   | Create a new todo                                                      |
-| `todo_update`   | Update an existing todo (title and/or body)                            |
-| `todo_complete` | Mark a todo as completed                                               |
-| `todo_delete`   | Delete a todo                                                          |
+| Tool | Description |
+|------|-------------|
+| `login` | Authenticate via browser login (with device code fallback) |
+| `logout` | Clear cached tokens and sign out |
+| `auth_status` | Check authentication status, current user, and configuration |
+| `mail_send` | Send an email to yourself (from and to your Microsoft account) |
+| `todo_config` | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
+| `todo_list` | List todos with pagination |
+| `todo_show` | Show a single todo with full details |
+| `todo_create` | Create a new todo |
+| `todo_update` | Update an existing todo (title and/or body) |
+| `todo_complete` | Mark a todo as completed |
+| `todo_delete` | Delete a todo |
 
 ---
 
@@ -89,10 +89,11 @@ These scopes reflect the current set of capabilities. Additional scopes may be r
 
 ### Todo List Selection
 
-Before using todo tools, select which Microsoft To Do list to use. If the client supports elicitation, `todo_config` presents a dropdown picker. Otherwise:
+Before using todo tools, select which Microsoft To Do list to use. Call the `todo_config` tool — it opens a browser window with your available lists. Click the one you want, and the configuration is saved.
 
-1. Call `todo_config` without arguments → returns available lists
-2. Call `todo_config` with a `listId` → saves the selection
+**Security:** This is a human-only action. The AI agent cannot programmatically change which list it operates on — only you can make this selection through the browser.
+
+If a browser cannot be opened automatically, the tool displays a URL you can visit manually.
 
 The configuration is stored in the OS config directory:
 
