@@ -174,13 +174,17 @@ describe("integration", () => {
         "login",
         "logout",
         "mail_send",
+        "todo_add_step",
         "todo_complete",
         "todo_config",
         "todo_create",
         "todo_delete",
+        "todo_delete_step",
         "todo_list",
         "todo_show",
+        "todo_steps",
         "todo_update",
+        "todo_update_step",
       ]);
     });
 
@@ -644,6 +648,321 @@ describe("integration", () => {
       // Verify in mock state
       const remaining = graphState.getTodos("list-1");
       expect(remaining.find((t) => t.title === "Updated task")).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Enhanced todo features (importance, due date, reminder, recurrence)
+  // -----------------------------------------------------------------------
+
+  describe("enhanced todo features", () => {
+    beforeAll(async () => {
+      auth = new MockAuthenticator({ token: "enhanced-token" });
+      client = await createTestClient(auth);
+
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        configDirPath,
+      );
+
+      graphState.todos.set("list-1", [
+        { id: "task-1", title: "Base task", status: "notStarted" },
+      ]);
+    });
+
+    it("creates a todo with importance", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Urgent item", importance: "high" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Urgent item");
+
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Urgent item");
+      expect(task?.importance).toBe("high");
+    });
+
+    it("creates a todo with due date", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Due soon", dueDate: "2025-12-31" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Due soon");
+      expect(task?.dueDateTime).toBeDefined();
+      expect(task?.dueDateTime?.dateTime).toContain("2025-12-31");
+    });
+
+    it("creates a todo with reminder", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: {
+          title: "Reminder task",
+          reminderDateTime: "2025-12-30T09:00:00",
+        },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Reminder task");
+      expect(task?.isReminderOn).toBe(true);
+      expect(task?.reminderDateTime).toBeDefined();
+    });
+
+    it("creates a todo with daily recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Daily standup", repeat: "daily" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Daily standup");
+      expect(task?.recurrence).toBeDefined();
+      expect(task?.recurrence?.pattern.type).toBe("daily");
+      expect(task?.recurrence?.pattern.interval).toBe(1);
+    });
+
+    it("creates a todo with weekly recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Weekly review", repeat: "weekly" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Weekly review");
+      expect(task?.recurrence?.pattern.type).toBe("weekly");
+    });
+
+    it("creates a todo with weekdays recurrence", async () => {
+      const result = (await client.callTool({
+        name: "todo_create",
+        arguments: { title: "Weekday check", repeat: "weekdays" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.title === "Weekday check");
+      expect(task?.recurrence?.pattern.type).toBe("weekly");
+      expect(task?.recurrence?.pattern.daysOfWeek).toEqual(
+        expect.arrayContaining(["monday", "tuesday", "wednesday", "thursday", "friday"]),
+      );
+    });
+
+    it("shows a todo with all fields", async () => {
+      const result = (await client.callTool({
+        name: "todo_show",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Base task");
+    });
+
+    it("updates importance", async () => {
+      const result = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", importance: "low" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const tasks = graphState.getTodos("list-1");
+      const task = tasks.find((t) => t.id === "task-1");
+      expect(task?.importance).toBe("low");
+    });
+
+    it("sets and clears due date", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", dueDate: "2025-06-15" },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.dueDateTime).toBeDefined();
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearDueDate: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.dueDateTime).toBeUndefined();
+    });
+
+    it("sets and clears reminder", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: {
+          taskId: "task-1",
+          reminderDateTime: "2025-06-15T09:00:00",
+        },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.isReminderOn).toBe(true);
+      expect(task?.reminderDateTime).toBeDefined();
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearReminder: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.isReminderOn).toBe(false);
+      expect(task?.reminderDateTime).toBeUndefined();
+    });
+
+    it("sets and clears recurrence", async () => {
+      // Set
+      const setResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", repeat: "monthly" },
+      })) as ToolResult;
+      expect(setResult.isError).toBeFalsy();
+
+      let tasks = graphState.getTodos("list-1");
+      let task = tasks.find((t) => t.id === "task-1");
+      expect(task?.recurrence?.pattern.type).toBe("absoluteMonthly");
+
+      // Clear
+      const clearResult = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1", clearRecurrence: true },
+      })) as ToolResult;
+      expect(clearResult.isError).toBeFalsy();
+
+      tasks = graphState.getTodos("list-1");
+      task = tasks.find((t) => t.id === "task-1");
+      expect(task?.recurrence).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Checklist items (steps)
+  // -----------------------------------------------------------------------
+
+  describe("checklist items", () => {
+    beforeAll(async () => {
+      auth = new MockAuthenticator({ token: "steps-token" });
+      client = await createTestClient(auth);
+
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        configDirPath,
+      );
+
+      graphState.todos.set("list-1", [
+        { id: "task-1", title: "Task with steps", status: "notStarted" },
+      ]);
+      graphState.checklistItems.clear();
+    });
+
+    it("lists empty steps", async () => {
+      const result = (await client.callTool({
+        name: "todo_steps",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("No steps");
+    });
+
+    it("adds a step", async () => {
+      const result = (await client.callTool({
+        name: "todo_add_step",
+        arguments: { taskId: "task-1", displayName: "Step 1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Step 1");
+
+      const items = graphState.getChecklistItems("task-1");
+      expect(items).toHaveLength(1);
+      expect(items[0]!.displayName).toBe("Step 1");
+    });
+
+    it("adds multiple steps", async () => {
+      const result = (await client.callTool({
+        name: "todo_add_step",
+        arguments: { taskId: "task-1", displayName: "Step 2" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const items = graphState.getChecklistItems("task-1");
+      expect(items).toHaveLength(2);
+    });
+
+    it("lists steps after creation", async () => {
+      const result = (await client.callTool({
+        name: "todo_steps",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("Step 1");
+      expect(text).toContain("Step 2");
+    });
+
+    it("checks a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[0]!;
+
+      const result = (await client.callTool({
+        name: "todo_update_step",
+        arguments: { taskId: "task-1", stepId: step.id, isChecked: true },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+
+      const updated = graphState.getChecklistItems("task-1");
+      expect(updated.find((i) => i.id === step.id)?.isChecked).toBe(true);
+    });
+
+    it("renames a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[0]!;
+
+      const result = (await client.callTool({
+        name: "todo_update_step",
+        arguments: { taskId: "task-1", stepId: step.id, displayName: "Renamed Step" },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Renamed Step");
+    });
+
+    it("deletes a step", async () => {
+      const items = graphState.getChecklistItems("task-1");
+      const step = items[1]!;
+
+      const result = (await client.callTool({
+        name: "todo_delete_step",
+        arguments: { taskId: "task-1", stepId: step.id },
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("deleted");
+
+      const remaining = graphState.getChecklistItems("task-1");
+      expect(remaining).toHaveLength(1);
     });
   });
 

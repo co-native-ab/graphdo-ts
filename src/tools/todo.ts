@@ -12,10 +12,22 @@ import {
   updateTodo,
   completeTodo,
   deleteTodo,
+  listChecklistItems,
+  createChecklistItem,
+  updateChecklistItem,
+  deleteChecklistItem,
 } from "../graph/todo.js";
+import type {
+  DateTimeTimeZone,
+  PatternedRecurrence,
+} from "../graph/types.js";
 import { loadAndValidateConfig } from "../config.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function statusEmoji(status: string): string {
   return status === "completed" ? "✅" : "⬜";
@@ -23,6 +35,38 @@ function statusEmoji(status: string): string {
 
 function statusLabel(status: string): string {
   return status === "completed" ? "Completed" : "Not Started";
+}
+
+function importanceLabel(importance?: string): string {
+  if (!importance || importance === "normal") return "";
+  return importance === "high" ? " ❗" : " ↓";
+}
+
+function formatDate(dt?: DateTimeTimeZone): string {
+  if (!dt) return "";
+  return `${dt.dateTime} (${dt.timeZone})`;
+}
+
+function formatRecurrence(rec?: PatternedRecurrence): string {
+  if (!rec) return "";
+  const p = rec.pattern;
+  const interval = p.interval > 1 ? `every ${String(p.interval)} ` : "";
+  switch (p.type) {
+    case "daily":
+      return `${interval}day(s)`;
+    case "weekly":
+      return `${interval}week(s)${p.daysOfWeek ? ` on ${p.daysOfWeek.join(", ")}` : ""}`;
+    case "absoluteMonthly":
+      return `${interval}month(s) on day ${String(p.dayOfMonth ?? "")}`;
+    case "relativeMonthly":
+      return `${interval}month(s)${p.daysOfWeek ? ` on ${p.daysOfWeek.join(", ")}` : ""}`;
+    case "absoluteYearly":
+      return `${interval}year(s)`;
+    case "relativeYearly":
+      return `${interval}year(s)`;
+    default:
+      return p.type;
+  }
 }
 
 function formatError(toolName: string, err: unknown): { content: { type: "text"; text: string }[]; isError: true } {
@@ -38,6 +82,56 @@ function formatError(toolName: string, err: unknown): { content: { type: "text";
   logger.error(`${toolName} failed`, { error: message });
   return { content: [{ type: "text", text: message }], isError: true };
 }
+
+/**
+ * Parse a simplified repeat string into a full PatternedRecurrence.
+ * Supports: "daily", "weekly", "weekdays", "monthly", "yearly"
+ * with an optional interval (default 1).
+ */
+function parseRecurrence(
+  repeat: string,
+  interval: number,
+): PatternedRecurrence {
+  const todayParts = new Date().toISOString().split("T");
+  const today = todayParts[0] ?? new Date().toISOString().slice(0, 10);
+  const range = { type: "noEnd" as const, startDate: today };
+
+  switch (repeat) {
+    case "daily":
+      return { pattern: { type: "daily", interval }, range };
+    case "weekly":
+      return { pattern: { type: "weekly", interval, daysOfWeek: [currentDayOfWeek()], firstDayOfWeek: "sunday" }, range };
+    case "weekdays":
+      return { pattern: { type: "weekly", interval: 1, daysOfWeek: ["monday", "tuesday", "wednesday", "thursday", "friday"], firstDayOfWeek: "monday" }, range };
+    case "monthly":
+      return { pattern: { type: "absoluteMonthly", interval, dayOfMonth: new Date().getDate() }, range };
+    case "yearly":
+      return { pattern: { type: "absoluteYearly", interval, dayOfMonth: new Date().getDate(), month: new Date().getMonth() + 1 }, range };
+    default:
+      throw new Error(`Unknown repeat value: "${repeat}". Use: daily, weekly, weekdays, monthly, yearly.`);
+  }
+}
+
+function currentDayOfWeek(): string {
+  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  return days[new Date().getDay()] ?? "monday";
+}
+
+/** Parse an ISO date/time string into a DateTimeTimeZone object. */
+function parseDateTimeTimeZone(dateStr: string, timeZone = "UTC"): DateTimeTimeZone {
+  return { dateTime: dateStr, timeZone };
+}
+
+// ---------------------------------------------------------------------------
+// Zod schemas
+// ---------------------------------------------------------------------------
+
+const importanceSchema = z.enum(["low", "normal", "high"]).optional();
+const repeatSchema = z.enum(["daily", "weekly", "weekdays", "monthly", "yearly"]).optional();
+
+// ---------------------------------------------------------------------------
+// Tool registration
+// ---------------------------------------------------------------------------
 
 /** Register all To Do CRUD tools on the given MCP server. */
 export function registerTodoTools(
@@ -71,10 +165,13 @@ export function registerTodoTools(
           args.skip,
         );
 
-        const lines = items.map(
-          (item, i) =>
-            `${String(i + 1 + args.skip)}. ${statusEmoji(item.status)} ${item.title} (${item.id})`,
-        );
+        const lines = items.map((item, i) => {
+          const num = String(i + 1 + args.skip);
+          const emoji = statusEmoji(item.status);
+          const imp = importanceLabel(item.importance);
+          const due = item.dueDateTime ? ` 📅 ${item.dueDateTime.dateTime}` : "";
+          return `${num}. ${emoji}${imp} ${item.title}${due} (${item.id})`;
+        });
 
         const header = `Todos in "${todoConfig.todoListName}":\n`;
         const footer = `\nShowing ${String(items.length)} items (skip: ${String(args.skip)}, top: ${String(args.top)})`;
@@ -116,8 +213,30 @@ export function registerTodoTools(
           `List: ${todoConfig.todoListName} (${todoConfig.todoListId})`,
         ];
 
+        if (item.importance && item.importance !== "normal") {
+          lines.push(`Importance: ${item.importance}`);
+        }
+        if (item.dueDateTime) {
+          lines.push(`Due: ${formatDate(item.dueDateTime)}`);
+        }
+        if (item.isReminderOn) {
+          lines.push(`Reminder: ${item.reminderDateTime ? formatDate(item.reminderDateTime) : "on"}`);
+        }
+        if (item.recurrence) {
+          lines.push(`Repeat: ${formatRecurrence(item.recurrence)}`);
+        }
         if (item.body?.content) {
           lines.push("", `Body:\n${item.body.content}`);
+        }
+
+        // Show checklist items if present
+        const checklistItems = await listChecklistItems(client, todoConfig.todoListId, args.taskId);
+        if (checklistItems.length > 0) {
+          lines.push("", "Steps:");
+          for (const step of checklistItems) {
+            const check = step.isChecked ? "☑" : "☐";
+            lines.push(`  ${check} ${step.displayName} (${step.id})`);
+          }
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] };
@@ -131,10 +250,30 @@ export function registerTodoTools(
   server.registerTool(
     "todo_create",
     {
-      description: "Create a new todo",
+      description:
+        "Create a new todo. Supports optional due date, importance, reminder, and recurrence.",
       inputSchema: {
         title: z.string(),
         body: z.string().optional().default(""),
+        importance: importanceSchema,
+        dueDate: z
+          .string()
+          .optional()
+          .describe("Due date in ISO 8601 format (e.g. 2025-01-15T09:00:00)"),
+        dueDateTimeZone: z.string().optional().default("UTC"),
+        reminderDateTime: z
+          .string()
+          .optional()
+          .describe("Reminder date/time in ISO 8601 format"),
+        reminderTimeZone: z.string().optional().default("UTC"),
+        repeat: repeatSchema.describe(
+          "Recurrence: daily, weekly, weekdays, monthly, yearly",
+        ),
+        repeatInterval: z
+          .number()
+          .optional()
+          .default(1)
+          .describe("Interval between recurrences (e.g. 2 = every 2 weeks)"),
       },
       annotations: {
         title: "Create Todo",
@@ -147,15 +286,33 @@ export function registerTodoTools(
         const token = await config.authenticator.token();
         const todoConfig = await loadAndValidateConfig(config.configDir);
         const client = new GraphClient(config.graphBaseUrl, token);
-        const item = await createTodo(
-          client,
-          todoConfig.todoListId,
-          args.title,
-          args.body,
-        );
 
-        const text = `Created todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
-        return { content: [{ type: "text", text }] };
+        const item = await createTodo(client, todoConfig.todoListId, {
+          title: args.title,
+          body: args.body || undefined,
+          importance: args.importance,
+          dueDateTime: args.dueDate
+            ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
+            : undefined,
+          isReminderOn: args.reminderDateTime ? true : undefined,
+          reminderDateTime: args.reminderDateTime
+            ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
+            : undefined,
+          recurrence: args.repeat
+            ? parseRecurrence(args.repeat, args.repeatInterval)
+            : undefined,
+        });
+
+        const parts = [`Created todo: "${item.title}" (${item.id})`];
+        parts.push(`Status: ${statusLabel(item.status)}`);
+        if (item.importance && item.importance !== "normal") {
+          parts.push(`Importance: ${item.importance}`);
+        }
+        if (item.dueDateTime) parts.push(`Due: ${formatDate(item.dueDateTime)}`);
+        if (item.isReminderOn) parts.push("Reminder: set");
+        if (item.recurrence) parts.push(`Repeat: ${formatRecurrence(item.recurrence)}`);
+
+        return { content: [{ type: "text", text: parts.join("\n") }] };
       } catch (err: unknown) {
         return formatError("todo_create", err);
       }
@@ -166,11 +323,23 @@ export function registerTodoTools(
   server.registerTool(
     "todo_update",
     {
-      description: "Update an existing todo",
+      description:
+        "Update an existing todo. Set fields to change; omit to keep current values. " +
+        "Set clearDueDate/clearReminder/clearRecurrence to true to remove those.",
       inputSchema: {
         taskId: z.string(),
         title: z.string().optional().default(""),
         body: z.string().optional().default(""),
+        importance: importanceSchema,
+        dueDate: z.string().optional().describe("Due date in ISO 8601 format"),
+        dueDateTimeZone: z.string().optional().default("UTC"),
+        clearDueDate: z.boolean().optional().default(false),
+        reminderDateTime: z.string().optional().describe("Reminder date/time in ISO 8601 format"),
+        reminderTimeZone: z.string().optional().default("UTC"),
+        clearReminder: z.boolean().optional().default(false),
+        repeat: repeatSchema,
+        repeatInterval: z.number().optional().default(1),
+        clearRecurrence: z.boolean().optional().default(false),
       },
       annotations: {
         title: "Update Todo",
@@ -179,12 +348,23 @@ export function registerTodoTools(
       },
     },
     async (args) => {
-      if (!args.title && !args.body) {
+      const hasChange =
+        args.title !== "" ||
+        args.body !== "" ||
+        args.importance !== undefined ||
+        args.dueDate !== undefined ||
+        args.clearDueDate ||
+        args.reminderDateTime !== undefined ||
+        args.clearReminder ||
+        args.repeat !== undefined ||
+        args.clearRecurrence;
+
+      if (!hasChange) {
         return {
           content: [
             {
               type: "text" as const,
-              text: "At least one of title or body must be provided.",
+              text: "At least one field to update must be provided.",
             },
           ],
           isError: true,
@@ -195,13 +375,32 @@ export function registerTodoTools(
         const token = await config.authenticator.token();
         const todoConfig = await loadAndValidateConfig(config.configDir);
         const client = new GraphClient(config.graphBaseUrl, token);
-        const item = await updateTodo(
-          client,
-          todoConfig.todoListId,
-          args.taskId,
-          args.title,
-          args.body,
-        );
+
+        const item = await updateTodo(client, todoConfig.todoListId, args.taskId, {
+          title: args.title || undefined,
+          body: args.body || undefined,
+          importance: args.importance,
+          dueDateTime: args.clearDueDate
+            ? null
+            : args.dueDate
+              ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
+              : undefined,
+          isReminderOn: args.clearReminder
+            ? false
+            : args.reminderDateTime
+              ? true
+              : undefined,
+          reminderDateTime: args.clearReminder
+            ? null
+            : args.reminderDateTime
+              ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
+              : undefined,
+          recurrence: args.clearRecurrence
+            ? null
+            : args.repeat
+              ? parseRecurrence(args.repeat, args.repeatInterval)
+              : undefined,
+        });
 
         const text = `Updated todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
         return { content: [{ type: "text", text }] };
@@ -271,6 +470,195 @@ export function registerTodoTools(
         };
       } catch (err: unknown) {
         return formatError("todo_delete", err);
+      }
+    },
+  );
+
+  // ---- todo_steps ----
+  server.registerTool(
+    "todo_steps",
+    {
+      description: "List checklist steps for a todo",
+      inputSchema: { taskId: z.string() },
+      annotations: {
+        title: "List Steps",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args) => {
+      try {
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        const items = await listChecklistItems(
+          client,
+          todoConfig.todoListId,
+          args.taskId,
+        );
+
+        if (items.length === 0) {
+          return {
+            content: [{ type: "text", text: "No steps found for this todo." }],
+          };
+        }
+
+        const lines = items.map((item) => {
+          const check = item.isChecked ? "☑" : "☐";
+          return `${check} ${item.displayName} (${item.id})`;
+        });
+
+        return {
+          content: [
+            { type: "text", text: `Steps:\n\n${lines.join("\n")}` },
+          ],
+        };
+      } catch (err: unknown) {
+        return formatError("todo_steps", err);
+      }
+    },
+  );
+
+  // ---- todo_add_step ----
+  server.registerTool(
+    "todo_add_step",
+    {
+      description: "Add a checklist step to a todo",
+      inputSchema: {
+        taskId: z.string(),
+        displayName: z.string(),
+      },
+      annotations: {
+        title: "Add Step",
+        readOnlyHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (args) => {
+      try {
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        const item = await createChecklistItem(
+          client,
+          todoConfig.todoListId,
+          args.taskId,
+          args.displayName,
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Added step: "${item.displayName}" (${item.id})`,
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        return formatError("todo_add_step", err);
+      }
+    },
+  );
+
+  // ---- todo_update_step ----
+  server.registerTool(
+    "todo_update_step",
+    {
+      description:
+        "Update a checklist step — rename, check, or uncheck",
+      inputSchema: {
+        taskId: z.string(),
+        stepId: z.string(),
+        displayName: z.string().optional(),
+        isChecked: z.boolean().optional(),
+      },
+      annotations: {
+        title: "Update Step",
+        readOnlyHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (args) => {
+      if (args.displayName === undefined && args.isChecked === undefined) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "At least one of displayName or isChecked must be provided.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      try {
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        const item = await updateChecklistItem(
+          client,
+          todoConfig.todoListId,
+          args.taskId,
+          args.stepId,
+          {
+            displayName: args.displayName,
+            isChecked: args.isChecked,
+          },
+        );
+
+        const check = item.isChecked ? "☑" : "☐";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Updated step: ${check} "${item.displayName}" (${item.id})`,
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        return formatError("todo_update_step", err);
+      }
+    },
+  );
+
+  // ---- todo_delete_step ----
+  server.registerTool(
+    "todo_delete_step",
+    {
+      description: "Delete a checklist step from a todo",
+      inputSchema: {
+        taskId: z.string(),
+        stepId: z.string(),
+      },
+      annotations: {
+        title: "Delete Step",
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (args) => {
+      try {
+        const token = await config.authenticator.token();
+        const todoConfig = await loadAndValidateConfig(config.configDir);
+        const client = new GraphClient(config.graphBaseUrl, token);
+        await deleteChecklistItem(
+          client,
+          todoConfig.todoListId,
+          args.taskId,
+          args.stepId,
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Step "${args.stepId}" deleted.`,
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        return formatError("todo_delete_step", err);
       }
     },
   );

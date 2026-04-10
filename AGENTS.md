@@ -20,11 +20,11 @@ src/
     client.ts            Lightweight HTTP client (native fetch, no Graph SDK), GraphRequestError
     types.ts             TypeScript interfaces for Graph API entities
     mail.ts              getMe, sendMail
-    todo.ts              TodoList/TodoItem CRUD + pagination ($top/$skip)
+    todo.ts              TodoList/TodoItem CRUD + checklist items + pagination ($top/$skip)
   tools/
     login.ts             login (browser + device code fallback) and logout MCP tools
     mail.ts              mail_send MCP tool registration
-    todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete
+    todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete + step tools
     config.ts            todo_config MCP tool (human-only list selection via browser picker)
     status.ts            auth_status MCP tool (authentication state + config info)
 test/
@@ -37,7 +37,7 @@ test/
   graph/
     client.test.ts       GraphClient + GraphRequestError tests
     mail.test.ts         Mail operation tests
-    todo.test.ts         Todo CRUD tests
+    todo.test.ts         Todo CRUD + checklist item + enhanced field tests
 ```
 
 ## Key Design Decisions
@@ -194,5 +194,10 @@ The `GRAPHDO_CONFIG_DIR` env var overrides the directory (used in tests with tem
 - Collections wrapped in `{"value": [...]}` - decoded with `GraphListResponse<T>`
 - Pagination via `$top` and `$skip` query params
 - `POST /me/sendMail` returns HTTP 202 with empty body
-- `PATCH` supports partial updates (omit fields to keep unchanged)
+- `PATCH` supports partial updates (omit fields to keep unchanged; `null` clears a field)
 - Errors in `{"error": {"code": "...", "message": "..."}}` → parsed into `GraphRequestError`
+- TodoTask fields: `importance` ("low"/"normal"/"high"), `isReminderOn`, `reminderDateTime`, `dueDateTime`, `recurrence` (PatternedRecurrence)
+- Checklist items: sub-resource at `/tasks/{taskId}/checklistItems` — full CRUD
+- `ChecklistItem`: `{ id, displayName, isChecked, createdDateTime?, checkedDateTime? }`
+- Recurrence uses `PatternedRecurrence { pattern: RecurrencePattern, range: RecurrenceRange }` — tools accept simplified `repeat` string ("daily"/"weekly"/"weekdays"/"monthly"/"yearly")
+- Graph API v1.0 does NOT support `assignees`/`assignedTo` on todoTask or "My Day" field
