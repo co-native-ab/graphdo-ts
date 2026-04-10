@@ -162,6 +162,7 @@ function serveConfigPage(
     .done h2 { color: #107c10; margin-bottom: 8px; }
     .done p { color: #666; }
     .error { color: #d13438; margin-top: 16px; }
+    .countdown { color: #999; margin-top: 8px; font-size: 0.9rem; }
   </style>
 </head>
 <body>
@@ -174,7 +175,8 @@ function serveConfigPage(
     <div id="done" style="display:none" class="done">
       <h2>&#10003; Configured</h2>
       <p>Using list: <strong id="selected-name"></strong></p>
-      <p style="margin-top: 16px; color: #999;">This tab will close automatically.</p>
+      <p style="margin-top: 24px;">You can switch back to your AI assistant now.</p>
+      <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
   </div>
@@ -195,7 +197,13 @@ function serveConfigPage(
           document.getElementById('picker').style.display = 'none';
           document.getElementById('selected-name').textContent = name;
           document.getElementById('done').style.display = 'block';
-          setTimeout(() => window.close(), 5000);
+          let remaining = 5;
+          const el = document.getElementById('countdown');
+          const tick = setInterval(() => {
+            remaining--;
+            el.textContent = String(remaining);
+            if (remaining <= 0) { clearInterval(tick); window.close(); }
+          }, 1000);
         } catch (err) {
           document.getElementById('error').style.display = 'block';
           document.getElementById('error').textContent = 'Failed to save: ' + err.message;
