@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "graphdo",
   "display_name": "graphdo",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "MCP server providing AI agents with scoped access to Microsoft Graph",
   "author": {
     "name": "co-native-ab"
