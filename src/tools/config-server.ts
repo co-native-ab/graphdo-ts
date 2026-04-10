@@ -174,7 +174,7 @@ function serveConfigPage(
     <div id="done" style="display:none" class="done">
       <h2>&#10003; Configured</h2>
       <p>Using list: <strong id="selected-name"></strong></p>
-      <p style="margin-top: 16px; color: #999;">You can close this tab.</p>
+      <p style="margin-top: 16px; color: #999;">This tab will close automatically.</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
   </div>
@@ -195,6 +195,7 @@ function serveConfigPage(
           document.getElementById('picker').style.display = 'none';
           document.getElementById('selected-name').textContent = name;
           document.getElementById('done').style.display = 'block';
+          setTimeout(() => window.close(), 5000);
         } catch (err) {
           document.getElementById('error').style.display = 'block';
           document.getElementById('error').textContent = 'Failed to save: ' + err.message;
