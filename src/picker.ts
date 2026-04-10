@@ -186,6 +186,7 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
       <p>Selected: <strong id="selected-label"></strong></p>
       <p style="margin-top: 24px;">You can switch back to your AI assistant now.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
+      <p id="manual-close" style="display:none; margin-top: 16px; color: #666; font-size: 0.9rem;">If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
   </div>
@@ -211,7 +212,14 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
           const tick = setInterval(() => {
             remaining--;
             el.textContent = String(remaining);
-            if (remaining <= 0) { clearInterval(tick); window.close(); }
+            if (remaining <= 0) {
+              clearInterval(tick);
+              window.close();
+              setTimeout(() => {
+                document.getElementById('countdown').parentElement.style.display = 'none';
+                document.getElementById('manual-close').style.display = 'block';
+              }, 500);
+            }
           }, 1000);
         } catch (err) {
           document.getElementById('error').style.display = 'block';

@@ -272,6 +272,7 @@ function serveSuccessPage(res: ServerResponse): void {
       <h1>Authentication successful</h1>
       <p class="message">You can close this window and return to your AI assistant.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
+      <p id="manual-close" style="display:none; margin-top: 16px; color: #666; font-size: 0.9rem;">If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
   </div>
   <script>
@@ -280,7 +281,14 @@ function serveSuccessPage(res: ServerResponse): void {
     const tick = setInterval(() => {
       remaining--;
       el.textContent = String(remaining);
-      if (remaining <= 0) { clearInterval(tick); window.close(); }
+      if (remaining <= 0) {
+        clearInterval(tick);
+        window.close();
+        setTimeout(() => {
+          document.getElementById('countdown').parentElement.style.display = 'none';
+          document.getElementById('manual-close').style.display = 'block';
+        }, 500);
+      }
     }, 1000);
   </script>
 </body>
