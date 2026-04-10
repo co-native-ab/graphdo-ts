@@ -143,21 +143,6 @@ function handleRequest(
     return;
   }
 
-  // Redirect to Microsoft auth
-  if (pathname === "/redirect" && req.method === "GET") {
-    const authUrl = client.getAuthUrl();
-    if (!authUrl) {
-      res.writeHead(503, { "Content-Type": "text/plain" });
-      res.end(
-        "Authentication URL not yet available. Please wait a moment and refresh.",
-      );
-      return;
-    }
-    res.writeHead(302, { Location: authUrl });
-    res.end();
-    return;
-  }
-
   // Success page (shown after redirect from auth code capture)
   if (pathname === "/done" && req.method === "GET") {
     serveSuccessPage(res);
@@ -207,10 +192,16 @@ function serveLandingPage(
   res: ServerResponse,
   authUrl: string | undefined,
 ): void {
-  const buttonDisabled = authUrl ? "" : "disabled";
-  const buttonStyle = authUrl
-    ? "background: #0078d4; cursor: pointer;"
-    : "background: #ccc; cursor: not-allowed;";
+  if (!authUrl) {
+    serveErrorPage(
+      res,
+      "Authentication URL is not available. Please close this window and try again.",
+    );
+    return;
+  }
+
+  // Escape & for use in HTML href attribute
+  const safeAuthUrl = authUrl.replace(/&/g, "&amp;");
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -226,7 +217,7 @@ function serveLandingPage(
     .sign-in-btn {
       display: inline-block;
       padding: 14px 32px;
-      ${buttonStyle}
+      background: #0078d4; cursor: pointer;
       color: white;
       border: none;
       border-radius: 8px;
@@ -235,8 +226,8 @@ function serveLandingPage(
       text-decoration: none;
       transition: background 0.15s, box-shadow 0.15s;
     }
-    .sign-in-btn:not([disabled]):hover { background: #106ebe; box-shadow: 0 2px 8px rgba(0,120,212,0.25); }
-    .sign-in-btn:not([disabled]):active { background: #005a9e; }
+    .sign-in-btn:hover { background: #106ebe; box-shadow: 0 2px 8px rgba(0,120,212,0.25); }
+    .sign-in-btn:active { background: #005a9e; }
     .footer { margin-top: 24px; font-size: 0.8rem; color: #999; }
   </style>
 </head>
@@ -246,7 +237,7 @@ function serveLandingPage(
       <div class="logo">graphdo</div>
       <h1>Sign in to continue</h1>
       <p class="subtitle">Connect your Microsoft account to enable email and task management through your AI assistant.</p>
-      <a href="/redirect" class="sign-in-btn" ${buttonDisabled}>Sign in with Microsoft</a>
+      <a href="${safeAuthUrl}" class="sign-in-btn">Sign in with Microsoft</a>
     </div>
     <p class="footer">Your credentials are handled directly by Microsoft. graphdo never sees your password.</p>
   </div>

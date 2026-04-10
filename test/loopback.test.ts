@@ -52,6 +52,8 @@ describe("LoginLoopbackClient", () => {
     const { client: c, uri } = await startClient();
     client = c;
 
+    c.setAuthUrl("https://login.microsoftonline.com/test");
+
     const res = await request(uri);
 
     expect(res.status).toBe(200);
@@ -61,53 +63,32 @@ describe("LoginLoopbackClient", () => {
     expect(html).toContain("Sign in with Microsoft");
   });
 
-  it("disables sign-in button when auth URL is not set", async () => {
+  it("shows error page when auth URL is not set", async () => {
     const { client: c, uri } = await startClient();
     client = c;
 
     const res = await request(uri);
     const html = await res.text();
 
-    expect(html).toContain("disabled");
-    expect(html).toContain("cursor: not-allowed");
+    expect(html).toContain("Authentication failed");
+    expect(html).toContain("Authentication URL is not available");
   });
 
-  it("enables sign-in button when auth URL is set", async () => {
+  it("embeds auth URL directly in sign-in button when set", async () => {
     const { client: c, uri } = await startClient();
     client = c;
 
-    c.setAuthUrl("https://login.microsoftonline.com/test");
+    c.setAuthUrl("https://login.microsoftonline.com/test?client_id=abc&scope=openid");
 
     const res = await request(uri);
     const html = await res.text();
 
-    // The <a> tag should not have the disabled attribute
-    expect(html).toContain('class="sign-in-btn" >');
-    expect(html).not.toContain("cursor: not-allowed");
+    expect(html).toContain('class="sign-in-btn"');
     expect(html).toContain("cursor: pointer");
-  });
-
-  it("returns 503 on /redirect when auth URL is not set", async () => {
-    const { client: c, uri } = await startClient();
-    client = c;
-
-    const res = await request(`${uri}/redirect`);
-
-    expect(res.status).toBe(503);
-  });
-
-  it("redirects to Microsoft auth URL on /redirect", async () => {
-    const { client: c, uri } = await startClient();
-    client = c;
-
-    const authUrl =
-      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test";
-    c.setAuthUrl(authUrl);
-
-    const res = await request(`${uri}/redirect`, { redirect: "manual" });
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(authUrl);
+    // Auth URL is embedded directly in the href (& escaped as &amp;)
+    expect(html).toContain("https://login.microsoftonline.com/test?client_id=abc&amp;scope=openid");
+    // Should NOT link to /redirect
+    expect(html).not.toContain('href="/redirect"');
   });
 
   it("captures auth code and redirects to /done", async () => {
@@ -235,18 +216,18 @@ describe("LoginLoopbackClient", () => {
     const microsoftAuthUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=test&redirect_uri=${encodeURIComponent(redirectUri)}&scope=Mail.Send`;
     c.setAuthUrl(microsoftAuthUrl);
 
-    // Step 4: User sees landing page
+    // Step 4: User sees landing page with auth URL embedded directly
     const landingRes = await request(redirectUri);
     expect(landingRes.status).toBe(200);
     const landingHtml = await landingRes.text();
     expect(landingHtml).toContain("Sign in with Microsoft");
+    // Auth URL should be embedded directly in the href (not via /redirect)
+    expect(landingHtml).toContain("login.microsoftonline.com");
+    expect(landingHtml).not.toContain('href="/redirect"');
 
-    // Step 5: User clicks "Sign in with Microsoft" → /redirect → 302 to Microsoft
-    const redirectRes = await request(`${redirectUri}/redirect`, {
-      redirect: "manual",
-    });
-    expect(redirectRes.status).toBe(302);
-    expect(redirectRes.headers.get("location")).toBe(microsoftAuthUrl);
+    // Step 5: User clicks "Sign in with Microsoft" → navigates directly to Microsoft
+    // (In a real browser, clicking the link opens the auth URL directly.
+    //  Here we simulate Microsoft redirecting back with the auth code.)
 
     // Step 6: Microsoft redirects back with auth code
     const callbackRes = await request(
