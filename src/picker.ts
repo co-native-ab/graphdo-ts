@@ -1,56 +1,67 @@
-// Local HTTP server for todo list configuration.
+// Generic browser-based picker — local HTTP server serving an HTML selection page.
 //
-// Serves a simple HTML page with clickable todo list options.
-// When the user selects a list, the server saves the config and shuts down.
-// This ensures only a human (via the browser) can change the active list.
+// Serves a page with clickable options. When the user selects one, the callback
+// is invoked and the server shuts down. Reusable for any browser-based selection
+// (todo list config, account picker, etc.).
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
-import { saveConfig } from "../config.js";
-import { logger } from "../logger.js";
+import { logger } from "./logger.js";
 
-interface TodoListOption {
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export interface PickerOption {
   id: string;
-  displayName: string;
+  label: string;
 }
 
-export interface ConfigServerResult {
-  listId: string;
-  listName: string;
+export interface PickerConfig {
+  title: string;
+  subtitle: string;
+  options: PickerOption[];
+  /** Called when the user selects an option. Errors are surfaced to the browser. */
+  onSelect: (option: PickerOption) => Promise<void>;
+  /** Timeout in milliseconds (default: 120 000 — 2 minutes). */
+  timeoutMs?: number;
 }
 
-export interface ConfigServerHandle {
-  /** URL where the config page is served. */
+export interface PickerResult {
+  /** The option the user selected. */
+  selected: PickerOption;
+}
+
+export interface PickerHandle {
+  /** URL where the picker page is served. */
   url: string;
   /** Resolves when the user makes a selection (or rejects on timeout/error). */
-  waitForSelection: Promise<ConfigServerResult>;
+  waitForSelection: Promise<PickerResult>;
 }
 
-/**
- * Start a local config server. Returns the URL immediately and a promise
- * that resolves when the user picks a list.
- */
-export function startConfigServer(
-  lists: TodoListOption[],
-  configDir: string,
-  opts?: { timeoutMs?: number },
-): Promise<ConfigServerHandle> {
-  const timeoutMs = opts?.timeoutMs ?? 120_000; // 2 minutes
+// ---------------------------------------------------------------------------
+// Picker server
+// ---------------------------------------------------------------------------
 
-  return new Promise<ConfigServerHandle>((resolveHandle, rejectHandle) => {
-    let onSelected: (result: ConfigServerResult) => void;
+/**
+ * Start a local picker server. Returns the URL immediately and a promise
+ * that resolves when the user picks an option.
+ */
+export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> {
+  const timeoutMs = config.timeoutMs ?? 120_000;
+
+  return new Promise<PickerHandle>((resolveHandle, rejectHandle) => {
+    let onSelected: (result: PickerResult) => void;
     let onError: (err: Error) => void;
 
-    const waitForSelection = new Promise<ConfigServerResult>(
-      (resolve, reject) => {
-        onSelected = resolve;
-        onError = reject;
-      },
-    );
+    const waitForSelection = new Promise<PickerResult>((resolve, reject) => {
+      onSelected = resolve;
+      onError = reject;
+    });
 
     const server = createServer((req, res) => {
-      handleRequest(req, res, lists, configDir, server, onSelected);
+      handleRequest(req, res, config, server, onSelected);
     });
 
     server.listen(0, "127.0.0.1", () => {
@@ -61,23 +72,21 @@ export function startConfigServer(
         return;
       }
       const url = `http://127.0.0.1:${String(addr.port)}`;
-      logger.info("config server started", { url });
+      logger.info("picker server started", { url });
       resolveHandle({ url, waitForSelection });
     });
 
     server.on("error", (err) => {
-      logger.error("config server error", { error: err.message });
+      logger.error("picker server error", { error: err.message });
       rejectHandle(err);
     });
 
-    // Timeout — shut down if user doesn't respond
     const timer = setTimeout(() => {
-      logger.warn("config server timed out");
+      logger.warn("picker server timed out");
       server.close();
       onError(
         new Error(
-          "Configuration timed out — no selection made within 2 minutes. " +
-            "Run the todo_config tool again to retry.",
+          "Selection timed out — no choice made within the time limit. Please try again.",
         ),
       );
     }, timeoutMs);
@@ -88,23 +97,26 @@ export function startConfigServer(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Request handling
+// ---------------------------------------------------------------------------
+
 function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  lists: TodoListOption[],
-  configDir: string,
+  config: PickerConfig,
   server: Server,
-  onSelected: (result: ConfigServerResult) => void,
+  onSelected: (result: PickerResult) => void,
 ): void {
   const url = req.url ?? "/";
 
   if (req.method === "GET" && url === "/") {
-    serveConfigPage(res, lists);
+    servePickerPage(res, config);
     return;
   }
 
   if (req.method === "POST" && url === "/select") {
-    handleSelection(req, res, lists, configDir, server, onSelected);
+    handleSelection(req, res, config, server, onSelected);
     return;
   }
 
@@ -112,14 +124,11 @@ function handleRequest(
   res.end("Not Found");
 }
 
-function serveConfigPage(
-  res: ServerResponse,
-  lists: TodoListOption[],
-): void {
-  const listItems = lists
+function servePickerPage(res: ServerResponse, config: PickerConfig): void {
+  const optionButtons = config.options
     .map(
-      (l) =>
-        `<button class="list-btn" data-id="${escapeHtml(l.id)}" data-name="${escapeHtml(l.displayName)}">${escapeHtml(l.displayName)}</button>`,
+      (opt) =>
+        `<button class="option-btn" data-id="${escapeHtml(opt.id)}" data-label="${escapeHtml(opt.label)}">${escapeHtml(opt.label)}</button>`,
     )
     .join("\n          ");
 
@@ -128,7 +137,7 @@ function serveConfigPage(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>graphdo — Configure Todo List</title>
+  <title>graphdo — ${escapeHtml(config.title)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -142,7 +151,7 @@ function serveConfigPage(
     .container { max-width: 480px; width: 100%; }
     h1 { font-size: 1.4rem; margin-bottom: 8px; }
     .subtitle { color: #666; margin-bottom: 24px; font-size: 0.95rem; }
-    .list-btn {
+    .option-btn {
       display: block;
       width: 100%;
       padding: 14px 18px;
@@ -155,9 +164,9 @@ function serveConfigPage(
       text-align: left;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .list-btn:hover { border-color: #0078d4; box-shadow: 0 2px 8px rgba(0,120,212,0.15); }
-    .list-btn:active { background: #f0f7ff; }
-    .list-btn.selected { border-color: #0078d4; background: #f0f7ff; pointer-events: none; }
+    .option-btn:hover { border-color: #0078d4; box-shadow: 0 2px 8px rgba(0,120,212,0.15); }
+    .option-btn:active { background: #f0f7ff; }
+    .option-btn.selected { border-color: #0078d4; background: #f0f7ff; pointer-events: none; }
     .done { text-align: center; padding: 32px 0; }
     .done h2 { color: #107c10; margin-bottom: 8px; }
     .done p { color: #666; }
@@ -168,34 +177,34 @@ function serveConfigPage(
 <body>
   <div class="container">
     <div id="picker">
-      <h1>Configure Todo List</h1>
-      <p class="subtitle">Select which Microsoft To Do list graphdo should use:</p>
-      ${listItems}
+      <h1>${escapeHtml(config.title)}</h1>
+      <p class="subtitle">${escapeHtml(config.subtitle)}</p>
+      ${optionButtons}
     </div>
     <div id="done" style="display:none" class="done">
-      <h2>&#10003; Configured</h2>
-      <p>Using list: <strong id="selected-name"></strong></p>
+      <h2>&#10003; Done</h2>
+      <p>Selected: <strong id="selected-label"></strong></p>
       <p style="margin-top: 24px;">You can switch back to your AI assistant now.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
   </div>
   <script>
-    document.querySelectorAll('.list-btn').forEach(btn => {
+    document.querySelectorAll('.option-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.id;
-        const name = btn.dataset.name;
+        const label = btn.dataset.label;
         btn.classList.add('selected');
-        document.querySelectorAll('.list-btn').forEach(b => { b.disabled = true; });
+        document.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
         try {
           const res = await fetch('/select', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ listId: id, listName: name }),
+            body: JSON.stringify({ id: id, label: label }),
           });
           if (!res.ok) throw new Error(await res.text());
           document.getElementById('picker').style.display = 'none';
-          document.getElementById('selected-name').textContent = name;
+          document.getElementById('selected-label').textContent = label;
           document.getElementById('done').style.display = 'block';
           let remaining = 5;
           const el = document.getElementById('countdown');
@@ -206,8 +215,8 @@ function serveConfigPage(
           }, 1000);
         } catch (err) {
           document.getElementById('error').style.display = 'block';
-          document.getElementById('error').textContent = 'Failed to save: ' + err.message;
-          document.querySelectorAll('.list-btn').forEach(b => { b.disabled = false; });
+          document.getElementById('error').textContent = 'Failed: ' + err.message;
+          document.querySelectorAll('.option-btn').forEach(b => { b.disabled = false; });
           btn.classList.remove('selected');
         }
       });
@@ -226,10 +235,9 @@ function serveConfigPage(
 function handleSelection(
   req: IncomingMessage,
   res: ServerResponse,
-  lists: TodoListOption[],
-  configDir: string,
+  config: PickerConfig,
   server: Server,
-  onSelected: (result: ConfigServerResult) => void,
+  onSelected: (result: PickerResult) => void,
 ): void {
   let body = "";
   req.on("data", (chunk: Buffer) => {
@@ -238,40 +246,31 @@ function handleSelection(
   req.on("end", () => {
     void (async () => {
       try {
-        const { listId } = JSON.parse(body) as {
-          listId: string;
-          listName: string;
-        };
+        const { id } = JSON.parse(body) as { id: string; label: string };
 
-        // Validate the selection is one of the offered lists
-        const match = lists.find((l) => l.id === listId);
+        // Validate the selection against offered options
+        const match = config.options.find((opt) => opt.id === id);
         if (!match) {
           res.writeHead(400, { "Content-Type": "text/plain" });
-          res.end("Invalid list selection");
+          res.end("Invalid selection");
           return;
         }
 
-        await saveConfig(
-          { todoListId: match.id, todoListName: match.displayName },
-          configDir,
-        );
+        await config.onSelect(match);
 
-        logger.info("todo list configured via browser", {
-          listId: match.id,
-          listName: match.displayName,
-        });
+        logger.info("picker selection made", { id: match.id, label: match.label });
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
 
-        // Shut down the server after a brief delay to let the response flush
+        // Shut down after a brief delay to let the response flush
         setTimeout(() => {
           server.close();
-          onSelected({ listId: match.id, listName: match.displayName });
+          onSelected({ selected: match });
         }, 100);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error("config selection failed", { error: message });
+        logger.error("picker selection failed", { error: message });
         res.writeHead(500, { "Content-Type": "text/plain" });
         res.end(`Error: ${message}`);
       }

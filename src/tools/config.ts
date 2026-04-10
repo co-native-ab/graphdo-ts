@@ -7,12 +7,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { AuthenticationRequiredError } from "../auth.js";
-import { openBrowser } from "../browser.js";
+import { saveConfig } from "../config.js";
 import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
-import { startConfigServer } from "./config-server.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
+import { startBrowserPicker } from "../picker.js";
 
 /** Register the todo_config tool on the given MCP server. */
 export function registerConfigTools(
@@ -50,13 +50,22 @@ export function registerConfigTools(
           };
         }
 
-        // Start local config server
-        const handle = await startConfigServer(lists, config.configDir);
+        const handle = await startBrowserPicker({
+          title: "Configure Todo List",
+          subtitle: "Select which Microsoft To Do list graphdo should use:",
+          options: lists.map((l) => ({ id: l.id, label: l.displayName })),
+          onSelect: async (option) => {
+            await saveConfig(
+              { todoListId: option.id, todoListName: option.label },
+              config.configDir,
+            );
+          },
+        });
 
         // Try to open the browser
         let browserOpened = false;
         try {
-          await openBrowser(handle.url);
+          await config.openBrowser(handle.url);
           browserOpened = true;
           logger.info("config browser opened", { url: handle.url });
         } catch (err: unknown) {
@@ -79,7 +88,7 @@ export function registerConfigTools(
           content: [
             {
               type: "text" as const,
-              text: `${instruction}\n\nTodo list configured: ${result.listName} (${result.listId})`,
+              text: `${instruction}\n\nTodo list configured: ${result.selected.label} (${result.selected.id})`,
             },
           ],
         };

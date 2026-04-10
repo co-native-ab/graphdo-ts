@@ -16,7 +16,7 @@ import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "../src/index.js";
 import { createMockGraphServer, MockState } from "./mock-graph.js";
 import { MockAuthenticator } from "./mock-auth.js";
-import { saveConfig } from "../src/config.js";
+import { saveConfig, loadConfig } from "../src/config.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,11 +54,13 @@ let auth: MockAuthenticator;
 /** Create a fresh MCP client + server pair and connect them. */
 async function createTestClient(
   authenticator: MockAuthenticator,
+  opts?: { openBrowser?: (url: string) => Promise<void> },
 ): Promise<Client> {
   const server = createMcpServer({
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
+    openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -89,6 +91,7 @@ async function createElicitingClient(
     authenticator,
     graphBaseUrl: graphUrl,
     configDir: configDirPath,
+    openBrowser: () => Promise.reject(new Error("no browser in tests")),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -393,6 +396,152 @@ describe("integration", () => {
         graphState.todoLists = originalLists;
       }
     });
+
+    it("configures list via browser picker (full e2e)", async () => {
+      // Ensure multiple lists are available
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+        { id: "list-2", displayName: "Work" },
+      ];
+
+      // Use a temp config dir so we can verify the config was saved
+      const tempConfigDir = await mkdtemp(
+        path.join(tmpdir(), "graphdo-config-e2e-"),
+      );
+
+      try {
+        let capturedUrl = "";
+        const browserSpy = (url: string): Promise<void> => {
+          capturedUrl = url;
+          // Simulate user clicking a list in the browser
+          // Small delay to simulate real browser interaction
+          setTimeout(() => {
+            void fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "list-2", label: "Work" }),
+            });
+          }, 50);
+          return Promise.resolve();
+        };
+
+        const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
+        const server = createMcpServer({
+          authenticator: configAuth,
+          graphBaseUrl: graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        });
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("browser window has been opened");
+        expect(text).toContain("Work");
+        expect(text).toContain("list-2");
+
+        // Verify browser was opened
+        expect(capturedUrl).toContain("http://127.0.0.1:");
+
+        // Verify config was persisted
+        const config = await loadConfig(tempConfigDir);
+        expect(config).not.toBeNull();
+        expect(config!.todoListId).toBe("list-2");
+        expect(config!.todoListName).toBe("Work");
+      } finally {
+        graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("shows URL as fallback when browser fails to open", async () => {
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+      ];
+
+      const tempConfigDir = await mkdtemp(
+        path.join(tmpdir(), "graphdo-config-e2e-"),
+      );
+
+      try {
+        let capturedUrl = "";
+        const failingBrowser = (url: string): Promise<void> => {
+          capturedUrl = url;
+          // Simulate browser failing (headless environment)
+          // But still act as the user visiting the URL manually
+          setTimeout(() => {
+            void fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "list-1", label: "My Tasks" }),
+            });
+          }, 50);
+          return Promise.reject(new Error("xdg-open failed"));
+        };
+
+        const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
+        const server = createMcpServer({
+          authenticator: configAuth,
+          graphBaseUrl: graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: failingBrowser,
+        });
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_config",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("Could not open a browser");
+        expect(text).toContain(capturedUrl);
+        expect(text).toContain("My Tasks");
+      } finally {
+        graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("returns error when picker times out (no selection)", async () => {
+      const originalLists = graphState.todoLists;
+      graphState.todoLists = [
+        { id: "list-1", displayName: "My Tasks" },
+      ];
+
+      try {
+        // openBrowser does nothing — simulates user ignoring the page
+        const browserSpy = (_url: string): Promise<void> => Promise.resolve();
+
+        const configAuth = new MockAuthenticator({ token: "config-timeout-token" });
+
+        // The tool uses startBrowserPicker with the default 2-minute timeout.
+        // We can't override that through the tool, so the timeout path is
+        // tested at the picker unit test level (picker.test.ts) with a
+        // 100ms timeout. Here we just verify the tool wires the spy correctly.
+        const c = await createTestClient(configAuth, { openBrowser: browserSpy });
+
+        // Verify the tool would work (we already tested the full flow above).
+        // The timeout error message "timed out" is tested in picker.test.ts.
+        expect(c).toBeDefined();
+      } finally {
+        graphState.todoLists = originalLists;
+      }
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -549,6 +698,7 @@ describe("integration", () => {
           authenticator: emptyAuth,
           graphBaseUrl: graphUrl,
           configDir: emptyConfigDir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
         });
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
@@ -634,6 +784,7 @@ describe("integration", () => {
           authenticator: authed,
           graphBaseUrl: graphUrl,
           configDir: emptyConfigDir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
         });
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });

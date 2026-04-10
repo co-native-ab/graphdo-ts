@@ -5,7 +5,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import type { Authenticator } from "./auth.js";
-import { MsalAuthenticator, StaticAuthenticator } from "./auth.js";
+import {
+  MsalAuthenticator,
+  StaticAuthenticator,
+} from "./auth.js";
+import { openBrowser } from "./browser.js";
 import { configDir } from "./config.js";
 import { logger, setLogLevel } from "./logger.js";
 import { registerLoginTools } from "./tools/login.js";
@@ -42,6 +46,8 @@ export interface ServerConfig {
   configDir: string;
   /** McpServer instance for elicitation and capability checks. */
   mcpServer: McpServer;
+  /** Opens a URL in the system browser. Injected for testability. */
+  openBrowser: (url: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +99,7 @@ async function main(): Promise<void> {
     authenticator,
     graphBaseUrl,
     configDir: cfgDir,
+    openBrowser,
   });
   const transport = new StdioServerTransport();
 
