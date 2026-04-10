@@ -217,6 +217,7 @@ export class MsalAuthenticator implements Authenticator {
 
     const result = await client.acquireTokenInteractive({
       scopes: this.scopes,
+      prompt: "select_account",
       loopbackClient: loopback,
       openBrowser: async (authUrl: string) => {
         loopback.setAuthUrl(authUrl);
