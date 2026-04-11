@@ -178,6 +178,38 @@ describe("browser picker", () => {
     await handle.waitForSelection;
   });
 
+  it("returns 413 when POST body exceeds size limit", async () => {
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handle = await startBrowserPicker({
+      title: "Test",
+      subtitle: "Test",
+      options: sampleOptions,
+      onSelect,
+      timeoutMs: 5000,
+    });
+
+    // Send a body larger than MAX_BODY_SIZE (1 MB)
+    const oversizedBody = "x".repeat(1_048_577);
+    const response = await fetch(`${handle.url}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: oversizedBody,
+    });
+    expect(response.status).toBe(413);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // Clean up - post a valid selection
+    await fetch(`${handle.url}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "opt-1", label: "Option A" }),
+    });
+    await handle.waitForSelection;
+  });
+
   it("returns 500 when onSelect throws", async () => {
     const onSelect = vi
       .fn<(opt: PickerOption) => Promise<void>>()
