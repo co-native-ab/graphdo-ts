@@ -375,8 +375,9 @@ async function showLogoutPage(
           })
           .catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
+            logger.error("logout confirm failed", { error: message });
             res.writeHead(500, { "Content-Type": "text/plain" });
-            res.end(message);
+            res.end("Failed to sign out. Please try again.");
             server.close();
             settle(() => reject(err instanceof Error ? err : new Error(message)));
           });

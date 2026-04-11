@@ -36,7 +36,7 @@ export const complementary = {
   sandstone: { base: "#dac48a", light: "#F8F2E6" },
   teal: { base: "#AABDB5", light: "#dae2df" },
   cobalt: { base: "#5271AC", light: "#DCE2EE" },
-  peach: { base: "#F9AA8F", light: "#FDE4DC" },
+  peach: { base: "#F9AA8F", hover: "#e8926e", light: "#FDE4DC" },
 } as const;
 
 // ---------------------------------------------------------------------------

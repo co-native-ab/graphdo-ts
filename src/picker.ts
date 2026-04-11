@@ -118,7 +118,7 @@ function handleRequest(
   config: PickerConfig,
   server: Server,
   onSelected: (result: PickerResult) => void,
-  onCancelled: (err: Error) => void,
+  onError: (err: Error) => void,
 ): void {
   const url = req.url ?? "/";
 
@@ -138,7 +138,7 @@ function handleRequest(
     setTimeout(() => {
       server.close();
     }, 100);
-    onCancelled(new UserCancelledError("Selection cancelled by user"));
+    onError(new UserCancelledError("Selection cancelled by user"));
     return;
   }
 

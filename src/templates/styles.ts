@@ -172,7 +172,7 @@ export const LOGOUT_CONFIRM_STYLE = `
       font-weight: ${fontWeight.semibold};
       transition: background 0.15s;
     }
-    .sign-out-btn:hover { background: #e8926e; }
+    .sign-out-btn:hover { background: ${complementary.peach.hover}; }
     .sign-out-btn:disabled { opacity: 0.6; cursor: not-allowed; }`;
 
 // ---------------------------------------------------------------------------
