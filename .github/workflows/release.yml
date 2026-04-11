@@ -5,14 +5,22 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -29,10 +37,12 @@ jobs:
       - name: Build
         run: npm run build
       - name: Create MCPB bundle
-        run: npx @anthropic-ai/mcpb@latest pack . "graphdo-ts-${{ github.ref_name }}.mcpb"
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: npx @anthropic-ai/mcpb@latest pack . "graphdo-ts-${TAG_NAME}.mcpb"
       - name: Generate checksums
         run: sha256sum graphdo-ts-*.mcpb > checksums-sha256.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
