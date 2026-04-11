@@ -6,7 +6,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { AuthenticationRequiredError } from "../auth.js";
+import { AuthenticationRequiredError } from "../errors.js";
 import { saveConfig } from "../config.js";
 import { GraphClient } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";

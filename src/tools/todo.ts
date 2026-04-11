@@ -3,7 +3,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { AuthenticationRequiredError } from "../auth.js";
+import { AuthenticationRequiredError } from "../errors.js";
 import { GraphClient } from "../graph/client.js";
 import {
   listTodos,

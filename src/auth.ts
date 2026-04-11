@@ -10,16 +10,9 @@ import path from "node:path";
 import * as msal from "@azure/msal-node";
 import { z } from "zod";
 
+import { AuthenticationRequiredError, isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function isNodeError(err: unknown): err is NodeJS.ErrnoException {
-  return err instanceof Error && "code" in err;
-}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -423,13 +416,4 @@ export class StaticAuthenticator implements Authenticator {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
-export class AuthenticationRequiredError extends Error {
-  constructor() {
-    super("Not logged in - use the login tool to authenticate with Microsoft");
-    this.name = "AuthenticationRequiredError";
-  }
-}

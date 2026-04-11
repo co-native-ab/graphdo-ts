@@ -1,7 +1,7 @@
 // Mock authenticator for testing - controllable authentication state.
 
 import type { Authenticator, LoginResult, AccountInfo } from "../src/auth.js";
-import { AuthenticationRequiredError } from "../src/auth.js";
+import { AuthenticationRequiredError } from "../src/errors.js";
 
 /**
  * A mock authenticator that can be controlled from tests.
