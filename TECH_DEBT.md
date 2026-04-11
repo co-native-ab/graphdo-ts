@@ -19,17 +19,17 @@
 | 9 | [`tools/todo.ts` is oversized at 758 lines](#9-toolstodots-is-oversized-at-758-lines) | P2 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #6) |
 | 10 | [Inline HTML templates mixed with server logic](#10-inline-html-templates-mixed-with-server-logic) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #6) |
 | 11 | [Graph API response types use `string` for enums](#11-graph-api-response-types-use-string-for-enums) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety | ✅ Resolved (PR #6) |
-| 12 | [Node.js version inconsistency across configs](#12-nodejs-version-inconsistency-across-configs) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ⬜ Remaining |
-| 13 | [No automated dependency update configuration](#13-no-automated-dependency-update-configuration) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ⬜ Remaining |
-| 14 | [No `CONTRIBUTING.md` or `CHANGELOG.md`](#14-no-contributingmd-or-changelogmd) | P3 | S | 🟢 Low | 🟢 Low | Documentation | ⬜ Remaining |
+| 12 | [Node.js version inconsistency across configs](#12-nodejs-version-inconsistency-across-configs) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 13 | [No automated dependency update configuration](#13-no-automated-dependency-update-configuration) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 14 | [No `CONTRIBUTING.md` or `CHANGELOG.md`](#14-no-contributingmd-or-changelogmd) | P3 | S | 🟢 Low | 🟢 Low | Documentation | ✅ Resolved (PR #7) |
 | 15 | [GraphClient created per tool call — no reuse](#15-graphclient-created-per-tool-call--no-reuse) | P3 | M | 🟢 Low | 🟢 Low | Performance | ✅ Resolved (PR #6) |
-| 16 | [No body size limit in picker `handleSelection`](#16-no-body-size-limit-in-picker-handleselection) | P1 | S | 🟡 Medium | 🟡 Medium | Security | ⬜ Remaining |
-| 17 | [No `engines` field in `package.json`](#17-no-engines-field-in-packagejson) | P2 | S | 🟢 Low | 🟢 Low | Dependency Mgmt | ⬜ Remaining |
-| 18 | [`loadConfig` JSON parse lacks runtime validation](#18-loadconfig-json-parse-lacks-runtime-validation) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety | ⬜ Remaining |
-| 19 | [No test coverage reporting in CI](#19-no-test-coverage-reporting-in-ci) | P2 | S | 🟡 Medium | 🟢 Low | Test Coverage | ⬜ Remaining |
-| 20 | [No `$filter`/`$orderby` support for todo listing](#20-no-filterorderby-support-for-todo-listing) | P3 | M | 🟢 Low | 🟢 Low | Feature Gap | ⬜ Remaining |
-| 21 | [eslint-disable for non-null assertion in loopback.ts](#21-eslint-disable-for-non-null-assertion-in-loopbackts) | P3 | S | 🟢 Low | 🟢 Low | Code Quality | ⬜ Remaining |
-| 22 | [Integration test file is 1,249 lines](#22-integration-test-file-is-1249-lines) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability | ⬜ Remaining |
+| 16 | [No body size limit in picker `handleSelection`](#16-no-body-size-limit-in-picker-handleselection) | P1 | S | 🟡 Medium | 🟡 Medium | Security | ✅ Resolved (PR #7) |
+| 17 | [No `engines` field in `package.json`](#17-no-engines-field-in-packagejson) | P2 | S | 🟢 Low | 🟢 Low | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 18 | [`loadConfig` JSON parse lacks runtime validation](#18-loadconfig-json-parse-lacks-runtime-validation) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety | ✅ Resolved (PR #7) |
+| 19 | [No test coverage reporting in CI](#19-no-test-coverage-reporting-in-ci) | P2 | S | 🟡 Medium | 🟢 Low | Test Coverage | ✅ Resolved (PR #7) |
+| 20 | [No `$filter`/`$orderby` support for todo listing](#20-no-filterorderby-support-for-todo-listing) | P3 | M | 🟢 Low | 🟢 Low | Feature Gap | ✅ Resolved (PR #7) |
+| 21 | [eslint-disable for non-null assertion in loopback.ts](#21-eslint-disable-for-non-null-assertion-in-loopbackts) | P3 | S | 🟢 Low | 🟢 Low | Code Quality | ✅ Resolved (PR #7) |
+| 22 | [Integration test file is 1,249 lines](#22-integration-test-file-is-1249-lines) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #7) |
 
 ---
 
