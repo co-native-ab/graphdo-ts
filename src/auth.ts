@@ -10,7 +10,7 @@ import path from "node:path";
 import * as msal from "@azure/msal-node";
 import { z } from "zod";
 
-import { AuthenticationRequiredError, isNodeError } from "./errors.js";
+import { AuthenticationRequiredError, isNodeError, UserCancelledError } from "./errors.js";
 import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
 import { logoutPageHtml } from "./templates/logout.js";
@@ -26,6 +26,9 @@ const ACCOUNT_FILE_NAME = "account.json";
 
 /** Timeout for the browser login flow (user must complete OAuth within this). */
 const LOGIN_TIMEOUT_MS = 120_000; // 2 minutes
+
+/** Timeout for the logout confirmation page. */
+const LOGOUT_TIMEOUT_MS = 120_000; // 2 minutes
 
 // ---------------------------------------------------------------------------
 // Authenticator interface
@@ -277,6 +280,19 @@ export class MsalAuthenticator implements Authenticator {
   }
 
   async logout(): Promise<void> {
+    try {
+      await showLogoutPage(this.openBrowser, () => this.clearCacheFiles());
+    } catch (err: unknown) {
+      if (err instanceof UserCancelledError) throw err;
+      // Browser unavailable or timed out — clear tokens silently
+      logger.warn("could not show logout confirmation page, clearing tokens silently", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.clearCacheFiles();
+    }
+  }
+
+  private async clearCacheFiles(): Promise<void> {
     const files = [
       path.join(this.configDir, CACHE_FILE_NAME),
       path.join(this.configDir, ACCOUNT_FILE_NAME),
@@ -295,15 +311,6 @@ export class MsalAuthenticator implements Authenticator {
     }
 
     logger.info("logged out, token cache cleared");
-
-    // Show a logout confirmation page in the browser
-    try {
-      await showLogoutPage(this.openBrowser);
-    } catch (err: unknown) {
-      logger.warn("could not show logout confirmation page", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   }
 
   async isAuthenticated(): Promise<boolean> {
@@ -327,51 +334,103 @@ export class MsalAuthenticator implements Authenticator {
 // ---------------------------------------------------------------------------
 
 /**
- * Show a logout confirmation page in the browser.
- * Starts a temporary local server, serves the page, then shuts down.
+ * Show an interactive logout confirmation page in the browser.
+ * The page has "Sign Out" and "Cancel" buttons. Token clearing only happens
+ * when the user confirms. Resolves on confirm, rejects with UserCancelledError
+ * on cancel, rejects with Error if browser cannot be opened.
  */
 async function showLogoutPage(
   openBrowser: (url: string) => Promise<void>,
+  onConfirm: () => Promise<void>,
 ): Promise<void> {
   const html = logoutPageHtml();
 
-  const server = createServer((_req, res) => {
-    res.writeHead(200, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-    });
-    res.end(html);
-    // Shut down after the response is fully sent
-    res.on("finish", () => {
-      setTimeout(() => {
-        server.close();
-      }, 100);
-    });
-  });
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
 
-  await new Promise<void>((resolve, reject) => {
+    const server = createServer((req, res) => {
+      const url = req.url ?? "/";
+
+      if (req.method === "GET" && url === "/") {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(html);
+        return;
+      }
+
+      if (req.method === "POST" && url === "/confirm") {
+        onConfirm()
+          .then(() => {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+            setTimeout(() => server.close(), 100);
+            settle(() => resolve());
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            res.writeHead(500, { "Content-Type": "text/plain" });
+            res.end(message);
+            server.close();
+            settle(() => reject(err instanceof Error ? err : new Error(message)));
+          });
+        return;
+      }
+
+      if (req.method === "POST" && url === "/cancel") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        setTimeout(() => server.close(), 100);
+        settle(() => reject(new UserCancelledError("Logout cancelled by user")));
+        return;
+      }
+
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+    });
+
+    const timer = setTimeout(() => {
+      logger.warn("logout confirmation page timed out");
+      server.close();
+      settle(() => reject(new Error("Logout confirmation timed out")));
+    }, LOGOUT_TIMEOUT_MS);
+
+    server.on("close", () => {
+      clearTimeout(timer);
+    });
+
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         server.close();
-        reject(new Error("Server bound to unexpected address type (expected port number)"));
+        settle(() =>
+          reject(
+            new Error(
+              "Server bound to unexpected address type (expected port number)",
+            ),
+          ),
+        );
         return;
       }
       const url = `http://127.0.0.1:${String(addr.port)}`;
       logger.debug("logout page server started", { url });
 
-      openBrowser(url)
-        .then(() => {
-          resolve();
-        })
-        .catch((err: unknown) => {
-          server.close();
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
+      openBrowser(url).catch((err: unknown) => {
+        server.close();
+        settle(() =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        );
+      });
     });
 
     server.on("error", (err) => {
-      reject(err);
+      settle(() => reject(err));
     });
   });
 }

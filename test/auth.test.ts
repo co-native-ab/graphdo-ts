@@ -10,7 +10,7 @@ import {
   StaticAuthenticator,
   MsalAuthenticator,
 } from "../src/auth.js";
-import { AuthenticationRequiredError } from "../src/errors.js";
+import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
 
 // ---------------------------------------------------------------------------
 // vi.mock must be at the top level (hoisted by vitest)
@@ -291,14 +291,59 @@ describe("MsalAuthenticator.token", () => {
 // MsalAuthenticator — logout
 // =========================================================================
 
+/** Helper: openBrowser mock that auto-POSTs to a given path after a short delay. */
+function makeBrowserSpy(
+  path: string,
+): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
+  return vi.fn((url: string) => {
+    setTimeout(() => {
+      void fetch(`${url}${path}`, { method: "POST" }).catch(() => { /* fire and forget */ });
+    }, 30);
+    return Promise.resolve();
+  });
+}
+
 describe("MsalAuthenticator.logout", () => {
-  it("deletes msal_cache.json and account.json", async () => {
+  it("clears cache files when user confirms", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
     await fs.writeFile(path.join(dir, "account.json"), "{}");
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await auth.logout();
+
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
+    await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
+  });
+
+  it("throws UserCancelledError when user cancels", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+
+    const openBrowser = makeBrowserSpy("/cancel");
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await expect(auth.logout()).rejects.toThrow(UserCancelledError);
+
+    // Files should NOT be deleted when cancelled
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dir, "account.json"))).resolves.toBeUndefined();
+  });
+
+  it("clears tokens silently when browser cannot be opened", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockRejectedValue(
+      new Error("no browser available"),
+    );
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await auth.logout();
@@ -312,19 +357,19 @@ describe("MsalAuthenticator.logout", () => {
     await fs.mkdir(dir, { recursive: true });
     // No cache files exist
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await expect(auth.logout()).resolves.toBeUndefined();
   });
 
-  it("still deletes the remaining file when only one cache file exists", async () => {
+  it("still clears the remaining file when only one cache file exists", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "account.json"), "{}");
     // msal_cache.json does NOT exist
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await auth.logout();

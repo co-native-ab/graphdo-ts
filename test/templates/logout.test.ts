@@ -1,4 +1,4 @@
-// Tests for logout page template — structure, tokens, countdown, favicon.
+// Tests for logout page template — structure, tokens, buttons, favicon.
 
 import { describe, it, expect } from "vitest";
 import { logoutPageHtml } from "../../src/templates/logout.js";
@@ -19,7 +19,7 @@ describe("logout template", () => {
     });
 
     it("has correct title", () => {
-      expect(html).toContain("<title>graphdo - Signed Out</title>");
+      expect(html).toContain("<title>graphdo - Sign Out</title>");
     });
 
     it("includes Google Fonts link for Lexend", () => {
@@ -27,20 +27,47 @@ describe("logout template", () => {
       expect(html).toContain("Lexend");
     });
 
-    it("shows signed out message", () => {
+    it("shows confirmation prompt before sign-out", () => {
+      expect(html).toContain("Sign out?");
+    });
+
+    it("has a Sign Out confirm button", () => {
+      expect(html).toContain('id="sign-out-btn"');
+      expect(html).toContain("Sign Out");
+    });
+
+    it("has a Cancel button", () => {
+      expect(html).toContain('id="cancel-btn"');
+      expect(html).toContain("Cancel");
+    });
+
+    it("has a done-view with signed-out success message (hidden initially)", () => {
+      expect(html).toContain('id="done-view"');
       expect(html).toContain("Signed out successfully");
     });
 
-    it("mentions token clearing", () => {
+    it("mentions token clearing in the done-view", () => {
       expect(html).toContain("cached tokens have been cleared");
     });
 
-    it("has countdown script", () => {
+    it("confirm button POSTs to /confirm", () => {
+      expect(html).toContain("fetch('/confirm'");
+    });
+
+    it("cancel button POSTs to /cancel", () => {
+      expect(html).toContain("fetch('/cancel'");
+    });
+
+    it("has countdown script in done view", () => {
       expect(html).toContain("countdown");
       expect(html).toContain("setInterval");
     });
 
-    it("includes teal for success color", () => {
+    it("uses peach color for sign-out button (destructive action)", () => {
+      expect(html).toContain(complementary.peach.base);
+    });
+
+    it("includes teal for success color in done view", () => {
       expect(html).toContain(complementary.teal.base);
     });
 
@@ -51,10 +78,6 @@ describe("logout template", () => {
 
     it("includes page icon in body", () => {
       expect(html).toContain('class="page-icon"');
-    });
-
-    it("includes checkmark", () => {
-      expect(html).toContain('class="checkmark"');
     });
 
     it("includes manual close fallback", () => {

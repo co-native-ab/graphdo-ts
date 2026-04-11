@@ -8,3 +8,10 @@ export class AuthenticationRequiredError extends Error {
     this.name = "AuthenticationRequiredError";
   }
 }
+
+export class UserCancelledError extends Error {
+  constructor(message = "Cancelled by user") {
+    super(message);
+    this.name = "UserCancelledError";
+  }
+}

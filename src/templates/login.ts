@@ -16,10 +16,18 @@ export function landingPageHtml(authUrl: string): string {
       <div class="logo">graphdo</div>
       <h1>Sign in to continue</h1>
       <p class="subtitle">Connect your Microsoft account to enable email and task management through your AI assistant.</p>
-      <a href="${safeAuthUrl}" class="sign-in-btn">Sign in with Microsoft</a>
+      <div class="btn-group">
+        <a href="${safeAuthUrl}" class="sign-in-btn">Sign in with Microsoft</a>
+        <button id="cancel-btn" class="cancel-btn">Cancel</button>
+      </div>
     </div>
     <p class="footer">Your credentials are handled directly by Microsoft. graphdo never sees your password.</p>
   </div>`,
+    script: `    document.getElementById('cancel-btn').addEventListener('click', async () => {
+      document.getElementById('cancel-btn').disabled = true;
+      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      window.close();
+    });`,
   });
 }
 

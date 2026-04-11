@@ -241,4 +241,51 @@ describe("browser picker", () => {
     });
     await handle.waitForSelection;
   });
+
+  it("rejects waitForSelection with UserCancelledError when /cancel is posted", async () => {
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handle = await startBrowserPicker({
+      title: "Test",
+      subtitle: "Test",
+      options: sampleOptions,
+      onSelect,
+      timeoutMs: 5000,
+    });
+
+    const [response] = await Promise.all([
+      fetch(`${handle.url}/cancel`, { method: "POST" }),
+      expect(handle.waitForSelection).rejects.toThrow("Selection cancelled by user"),
+    ]);
+    expect(response.status).toBe(200);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("picker page includes a Cancel button", async () => {
+    const onSelect = vi
+      .fn<(opt: PickerOption) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handle = await startBrowserPicker({
+      title: "Choose a list",
+      subtitle: "Select one:",
+      options: sampleOptions,
+      onSelect,
+      timeoutMs: 5000,
+    });
+
+    // Attach cleanup handler before any requests to avoid unhandled rejection
+    const cleanup = handle.waitForSelection.catch(() => { /* expected rejection */ });
+    try {
+      const response = await fetch(handle.url);
+      const html = await response.text();
+      expect(html).toContain('id="cancel-btn"');
+      expect(html).toContain("Cancel");
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => { /* ignore */ });
+      await cleanup;
+    }
+  });
 });

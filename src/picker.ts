@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
 import { logger } from "./logger.js";
+import { UserCancelledError } from "./errors.js";
 import { pickerPageHtml } from "./templates/picker.js";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ export function startBrowserPicker(
     });
 
     const server = createServer((req, res) => {
-      handleRequest(req, res, config, server, onSelected);
+      handleRequest(req, res, config, server, onSelected, onError);
     });
 
     server.listen(0, "127.0.0.1", () => {
@@ -117,6 +118,7 @@ function handleRequest(
   config: PickerConfig,
   server: Server,
   onSelected: (result: PickerResult) => void,
+  onCancelled: (err: Error) => void,
 ): void {
   const url = req.url ?? "/";
 
@@ -127,6 +129,16 @@ function handleRequest(
 
   if (req.method === "POST" && url === "/select") {
     handleSelection(req, res, config, server, onSelected);
+    return;
+  }
+
+  if (req.method === "POST" && url === "/cancel") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    setTimeout(() => {
+      server.close();
+    }, 100);
+    onCancelled(new UserCancelledError("Selection cancelled by user"));
     return;
   }
 

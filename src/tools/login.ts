@@ -6,6 +6,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
+import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { formatError } from "./shared.js";
@@ -59,6 +60,11 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
+        if (error instanceof UserCancelledError) {
+          return {
+            content: [{ type: "text", text: "Login cancelled." }],
+          };
+        }
         return formatError("login", error, {
           prefix: "Login failed: ",
           suffix: "\n\nYou can call this tool again if the user would like to retry.",
@@ -95,6 +101,11 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
+        if (error instanceof UserCancelledError) {
+          return {
+            content: [{ type: "text", text: "Logout cancelled." }],
+          };
+        }
         return formatError("logout", error, { prefix: "Logout failed: " });
       }
     },
