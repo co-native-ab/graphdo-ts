@@ -47,7 +47,7 @@ Each capability is scoped as narrowly as possible beyond what the permission mod
 
 Operations that change the agent's access scope require human interaction via the browser, ensuring the AI agent cannot perform them programmatically:
 
-- **Login**: the `login` tool opens a browser for interactive MSAL authentication (or falls back to device code flow where the user manually enters a code at `microsoft.com/devicelogin`). The agent cannot authenticate without a human completing the sign-in.
+- **Login**: the `login` tool opens a browser for interactive MSAL authentication. The agent cannot authenticate without a human completing the sign-in.
 - **List selection**: the `todo_config` tool starts a local HTTP server and opens a browser picker where the user clicks the list to use. The agent cannot programmatically change which list it operates on — the picker is served as an HTML page that requires a human click.
 
 ### 4. Minimal Permissions
