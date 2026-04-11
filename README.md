@@ -174,6 +174,12 @@ MCP Server (StdioServerTransport)
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR process.
+
+---
+
 ## License
 
 MIT
