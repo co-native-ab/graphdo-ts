@@ -6,7 +6,7 @@ import type { ServerConfig } from "../index.js";
 import { z } from "zod";
 import { VERSION } from "../index.js";
 import { loadConfig } from "../config.js";
-import { logger } from "../logger.js";
+import { formatError } from "./shared.js";
 
 /** Register the auth_status tool on the given MCP server. */
 export function registerStatusTool(
@@ -61,17 +61,9 @@ export function registerStatusTool(
           content: [{ type: "text", text: lines.join("\n") }],
         };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error("status check failed", { error: message });
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Status check failed: ${message}`,
-            },
-          ],
-          isError: true,
-        };
+        return formatError("status check", error, {
+          prefix: "Status check failed: ",
+        });
       }
     },
   );

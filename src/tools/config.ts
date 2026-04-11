@@ -6,14 +6,13 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { AuthenticationRequiredError } from "../errors.js";
 import { saveConfig } from "../config.js";
-import { GraphClient } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
 import type { ServerConfig } from "../index.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
+import { createAuthenticatedClient, formatError } from "./shared.js";
 
 /** Register the todo_config tool on the given MCP server. */
 export function registerConfigTools(
@@ -38,8 +37,7 @@ export function registerConfigTools(
     },
     async () => {
       try {
-        const token = await config.authenticator.token();
-        const client = new GraphClient(config.graphBaseUrl, token);
+        const client = await createAuthenticatedClient(config);
         const lists = await listTodoLists(client);
 
         if (lists.length === 0) {
@@ -96,28 +94,15 @@ export function registerConfigTools(
           ],
         };
       } catch (err: unknown) {
-        if (err instanceof AuthenticationRequiredError) {
-          return {
-            content: [{ type: "text", text: err.message }],
-            isError: true,
-          };
-        }
-        const message =
-          err instanceof Error
-            ? err.message
-            : String(err);
-        logger.error("todo_config failed", { error: message });
-
-        const isTimeout = message.toLowerCase().includes("timed out");
+        const isTimeout =
+          err instanceof Error &&
+          err.message.toLowerCase().includes("timed out");
         const retryHint = isTimeout
           ? "\n\nThe user did not make a selection in time. " +
             "You can call this tool again if the user would like to retry."
           : "\n\nYou can call this tool again if the user would like to retry.";
 
-        return {
-          content: [{ type: "text", text: message + retryHint }],
-          isError: true,
-        };
+        return formatError("todo_config", err, { suffix: retryHint });
       }
     },
   );

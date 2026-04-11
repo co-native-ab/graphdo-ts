@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServerConfig } from "../index.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
+import { formatError } from "./shared.js";
 
 /** Check whether the connected client supports form-based elicitation. */
 function clientSupportsElicitation(config: ServerConfig): boolean {
@@ -143,19 +144,10 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error("login failed", { error: message });
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `Login failed: ${message}\n\n` +
-                "You can call this tool again if the user would like to retry.",
-            },
-          ],
-          isError: true,
-        };
+        return formatError("login", error, {
+          prefix: "Login failed: ",
+          suffix: "\n\nYou can call this tool again if the user would like to retry.",
+        });
       }
     },
   );
@@ -188,14 +180,7 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error("logout failed", { error: message });
-        return {
-          content: [
-            { type: "text", text: `Logout failed: ${message}` },
-          ],
-          isError: true,
-        };
+        return formatError("logout", error, { prefix: "Logout failed: " });
       }
     },
   );
