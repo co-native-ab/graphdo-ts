@@ -33,6 +33,7 @@ export interface ToolResult {
 }
 
 /** Elicitation response handler - returns the configured result. */
+/** Handler that produces an elicitation response for testing MCP clients with form-based elicitation support. */
 export type ElicitHandler = (params: {
   message: string;
   requestedSchema?: unknown;
