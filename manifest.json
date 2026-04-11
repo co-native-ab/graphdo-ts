@@ -23,7 +23,11 @@
     "mcp_config": {
       "command": "node",
       "args": ["${__dirname}/dist/index.js"],
-      "env": {}
+      "env": {
+        "GRAPHDO_DEBUG": "${user_config.debug}",
+        "GRAPHDO_CLIENT_ID": "${user_config.client_id}",
+        "GRAPHDO_TENANT_ID": "${user_config.tenant_id}"
+      }
     }
   },
   "tools": [
@@ -102,6 +106,29 @@
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
       "node": ">=22.0.0"
+    }
+  },
+  "user_config": {
+    "debug": {
+      "type": "boolean",
+      "title": "Debug Logging",
+      "description": "Enable verbose debug logging to stderr. Useful for troubleshooting authentication and API issues.",
+      "default": false,
+      "required": false
+    },
+    "client_id": {
+      "type": "string",
+      "title": "Client ID",
+      "description": "Azure AD (Entra ID) application client ID for authentication. Uses the default graphdo app registration if not set.",
+      "default": "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd",
+      "required": false
+    },
+    "tenant_id": {
+      "type": "string",
+      "title": "Tenant ID",
+      "description": "Azure AD (Entra ID) tenant ID. Use 'common' for any Microsoft account, 'organizations' for work/school only, 'consumers' for personal only, or a specific tenant GUID.",
+      "default": "common",
+      "required": false
     }
   }
 }

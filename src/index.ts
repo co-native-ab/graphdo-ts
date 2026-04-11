@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import type { Authenticator } from "./auth.js";
-import { MsalAuthenticator, StaticAuthenticator } from "./auth.js";
+import { MsalAuthenticator, StaticAuthenticator, DEFAULT_TENANT_ID } from "./auth.js";
 import { openBrowser } from "./browser.js";
 import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
@@ -111,9 +111,11 @@ async function main(): Promise<void> {
 
   // Use static token if provided, otherwise MSAL (browser-only)
   const staticToken = process.env["GRAPHDO_ACCESS_TOKEN"];
+  const clientId = process.env["GRAPHDO_CLIENT_ID"] ?? CLIENT_ID;
+  const tenantId = process.env["GRAPHDO_TENANT_ID"] ?? DEFAULT_TENANT_ID;
   const authenticator: Authenticator = staticToken
     ? new StaticAuthenticator(staticToken)
-    : new MsalAuthenticator(CLIENT_ID, cfgDir, [...SCOPES], openBrowser);
+    : new MsalAuthenticator(clientId, tenantId, cfgDir, [...SCOPES], openBrowser);
 
   const graphBaseUrl =
     process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";

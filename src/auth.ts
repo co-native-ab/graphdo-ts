@@ -19,7 +19,10 @@ import { logoutPageHtml } from "./templates/logout.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-const AUTHORITY_URL = "https://login.microsoftonline.com/common";
+const AUTHORITY_BASE = "https://login.microsoftonline.com";
+
+/** Default tenant: "common" allows any Microsoft account (personal + work/school). */
+export const DEFAULT_TENANT_ID = "common";
 
 const CACHE_FILE_NAME = "msal_cache.json";
 const ACCOUNT_FILE_NAME = "account.json";
@@ -170,17 +173,20 @@ async function loadAccount(
  */
 export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
+  private readonly tenantId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
   private readonly openBrowser: (url: string) => Promise<void>;
 
   constructor(
     clientId: string,
+    tenantId: string,
     configDir: string,
     scopes: string[],
     openBrowser: (url: string) => Promise<void>,
   ) {
     this.clientId = clientId;
+    this.tenantId = tenantId;
     this.configDir = configDir;
     this.scopes = scopes;
     this.openBrowser = openBrowser;
@@ -190,7 +196,7 @@ export class MsalAuthenticator implements Authenticator {
     return new msal.PublicClientApplication({
       auth: {
         clientId: this.clientId,
-        authority: AUTHORITY_URL,
+        authority: `${AUTHORITY_BASE}/${this.tenantId}`,
       },
       cache: {
         cachePlugin: createFileCachePlugin(this.configDir),
