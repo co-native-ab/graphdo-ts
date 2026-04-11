@@ -21,6 +21,9 @@
   ],
   "author": "co-native-ab",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "@azure/msal-node": "^5.1.2",
     "@modelcontextprotocol/sdk": "^1.29.0",

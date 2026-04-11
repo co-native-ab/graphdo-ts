@@ -115,7 +115,7 @@ For work or school accounts, your IT administrator may need to grant admin conse
 
 ### Prerequisites
 
-- Node.js 24+
+- Node.js 22+
 
 ### Setup
 
