@@ -13,7 +13,7 @@ export function parseRecurrence(
 ): PatternedRecurrence {
   const todayParts = new Date().toISOString().split("T");
   const today = todayParts[0] ?? new Date().toISOString().slice(0, 10);
-  const range = { type: "noEnd" as RecurrenceRangeType, startDate: today };
+  const range: { type: RecurrenceRangeType; startDate: string } = { type: "noEnd", startDate: today };
 
   switch (repeat) {
     case "daily":
