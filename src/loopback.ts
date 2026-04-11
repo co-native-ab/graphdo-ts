@@ -200,8 +200,12 @@ function serveLandingPage(
     return;
   }
 
-  // Escape & for use in HTML href attribute
-  const safeAuthUrl = authUrl.replace(/&/g, "&amp;");
+  // Security: full HTML attribute escaping to prevent breaking out of href=""
+  const safeAuthUrl = authUrl
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 
   const html = `<!DOCTYPE html>
 <html lang="en">

@@ -80,13 +80,6 @@ export interface GraphListResponse<T> {
   value: T[];
 }
 
-/** Structured error from the Microsoft Graph API. */
-export interface GraphAPIError {
-  code: string;
-  message: string;
-  statusCode: number;
-}
-
 /** Graph API error response envelope. */
 export interface GraphErrorEnvelope {
   error: {

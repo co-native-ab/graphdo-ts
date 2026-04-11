@@ -13,6 +13,14 @@ import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function isNodeError(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && "code" in err;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -77,11 +85,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
         context.tokenCache.deserialize(data);
         logger.debug("loaded token cache", { path: cachePath });
       } catch (err: unknown) {
-        if (
-          err instanceof Error &&
-          "code" in err &&
-          (err as NodeJS.ErrnoException).code === "ENOENT"
-        ) {
+        if (isNodeError(err) && err.code === "ENOENT") {
           logger.debug("token cache file not found, starting fresh", {
             path: cachePath,
           });
@@ -140,11 +144,7 @@ async function loadAccount(
     });
     return account;
   } catch (err: unknown) {
-    if (
-      err instanceof Error &&
-      "code" in err &&
-      (err as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
+    if (isNodeError(err) && err.code === "ENOENT") {
       logger.debug("account file not found", { path: accountPath });
       return undefined;
     }
@@ -348,11 +348,7 @@ export class MsalAuthenticator implements Authenticator {
         await fs.unlink(f);
         logger.debug("removed cache file", { path: f });
       } catch (err: unknown) {
-        if (
-          err instanceof Error &&
-          "code" in err &&
-          (err as NodeJS.ErrnoException).code === "ENOENT"
-        ) {
+        if (isNodeError(err) && err.code === "ENOENT") {
           continue;
         }
         throw err;

@@ -3,6 +3,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
+import { z } from "zod";
 import { VERSION } from "../index.js";
 import { loadConfig } from "../config.js";
 import { logger } from "../logger.js";
@@ -19,7 +20,7 @@ export function registerStatusTool(
         "Check current authentication status, logged-in user, configured todo list, " +
         "and server version. A good first tool to call when diagnosing issues or " +
         "understanding what is set up.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Authentication Status",
         readOnlyHint: true,
@@ -57,7 +58,7 @@ export function registerStatusTool(
         }
 
         return {
-          content: [{ type: "text" as const, text: lines.join("\n") }],
+          content: [{ type: "text", text: lines.join("\n") }],
         };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -65,7 +66,7 @@ export function registerStatusTool(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: `Status check failed: ${message}`,
             },
           ],

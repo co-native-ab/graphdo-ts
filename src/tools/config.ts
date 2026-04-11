@@ -8,9 +8,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { AuthenticationRequiredError } from "../auth.js";
 import { saveConfig } from "../config.js";
-import { GraphClient, GraphRequestError } from "../graph/client.js";
+import { GraphClient } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
 import type { ServerConfig } from "../index.js";
+import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
 
@@ -28,7 +29,7 @@ export function registerConfigTools(
         "they want, this tool opens a browser picker where the user makes the " +
         "selection themselves. This is a human-only action - the AI agent cannot " +
         "choose the list programmatically.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Configure Todo List",
         readOnlyHint: false,
@@ -45,7 +46,7 @@ export function registerConfigTools(
           return {
             content: [
               {
-                type: "text" as const,
+                type: "text",
                 text: "No todo lists found in your Microsoft account.",
               },
             ],
@@ -89,7 +90,7 @@ export function registerConfigTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: `${instruction}\n\nTodo list configured: ${result.selected.label} (${result.selected.id})`,
             },
           ],
@@ -97,16 +98,14 @@ export function registerConfigTools(
       } catch (err: unknown) {
         if (err instanceof AuthenticationRequiredError) {
           return {
-            content: [{ type: "text" as const, text: err.message }],
+            content: [{ type: "text", text: err.message }],
             isError: true,
           };
         }
         const message =
-          err instanceof GraphRequestError
-            ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-            : err instanceof Error
-              ? err.message
-              : String(err);
+          err instanceof Error
+            ? err.message
+            : String(err);
         logger.error("todo_config failed", { error: message });
 
         const isTimeout = message.toLowerCase().includes("timed out");
@@ -116,7 +115,7 @@ export function registerConfigTools(
           : "\n\nYou can call this tool again if the user would like to retry.";
 
         return {
-          content: [{ type: "text" as const, text: message + retryHint }],
+          content: [{ type: "text", text: message + retryHint }],
           isError: true,
         };
       }

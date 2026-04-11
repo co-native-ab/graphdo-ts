@@ -10,6 +10,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
+import { z } from "zod";
 import { logger } from "../logger.js";
 
 /** Check whether the connected client supports form-based elicitation. */
@@ -34,11 +35,12 @@ export function registerLoginTools(
         "Opens a browser for interactive sign-in. If a browser is unavailable, " +
         "falls back to device code authentication (returns a URL and code for manual entry). " +
         "Once signed in, all other tools work automatically.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Login to Microsoft",
         readOnlyHint: false,
         openWorldHint: true,
+        idempotentHint: true,
       },
     },
     async () => {
@@ -48,7 +50,7 @@ export function registerLoginTools(
           return {
             content: [
               {
-                type: "text" as const,
+                type: "text",
                 text: "Already logged in. Use the logout tool first if you want to re-authenticate.",
               },
             ],
@@ -64,7 +66,7 @@ export function registerLoginTools(
           return {
             content: [
               {
-                type: "text" as const,
+                type: "text",
                 text: loginResult.message,
               },
             ],
@@ -97,7 +99,7 @@ export function registerLoginTools(
             return {
               content: [
                 {
-                  type: "text" as const,
+                  type: "text",
                   text: "Login cancelled. Use the login tool when you're ready to sign in.",
                 },
               ],
@@ -111,7 +113,7 @@ export function registerLoginTools(
             return {
               content: [
                 {
-                  type: "text" as const,
+                  type: "text",
                   text: "Sign-in not yet complete. Please visit the URL, enter the code, and try again.",
                 },
               ],
@@ -122,7 +124,7 @@ export function registerLoginTools(
           return {
             content: [
               {
-                type: "text" as const,
+                type: "text",
                 text: "Logged in successfully. You can now use the other tools.",
               },
             ],
@@ -133,7 +135,7 @@ export function registerLoginTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text:
                 loginResult.message +
                 "\n\nOnce you've signed in, you can use the other tools.",
@@ -146,7 +148,7 @@ export function registerLoginTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text:
                 `Login failed: ${message}\n\n` +
                 "You can call this tool again if the user would like to retry.",
@@ -166,11 +168,12 @@ export function registerLoginTools(
       description:
         "Sign out of Microsoft Graph and clear all cached tokens. " +
         "After logging out, the login tool must be used to re-authenticate.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Logout from Microsoft",
         readOnlyHint: false,
         destructiveHint: true,
+        idempotentHint: true,
       },
     },
     async () => {
@@ -179,7 +182,7 @@ export function registerLoginTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: "Logged out successfully. Token cache cleared.",
             },
           ],
@@ -189,7 +192,7 @@ export function registerLoginTools(
         logger.error("logout failed", { error: message });
         return {
           content: [
-            { type: "text" as const, text: `Logout failed: ${message}` },
+            { type: "text", text: `Logout failed: ${message}` },
           ],
           isError: true,
         };
