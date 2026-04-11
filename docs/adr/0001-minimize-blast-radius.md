@@ -1,7 +1,7 @@
 ---
 title: "ADR-0001: Minimize Blast Radius for AI Agent Access"
 status: "Accepted"
-date: "2025-07-16"
+date: "2026-04-11"
 authors: "co-native-ab"
 tags: ["architecture", "security", "ai-agents", "microsoft-graph"]
 supersedes: ""
