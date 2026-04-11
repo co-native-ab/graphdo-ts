@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`design tokens > is deeply frozen (read-only) 1`] = `
+exports[`design tokens > token object shape is stable 1`] = `
 {
   "color": {
     "background": "#f5f5f5",

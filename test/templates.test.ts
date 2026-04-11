@@ -62,7 +62,7 @@ describe("design tokens", () => {
     expect(DESIGN_TOKENS.font.family).toContain("sans-serif");
   });
 
-  it("is deeply frozen (read-only)", () => {
+  it("token object shape is stable", () => {
     // The `as const` assertion makes the type read-only at compile time.
     // Verify the token object shape is stable via snapshot.
     expect(DESIGN_TOKENS).toMatchSnapshot();
@@ -164,9 +164,11 @@ describe("style modules", () => {
     expect(allStyles).not.toContain("#0078d4");
     expect(allStyles).not.toContain("#106ebe");
     expect(allStyles).not.toContain("#005a9e");
-    // Hardcoded semantic colors should be in tokens only, not in style rules
-    // (the :root block contains them as custom property values, which is expected)
-    const withoutRoot = allStyles.replace(/:root\s*\{[^}]*\}/g, "");
+    // Hardcoded semantic colors should be in tokens only, not in style rules.
+    // The :root block in cssCustomProperties() contains them as values — strip
+    // all :root blocks first (simple non-greedy match, safe because our :root
+    // blocks do not contain nested braces).
+    const withoutRoot = allStyles.replace(/:root\s*\{[\s\S]*?\n  \}/g, "");
     expect(withoutRoot).not.toContain("#70638c");
     expect(withoutRoot).not.toContain("#107c10");
     expect(withoutRoot).not.toContain("#d13438");
