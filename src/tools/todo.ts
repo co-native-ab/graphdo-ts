@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { AuthenticationRequiredError } from "../auth.js";
-import { GraphClient, GraphRequestError } from "../graph/client.js";
+import { GraphClient } from "../graph/client.js";
 import {
   listTodos,
   getTodo,
@@ -73,12 +73,7 @@ function formatError(
   if (err instanceof AuthenticationRequiredError) {
     return { content: [{ type: "text", text: err.message }], isError: true };
   }
-  const message =
-    err instanceof GraphRequestError
-      ? `Graph API error: ${err.message} (${String(err.statusCode)})`
-      : err instanceof Error
-        ? err.message
-        : String(err);
+  const message = err instanceof Error ? err.message : String(err);
   logger.error(`${toolName} failed`, { error: message });
   return { content: [{ type: "text", text: message }], isError: true };
 }
@@ -94,7 +89,7 @@ function parseRecurrence(
 ): PatternedRecurrence {
   const todayParts = new Date().toISOString().split("T");
   const today = todayParts[0] ?? new Date().toISOString().slice(0, 10);
-  const range = { type: "noEnd" as const, startDate: today };
+  const range = { type: "noEnd", startDate: today };
 
   switch (repeat) {
     case "daily":
@@ -443,7 +438,7 @@ export function registerTodoTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: "At least one field to update must be provided.",
             },
           ],
@@ -681,7 +676,7 @@ export function registerTodoTools(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: "At least one of displayName or isChecked must be provided.",
             },
           ],

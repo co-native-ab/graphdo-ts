@@ -57,7 +57,7 @@ export function registerStatusTool(
         }
 
         return {
-          content: [{ type: "text" as const, text: lines.join("\n") }],
+          content: [{ type: "text", text: lines.join("\n") }],
         };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -65,7 +65,7 @@ export function registerStatusTool(
         return {
           content: [
             {
-              type: "text" as const,
+              type: "text",
               text: `Status check failed: ${message}`,
             },
           ],

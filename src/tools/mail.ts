@@ -4,7 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { AuthenticationRequiredError } from "../auth.js";
-import { GraphClient, GraphRequestError } from "../graph/client.js";
+import { GraphClient } from "../graph/client.js";
 import { getMe, sendMail } from "../graph/mail.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
@@ -41,25 +41,23 @@ export function registerMailTools(
         logger.info("mail sent", { to: user.mail, subject });
         return {
           content: [
-            { type: "text" as const, text: `Email sent to ${user.mail}` },
+            { type: "text", text: `Email sent to ${user.mail}` },
           ],
         };
       } catch (error: unknown) {
         if (error instanceof AuthenticationRequiredError) {
           return {
-            content: [{ type: "text" as const, text: error.message }],
+            content: [{ type: "text", text: error.message }],
             isError: true,
           };
         }
         const message =
-          error instanceof GraphRequestError
+          error instanceof Error
             ? error.message
-            : error instanceof Error
-              ? error.message
-              : String(error);
+            : String(error);
         logger.error("mail_send failed", { error: message });
         return {
-          content: [{ type: "text" as const, text: message }],
+          content: [{ type: "text", text: message }],
           isError: true,
         };
       }
