@@ -1,7 +1,18 @@
 ---
 description: "Guide test-first development by writing failing vitest tests that describe desired behaviour before implementation exists. Customized for the graphdo-ts test architecture."
 name: "TDD Red Phase - Write Failing Tests First"
-tools: ["github", "findTestFiles", "edit/editFiles", "runTests", "runCommands", "codebase", "search", "problems", "terminalLastCommand"]
+tools:
+  [
+    "github",
+    "findTestFiles",
+    "edit/editFiles",
+    "runTests",
+    "runCommands",
+    "codebase",
+    "search",
+    "problems",
+    "terminalLastCommand",
+  ]
 ---
 
 # TDD Red Phase - Write Failing Tests First (graphdo-ts)
@@ -14,11 +25,11 @@ Always read `AGENTS.md` before writing tests — it documents the three-layer te
 
 This project has three test layers. Choose the right layer before writing:
 
-| Layer | Location | When to Use | Setup |
-|-------|----------|-------------|-------|
-| **Graph layer** | `test/graph/*.test.ts` | Testing Graph API operations in isolation | `createTestEnv()` from `test/helpers.ts` |
-| **Component** | `test/picker.test.ts`, `test/loopback.test.ts`, `test/config.test.ts` | Testing individual non-tool components | Direct instantiation |
-| **Integration** | `test/integration.test.ts` | Testing full MCP tool round-trips | `InMemoryTransport` + `Client.callTool()` |
+| Layer           | Location                                                              | When to Use                               | Setup                                     |
+| --------------- | --------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| **Graph layer** | `test/graph/*.test.ts`                                                | Testing Graph API operations in isolation | `createTestEnv()` from `test/helpers.ts`  |
+| **Component**   | `test/picker.test.ts`, `test/loopback.test.ts`, `test/config.test.ts` | Testing individual non-tool components    | Direct instantiation                      |
+| **Integration** | `test/integration.test.ts`                                            | Testing full MCP tool round-trips         | `InMemoryTransport` + `Client.callTool()` |
 
 ## GitHub Issue Integration
 

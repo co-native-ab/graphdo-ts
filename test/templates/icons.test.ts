@@ -1,11 +1,7 @@
 // Tests for icon data URIs — verifies base64-encoded assets are valid.
 
 import { describe, it, expect } from "vitest";
-import {
-  iconDataUri,
-  iconLightDataUri,
-  iconDarkDataUri,
-} from "../../src/templates/icons.js";
+import { iconDataUri, iconLightDataUri, iconDarkDataUri } from "../../src/templates/icons.js";
 
 describe("icon data URIs", () => {
   it("exports a valid PNG data URI for default icon", () => {
@@ -13,15 +9,11 @@ describe("icon data URIs", () => {
   });
 
   it("exports a valid PNG data URI for light icon", () => {
-    expect(iconLightDataUri).toMatch(
-      /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/,
-    );
+    expect(iconLightDataUri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
   });
 
   it("exports a valid PNG data URI for dark icon", () => {
-    expect(iconDarkDataUri).toMatch(
-      /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/,
-    );
+    expect(iconDarkDataUri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
   });
 
   it("icons are non-trivial size (actual image data)", () => {

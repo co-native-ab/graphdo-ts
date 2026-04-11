@@ -16,11 +16,7 @@ export class MockAuthenticator implements Authenticator {
   private _browserLogin: boolean;
   private _logoutCalled = false;
 
-  constructor(opts?: {
-    token?: string;
-    username?: string;
-    browserLogin?: boolean;
-  }) {
+  constructor(opts?: { token?: string; username?: string; browserLogin?: boolean }) {
     this._token = opts?.token ?? null;
     this._username = opts?.username ?? "test@example.com";
     this._browserLogin = opts?.browserLogin ?? true;

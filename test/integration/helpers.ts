@@ -62,9 +62,7 @@ export async function setupIntegrationEnv(): Promise<IntegrationEnv> {
     userPrincipalName: "test@example.com",
   };
   graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
-  graphState.todos.set("list-1", [
-    { id: "task-1", title: "Buy milk", status: "notStarted" },
-  ]);
+  graphState.todos.set("list-1", [{ id: "task-1", title: "Buy milk", status: "notStarted" }]);
 
   const mock = await createMockGraphServer(graphState);
   const configDir = await mkdtemp(path.join(tmpdir(), "graphdo-test-"));
@@ -98,12 +96,9 @@ export async function createTestClient(
     authenticator,
     graphBaseUrl: env.graphUrl,
     configDir: env.configDir,
-    openBrowser:
-      opts?.openBrowser ??
-      (() => Promise.reject(new Error("no browser in tests"))),
+    openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
   });
-  const [clientTransport, serverTransport] =
-    InMemoryTransport.createLinkedPair();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   const c = new Client({ name: "test-client", version: "1.0.0" });
 

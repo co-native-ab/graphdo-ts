@@ -10,9 +10,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint && npm run typecheck && npm run test"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
   },
   "keywords": [
     "mcp",
@@ -37,6 +39,7 @@
     "@vitest/coverage-v8": "^4.1.4",
     "esbuild": "^0.28.0",
     "eslint": "^10.2.0",
+    "prettier": "^3.8.2",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1",
     "vitest": "^4.1.4"

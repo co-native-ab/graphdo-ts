@@ -112,12 +112,12 @@ graphdo-ts uses a multi-tenant application published by Co-native AB. To grant c
 4. Go to **Permissions** and click **Grant admin consent for [your organization]**.
 5. Review and approve the following delegated permissions:
 
-   | Permission       | Type      | Description                                                                    |
-   | ---------------- | --------- | ------------------------------------------------------------------------------ |
-   | `User.Read`      | Delegated | Read the signed-in user's basic profile                                        |
-   | `Mail.Send`      | Delegated | Send mail as the signed-in user                                                |
-   | `Tasks.ReadWrite`| Delegated | Read and write the signed-in user's tasks                                      |
-   | `offline_access` | Delegated | Maintain access to data you have given it access to (enables refresh tokens)   |
+   | Permission        | Type      | Description                                                                  |
+   | ----------------- | --------- | ---------------------------------------------------------------------------- |
+   | `User.Read`       | Delegated | Read the signed-in user's basic profile                                      |
+   | `Mail.Send`       | Delegated | Send mail as the signed-in user                                              |
+   | `Tasks.ReadWrite` | Delegated | Read and write the signed-in user's tasks                                    |
+   | `offline_access`  | Delegated | Maintain access to data you have given it access to (enables refresh tokens) |
 
 6. Once consent is granted, all users in your organization can use the `login` tool without further approval.
 
@@ -191,14 +191,14 @@ npm run mcpb        # Build + create MCPB bundle
 
 ### Environment Variables
 
-| Variable               | Description                                                     | Default                            |
-| ---------------------- | --------------------------------------------------------------- | ---------------------------------- |
-| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)                           | `false`                            |
-| `GRAPHDO_CLIENT_ID`    | Azure AD (Entra ID) application client ID                       | `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` |
-| `GRAPHDO_TENANT_ID`    | Azure AD tenant ID (`common`, `organizations`, `consumers`, or a GUID) | `common`                   |
-| `GRAPHDO_CONFIG_DIR`   | Override config directory                                       | OS default                         |
-| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                                     | `https://graph.microsoft.com/v1.0` |
-| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token                    | -                                  |
+| Variable               | Description                                                            | Default                                |
+| ---------------------- | ---------------------------------------------------------------------- | -------------------------------------- |
+| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)                                  | `false`                                |
+| `GRAPHDO_CLIENT_ID`    | Azure AD (Entra ID) application client ID                              | `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` |
+| `GRAPHDO_TENANT_ID`    | Azure AD tenant ID (`common`, `organizations`, `consumers`, or a GUID) | `common`                               |
+| `GRAPHDO_CONFIG_DIR`   | Override config directory                                              | OS default                             |
+| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                                            | `https://graph.microsoft.com/v1.0`     |
+| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token                           | -                                      |
 
 When installed via [MCPB](https://github.com/modelcontextprotocol/mcpb), `GRAPHDO_DEBUG`, `GRAPHDO_CLIENT_ID`, and `GRAPHDO_TENANT_ID` are exposed as configurable settings in the extension UI and automatically passed as environment variables.
 

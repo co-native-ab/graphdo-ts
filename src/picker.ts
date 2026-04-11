@@ -57,9 +57,7 @@ const MAX_BODY_SIZE = 1_048_576;
  * Start a local picker server. Returns the URL immediately and a promise
  * that resolves when the user picks an option.
  */
-export function startBrowserPicker(
-  config: PickerConfig,
-): Promise<PickerHandle> {
+export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> {
   const timeoutMs = config.timeoutMs ?? 120_000;
 
   return new Promise<PickerHandle>((resolveHandle, rejectHandle) => {
@@ -96,9 +94,7 @@ export function startBrowserPicker(
       logger.warn("picker server timed out");
       server.close();
       onError(
-        new Error(
-          "Selection timed out - no choice made within the time limit. Please try again.",
-        ),
+        new Error("Selection timed out - no choice made within the time limit. Please try again."),
       );
     }, timeoutMs);
 
@@ -210,4 +206,3 @@ function handleSelection(
     })();
   });
 }
-

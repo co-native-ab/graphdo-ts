@@ -6,10 +6,7 @@ import * as crypto from "node:crypto";
 
 import type * as MsalTypes from "@azure/msal-node";
 
-import {
-  StaticAuthenticator,
-  MsalAuthenticator,
-} from "../src/auth.js";
+import { StaticAuthenticator, MsalAuthenticator } from "../src/auth.js";
 import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -45,11 +42,9 @@ function getTempDir(): string {
 
 afterEach(async () => {
   for (const dir of tempDirs) {
-    await fs
-      .rm(dir, { recursive: true, force: true })
-      .catch(() => {
-        /* ignore cleanup errors */
-      });
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {
+      /* ignore cleanup errors */
+    });
   }
   tempDirs.length = 0;
   vi.restoreAllMocks();
@@ -170,9 +165,7 @@ describe("MsalAuthenticator.login", () => {
 
     const fakePCA = installFakePCA();
     // Browser login fails
-    fakePCA.acquireTokenInteractive.mockRejectedValue(
-      new Error("cannot open browser"),
-    );
+    fakePCA.acquireTokenInteractive.mockRejectedValue(new Error("cannot open browser"));
 
     await expect(auth.login()).rejects.toThrow("cannot open browser");
   });
@@ -218,9 +211,7 @@ describe("MsalAuthenticator.token", () => {
     const auth = new MsalAuthenticator("client-id", "common", dir, ["User.Read"], openBrowser);
 
     const fakePCA = installFakePCA();
-    fakePCA.acquireTokenSilent.mockResolvedValue(
-      authResult({ accessToken: "silent-token-xyz" }),
-    );
+    fakePCA.acquireTokenSilent.mockResolvedValue(authResult({ accessToken: "silent-token-xyz" }));
 
     const token = await auth.token();
     expect(token).toBe("silent-token-xyz");
@@ -292,12 +283,12 @@ describe("MsalAuthenticator.token", () => {
 // =========================================================================
 
 /** Helper: openBrowser mock that auto-POSTs to a given path after a short delay. */
-function makeBrowserSpy(
-  path: string,
-): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
+function makeBrowserSpy(path: string): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
   return vi.fn((url: string) => {
     setTimeout(() => {
-      void fetch(`${url}${path}`, { method: "POST" }).catch(() => { /* fire and forget */ });
+      void fetch(`${url}${path}`, { method: "POST" }).catch(() => {
+        /* fire and forget */
+      });
     }, 30);
     return Promise.resolve();
   });
@@ -341,9 +332,9 @@ describe("MsalAuthenticator.logout", () => {
     await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
     await fs.writeFile(path.join(dir, "account.json"), "{}");
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockRejectedValue(
-      new Error("no browser available"),
-    );
+    const openBrowser = vi
+      .fn<(url: string) => Promise<void>>()
+      .mockRejectedValue(new Error("no browser available"));
     const auth = new MsalAuthenticator("client-id", "common", dir, ["User.Read"], openBrowser);
 
     await auth.logout();
@@ -495,10 +486,7 @@ describe("MsalAuthenticator.accountInfo", () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     // Valid JSON but missing required 'username' field
-    await fs.writeFile(
-      path.join(dir, "account.json"),
-      JSON.stringify({ homeAccountId: "h-1" }),
-    );
+    await fs.writeFile(path.join(dir, "account.json"), JSON.stringify({ homeAccountId: "h-1" }));
 
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", "common", dir, ["User.Read"], openBrowser);

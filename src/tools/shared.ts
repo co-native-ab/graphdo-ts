@@ -40,8 +40,6 @@ export function formatError(
  * throw AuthenticationRequiredError, which formatError maps to the standard
  * "please use the login tool" message.
  */
-export function createAuthenticatedClient(
-  config: ServerConfig,
-): Promise<GraphClient> {
+export function createAuthenticatedClient(config: ServerConfig): Promise<GraphClient> {
   return Promise.resolve(config.graphClient);
 }

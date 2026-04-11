@@ -31,19 +31,14 @@ import { registerStepTools } from "./todo-steps.js";
 // ---------------------------------------------------------------------------
 
 const importanceSchema = z.enum(["low", "normal", "high"]).optional();
-const repeatSchema = z
-  .enum(["daily", "weekly", "weekdays", "monthly", "yearly"])
-  .optional();
+const repeatSchema = z.enum(["daily", "weekly", "weekdays", "monthly", "yearly"]).optional();
 
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
 /** Register all To Do CRUD tools on the given MCP server. */
-export function registerTodoTools(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerTodoTools(server: McpServer, config: ServerConfig): void {
   // ---- todo_list ----
   server.registerTool(
     "todo_list",
@@ -74,7 +69,7 @@ export function registerTodoTools(
           .string()
           .optional()
           .describe(
-            "OData $orderby expression. Examples: \"dueDateTime/dateTime\", \"importance desc\"",
+            'OData $orderby expression. Examples: "dueDateTime/dateTime", "importance desc"',
           ),
       },
       annotations: {
@@ -100,9 +95,7 @@ export function registerTodoTools(
           const num = String(i + 1 + args.skip);
           const emoji = statusEmoji(item.status);
           const imp = importanceLabel(item.importance);
-          const due = item.dueDateTime
-            ? ` 📅 ${item.dueDateTime.dateTime}`
-            : "";
+          const due = item.dueDateTime ? ` 📅 ${item.dueDateTime.dateTime}` : "";
           return `${num}. ${emoji}${imp} ${item.title}${due} (${item.id})`;
         });
 
@@ -168,11 +161,7 @@ export function registerTodoTools(
         }
 
         // Show checklist items if present
-        const checklistItems = await listChecklistItems(
-          client,
-          todoConfig.todoListId,
-          args.taskId,
-        );
+        const checklistItems = await listChecklistItems(client, todoConfig.todoListId, args.taskId);
         if (checklistItems.length > 0) {
           lines.push("", "Steps:");
           for (const step of checklistItems) {
@@ -205,14 +194,9 @@ export function registerTodoTools(
           .optional()
           .describe("Due date in ISO 8601 format (e.g. 2025-01-15T09:00:00)"),
         dueDateTimeZone: z.string().optional().default("UTC"),
-        reminderDateTime: z
-          .string()
-          .optional()
-          .describe("Reminder date/time in ISO 8601 format"),
+        reminderDateTime: z.string().optional().describe("Reminder date/time in ISO 8601 format"),
         reminderTimeZone: z.string().optional().default("UTC"),
-        repeat: repeatSchema.describe(
-          "Recurrence: daily, weekly, weekdays, monthly, yearly",
-        ),
+        repeat: repeatSchema.describe("Recurrence: daily, weekly, weekdays, monthly, yearly"),
         repeatInterval: z
           .number()
           .optional()
@@ -239,14 +223,9 @@ export function registerTodoTools(
             : undefined,
           isReminderOn: args.reminderDateTime ? true : undefined,
           reminderDateTime: args.reminderDateTime
-            ? parseDateTimeTimeZone(
-                args.reminderDateTime,
-                args.reminderTimeZone,
-              )
+            ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
             : undefined,
-          recurrence: args.repeat
-            ? parseRecurrence(args.repeat, args.repeatInterval)
-            : undefined,
+          recurrence: args.repeat ? parseRecurrence(args.repeat, args.repeatInterval) : undefined,
         });
 
         const parts = [`Created todo: "${item.title}" (${item.id})`];
@@ -254,11 +233,9 @@ export function registerTodoTools(
         if (item.importance && item.importance !== "normal") {
           parts.push(`Importance: ${item.importance}`);
         }
-        if (item.dueDateTime)
-          parts.push(`Due: ${formatDate(item.dueDateTime)}`);
+        if (item.dueDateTime) parts.push(`Due: ${formatDate(item.dueDateTime)}`);
         if (item.isReminderOn) parts.push("Reminder: set");
-        if (item.recurrence)
-          parts.push(`Repeat: ${formatRecurrence(item.recurrence)}`);
+        if (item.recurrence) parts.push(`Repeat: ${formatRecurrence(item.recurrence)}`);
 
         return { content: [{ type: "text", text: parts.join("\n") }] };
       } catch (err: unknown) {
@@ -283,10 +260,7 @@ export function registerTodoTools(
         dueDate: z.string().optional().describe("Due date in ISO 8601 format"),
         dueDateTimeZone: z.string().optional().default("UTC"),
         clearDueDate: z.boolean().optional().default(false),
-        reminderDateTime: z
-          .string()
-          .optional()
-          .describe("Reminder date/time in ISO 8601 format"),
+        reminderDateTime: z.string().optional().describe("Reminder date/time in ISO 8601 format"),
         reminderTimeZone: z.string().optional().default("UTC"),
         clearReminder: z.boolean().optional().default(false),
         repeat: repeatSchema,
@@ -327,39 +301,27 @@ export function registerTodoTools(
         const client = await createAuthenticatedClient(config);
         const todoConfig = await loadAndValidateConfig(config.configDir);
 
-        const item = await updateTodo(
-          client,
-          todoConfig.todoListId,
-          args.taskId,
-          {
-            title: args.title || undefined,
-            body: args.body || undefined,
-            importance: args.importance,
-            dueDateTime: args.clearDueDate
-              ? null
-              : args.dueDate
-                ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
-                : undefined,
-            isReminderOn: args.clearReminder
-              ? false
-              : args.reminderDateTime
-                ? true
-                : undefined,
-            reminderDateTime: args.clearReminder
-              ? null
-              : args.reminderDateTime
-                ? parseDateTimeTimeZone(
-                    args.reminderDateTime,
-                    args.reminderTimeZone,
-                  )
-                : undefined,
-            recurrence: args.clearRecurrence
-              ? null
-              : args.repeat
-                ? parseRecurrence(args.repeat, args.repeatInterval)
-                : undefined,
-          },
-        );
+        const item = await updateTodo(client, todoConfig.todoListId, args.taskId, {
+          title: args.title || undefined,
+          body: args.body || undefined,
+          importance: args.importance,
+          dueDateTime: args.clearDueDate
+            ? null
+            : args.dueDate
+              ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
+              : undefined,
+          isReminderOn: args.clearReminder ? false : args.reminderDateTime ? true : undefined,
+          reminderDateTime: args.clearReminder
+            ? null
+            : args.reminderDateTime
+              ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
+              : undefined,
+          recurrence: args.clearRecurrence
+            ? null
+            : args.repeat
+              ? parseRecurrence(args.repeat, args.repeatInterval)
+              : undefined,
+        });
 
         const text = `Updated todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
         return { content: [{ type: "text", text }] };

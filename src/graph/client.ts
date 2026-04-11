@@ -23,9 +23,7 @@ export class GraphRequestError extends Error {
     public readonly code: string,
     public readonly graphMessage: string,
   ) {
-    super(
-      `graph ${method} ${path}: ${code}: ${graphMessage} (HTTP ${statusCode})`,
-    );
+    super(`graph ${method} ${path}: ${code}: ${graphMessage} (HTTP ${statusCode})`);
     this.name = "GraphRequestError";
   }
 }
@@ -115,20 +113,14 @@ export class GraphClient {
     while (cleanUrl.endsWith("/")) cleanUrl = cleanUrl.slice(0, -1);
     this.baseUrl = cleanUrl;
     this.credential =
-      typeof credential === "string"
-        ? { getToken: () => Promise.resolve(credential) }
-        : credential;
+      typeof credential === "string" ? { getToken: () => Promise.resolve(credential) } : credential;
     this.timeoutMs = timeoutMs;
     this.maxRetries = maxRetries;
     this._delayFn = delayFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /** Send an HTTP request to the Graph API and return the raw Response. */
-  async request(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<Response> {
+  async request(method: string, path: string, body?: unknown): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
 
     // Acquire a fresh (or silently-refreshed) token for this request.
@@ -192,18 +184,9 @@ export class GraphClient {
         // Use raw body text as message
       }
 
-      const error = new GraphRequestError(
-        method,
-        path,
-        response.status,
-        code,
-        message,
-      );
+      const error = new GraphRequestError(method, path, response.status, code, message);
 
-      if (
-        attempt < this.maxRetries &&
-        GraphClient.retryableStatusCodes.has(response.status)
-      ) {
+      if (attempt < this.maxRetries && GraphClient.retryableStatusCodes.has(response.status)) {
         // Determine delay
         let delayMs = 0;
         const retryAfter = response.headers.get("Retry-After");
@@ -244,7 +227,6 @@ export class GraphClient {
     throw lastError!;
   }
 }
-
 
 function isGraphErrorEnvelope(value: unknown): value is GraphErrorEnvelope {
   if (typeof value !== "object" || value === null) return false;

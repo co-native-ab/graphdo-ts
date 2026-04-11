@@ -75,13 +75,7 @@ describe("todo operations", () => {
         { id: "t3", title: "Task 3", status: "notStarted" },
       ]);
 
-      const filtered = await listTodos(
-        client,
-        "list-1",
-        0,
-        0,
-        "status eq 'notStarted'",
-      );
+      const filtered = await listTodos(client, "list-1", 0, 0, "status eq 'notStarted'");
       expect(filtered).toHaveLength(2);
       expect(filtered.every((t) => t.status === "notStarted")).toBe(true);
     });
@@ -98,14 +92,7 @@ describe("todo operations", () => {
         },
       ]);
 
-      const sorted = await listTodos(
-        client,
-        "list-1",
-        0,
-        0,
-        undefined,
-        "importance",
-      );
+      const sorted = await listTodos(client, "list-1", 0, 0, undefined, "importance");
       expect(sorted[0]!.importance).toBe("high");
       expect(sorted[1]!.importance).toBe("low");
       expect(sorted[2]!.importance).toBe("normal");
@@ -121,9 +108,7 @@ describe("todo operations", () => {
     });
 
     it("throws on non-existent ID", async () => {
-      await expect(
-        getTodo(client, "list-1", "no-such-task"),
-      ).rejects.toThrow(GraphRequestError);
+      await expect(getTodo(client, "list-1", "no-such-task")).rejects.toThrow(GraphRequestError);
     });
   });
 
@@ -362,9 +347,9 @@ describe("todo operations", () => {
     });
 
     it("throws on non-existent checklist item delete", async () => {
-      await expect(
-        deleteChecklistItem(client, "list-1", "task-1", "no-such-item"),
-      ).rejects.toThrow(GraphRequestError);
+      await expect(deleteChecklistItem(client, "list-1", "task-1", "no-such-item")).rejects.toThrow(
+        GraphRequestError,
+      );
     });
   });
 
@@ -436,9 +421,9 @@ describe("todo operations", () => {
     });
 
     it("empty itemId throws on deleteChecklistItem", async () => {
-      await expect(
-        deleteChecklistItem(client, "list-1", "task-1", ""),
-      ).rejects.toThrow("deleteChecklistItem: itemId must not be empty");
+      await expect(deleteChecklistItem(client, "list-1", "task-1", "")).rejects.toThrow(
+        "deleteChecklistItem: itemId must not be empty",
+      );
     });
   });
 });

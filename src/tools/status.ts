@@ -9,10 +9,7 @@ import { loadConfig } from "../config.js";
 import { formatError } from "./shared.js";
 
 /** Register the auth_status tool on the given MCP server. */
-export function registerStatusTool(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerStatusTool(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "auth_status",
     {

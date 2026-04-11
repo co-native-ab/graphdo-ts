@@ -132,10 +132,7 @@ export function validateConfig(config: Config | null): config is Config {
 export async function loadAndValidateConfig(dir: string): Promise<Config> {
   const config = await loadConfig(dir);
   if (!validateConfig(config)) {
-    throw new Error(
-      "todo list not configured - use the todo_config tool to select one",
-    );
+    throw new Error("todo list not configured - use the todo_config tool to select one");
   }
   return config;
 }
-

@@ -2,7 +2,18 @@
 description: "Expert assistant for adding new MCP tools to graphdo-ts following the project's 5-step pattern: Graph operation → tool registration → handler with DI → register in index.ts → tests."
 name: "graphdo Tool Developer"
 model: GPT-4.1
-tools: ['codebase', 'edit/editFiles', 'search', 'terminalCommand', 'findTestFiles', 'runTests', 'runCommands', 'problems', 'usages']
+tools:
+  [
+    "codebase",
+    "edit/editFiles",
+    "search",
+    "terminalCommand",
+    "findTestFiles",
+    "runTests",
+    "runCommands",
+    "problems",
+    "usages",
+  ]
 ---
 
 # graphdo Tool Developer
@@ -39,7 +50,7 @@ export async function getNewEntity(client: GraphClient, entityId: string): Promi
 // Write operation
 export async function createNewEntity(
   client: GraphClient,
-  body: { displayName: string }
+  body: { displayName: string },
 ): Promise<NewEntity> {
   return client.request<NewEntity>("POST", "/me/some/resource", body);
 }
@@ -51,6 +62,7 @@ export async function deleteNewEntity(client: GraphClient, entityId: string): Pr
 ```
 
 **Rules:**
+
 - All Graph API calls go through `client.request<T>(method, path, body?)` — **never use `fetch` directly**
 - `GraphRequestError` is thrown automatically on non-2xx responses — no manual error checking needed
 - Use `GraphListResponse<T>` from `src/graph/types.ts` for collection endpoints: `client.request<GraphListResponse<T>>("GET", path)`
@@ -74,6 +86,7 @@ export interface NewEntity {
 ```
 
 **Rules:**
+
 - Use `?` for optional fields (present only sometimes in Graph responses)
 - Do not invent fields — only model what the Graph API actually returns
 - Graph API v1.0 does **not** support `assignees`/`assignedTo` on `todoTask` or "My Day"
@@ -113,7 +126,7 @@ export function registerNewEntityTools(server: McpServer, config: ServerConfig):
         logger.error("newentity_show failed", { error: message, entityId });
         return { isError: true, content: [{ type: "text", text: `Error: ${message}` }] };
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -131,19 +144,25 @@ export function registerNewEntityTools(server: McpServer, config: ServerConfig):
         const client = new GraphClient(config.graphBaseUrl, token);
         const entity = await createNewEntity(client, { displayName });
         return {
-          content: [{ type: "text", text: `Created entity: ${entity.id}\n\n${JSON.stringify(entity, null, 2)}` }],
+          content: [
+            {
+              type: "text",
+              text: `Created entity: ${entity.id}\n\n${JSON.stringify(entity, null, 2)}`,
+            },
+          ],
         };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error("newentity_create failed", { error: message });
         return { isError: true, content: [{ type: "text", text: `Error: ${message}` }] };
       }
-    }
+    },
   );
 }
 ```
 
 **Handler rules (non-negotiable):**
+
 - `const token = await config.authenticator.token()` — first line of every handler (throws `AuthenticationRequiredError` if not logged in)
 - `new GraphClient(config.graphBaseUrl, token)` — always use `config.graphBaseUrl`, never a hardcoded URL
 - Catch `error: unknown`, extract message with `error instanceof Error ? error.message : String(error)`
@@ -152,6 +171,7 @@ export function registerNewEntityTools(server: McpServer, config: ServerConfig):
 - Tools return only `content`, not `structuredContent`
 
 **Annotation guidelines:**
+
 - `readOnlyHint: true` — GET operations that do not modify data
 - `destructiveHint: true` — DELETE operations
 - `openWorldHint: true` — tools that send data outside the system (e.g., `mail_send`)
@@ -266,12 +286,12 @@ npm run build   # esbuild bundle — verify no bundling errors
 
 ## Common Mistakes to Avoid
 
-| Mistake | Correct Pattern |
-|---------|----------------|
-| `import { X } from "./module"` | `import { X } from "./module.js"` |
-| `fetch(url, ...)` directly | `client.request<T>(method, path)` |
-| `console.log(...)` | `logger.info(msg, { key: val })` |
+| Mistake                               | Correct Pattern                            |
+| ------------------------------------- | ------------------------------------------ |
+| `import { X } from "./module"`        | `import { X } from "./module.js"`          |
+| `fetch(url, ...)` directly            | `client.request<T>(method, path)`          |
+| `console.log(...)`                    | `logger.info(msg, { key: val })`           |
 | `throw new Error(...)` inside handler | `return { isError: true, content: [...] }` |
-| `process.env.SOME_VAR` inside tool | Use `config.someField` from `ServerConfig` |
-| Adding `@microsoft/msgraph-sdk` | Use `GraphClient` — no SDK |
-| `any` type | Define proper TypeScript interfaces |
+| `process.env.SOME_VAR` inside tool    | Use `config.someField` from `ServerConfig` |
+| Adding `@microsoft/msgraph-sdk`       | Use `GraphClient` — no SDK                 |
+| `any` type                            | Define proper TypeScript interfaces        |

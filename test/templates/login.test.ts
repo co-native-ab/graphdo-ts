@@ -1,11 +1,7 @@
 // Tests for login page templates — structure, tokens, XSS escaping, favicon.
 
 import { describe, it, expect } from "vitest";
-import {
-  landingPageHtml,
-  successPageHtml,
-  errorPageHtml,
-} from "../../src/templates/login.js";
+import { landingPageHtml, successPageHtml, errorPageHtml } from "../../src/templates/login.js";
 import { purple, complementary } from "../../src/templates/tokens.js";
 
 describe("login templates", () => {
@@ -63,7 +59,7 @@ describe("login templates", () => {
     });
 
     it("escapes angle brackets in auth URL", () => {
-      const xssHtml = landingPageHtml('https://evil.com?x=<script>alert(1)</script>');
+      const xssHtml = landingPageHtml("https://evil.com?x=<script>alert(1)</script>");
       expect(xssHtml).not.toContain("<script>alert(1)</script>");
       expect(xssHtml).toContain("&lt;script&gt;");
     });
@@ -125,7 +121,7 @@ describe("login templates", () => {
     });
 
     it("escapes HTML in error messages", () => {
-      const html = errorPageHtml('<img src=x onerror=alert(1)>');
+      const html = errorPageHtml("<img src=x onerror=alert(1)>");
       expect(html).not.toContain("<img src=x");
       expect(html).toContain("&lt;img");
     });

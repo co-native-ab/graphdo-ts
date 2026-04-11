@@ -26,9 +26,9 @@ describe("openBrowser", () => {
   });
 
   it("rejects a remote hostname", async () => {
-    await expect(
-      openBrowser("http://example.com/anything"),
-    ).rejects.toThrow("URL must be a localhost address, got: example.com");
+    await expect(openBrowser("http://example.com/anything")).rejects.toThrow(
+      "URL must be a localhost address, got: example.com",
+    );
   });
 
   it("rejects a remote IP address", async () => {

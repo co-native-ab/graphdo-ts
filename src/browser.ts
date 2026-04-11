@@ -15,20 +15,14 @@ export function openBrowser(url: string): Promise<void> {
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return Promise.reject(
-      new Error(`Unsupported URL protocol: ${parsed.protocol}`),
-    );
+    return Promise.reject(new Error(`Unsupported URL protocol: ${parsed.protocol}`));
   }
 
   // All URLs opened by this app are local server pages (loopback login page or
   // picker page). Reject anything that is not localhost to prevent accidentally
   // opening arbitrary remote URLs.
   if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
-    return Promise.reject(
-      new Error(
-        `URL must be a localhost address, got: ${parsed.hostname}`,
-      ),
-    );
+    return Promise.reject(new Error(`URL must be a localhost address, got: ${parsed.hostname}`));
   }
 
   const os = platform();

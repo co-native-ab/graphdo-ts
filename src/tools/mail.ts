@@ -9,10 +9,7 @@ import { logger } from "../logger.js";
 import { createAuthenticatedClient, formatError } from "./shared.js";
 
 /** Register mail-related tools on the given MCP server. */
-export function registerMailTools(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerMailTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "mail_send",
     {
@@ -38,9 +35,7 @@ export function registerMailTools(
         await sendMail(client, user.mail, subject, body, html);
         logger.info("mail sent", { to: user.mail, subject });
         return {
-          content: [
-            { type: "text", text: `Email sent to ${user.mail}` },
-          ],
+          content: [{ type: "text", text: `Email sent to ${user.mail}` }],
         };
       } catch (error: unknown) {
         return formatError("mail_send", error);
