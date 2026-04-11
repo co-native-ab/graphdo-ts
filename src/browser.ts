@@ -1,6 +1,6 @@
 // System browser opener - cross-platform utility.
 
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { platform } from "node:os";
 
 /** Open a URL in the system browser. Throws on failure. */
@@ -38,11 +38,10 @@ export function openBrowser(url: string): Promise<void> {
     });
   }
 
-  // Windows: `start` is a cmd.exe builtin so a shell is unavoidable.
-  // Strip double-quotes as defense-in-depth (validated URL above).
-  const safeUrl = url.replace(/"/g, "");
+  // Windows: use execFile with cmd.exe /c start to avoid shell string injection.
+  // Arguments are passed as array elements, not interpolated into a command string.
   return new Promise((resolve, reject) => {
-    exec(`start "" "${safeUrl}"`, (err) => {
+    execFile("cmd.exe", ["/c", "start", "", url], (err) => {
       if (err) {
         reject(new Error(`Failed to open browser: ${err.message}`));
       } else {
