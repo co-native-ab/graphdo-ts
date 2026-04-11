@@ -36,23 +36,27 @@ export async function listTodoLists(
 // Tasks
 // ---------------------------------------------------------------------------
 
-/** List tasks in a To Do list with pagination. */
+/** List tasks in a To Do list with pagination, optional filtering and sorting. */
 export async function listTodos(
   client: GraphClient,
   listId: string,
   top: number,
   skip: number,
+  filter?: string,
+  orderBy?: string,
 ): Promise<TodoItem[]> {
   if (!listId) throw new Error("listTodos: listId must not be empty");
 
   const params = new URLSearchParams();
   if (top > 0) params.set("$top", String(top));
   if (skip > 0) params.set("$skip", String(skip));
+  if (filter) params.set("$filter", filter);
+  if (orderBy) params.set("$orderby", orderBy);
 
   const query = params.toString();
   const path = `/me/todo/lists/${listId}/tasks${query ? `?${query}` : ""}`;
 
-  logger.debug("listing todos", { listId, top, skip });
+  logger.debug("listing todos", { listId, top, skip, filter, orderBy });
   const response = await client.request("GET", path);
   const data = await parseResponse(response, GraphListResponseSchema(TodoItemSchema), "GET", path);
   return data.value;

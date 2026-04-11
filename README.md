@@ -115,7 +115,7 @@ For work or school accounts, your IT administrator may need to grant admin conse
 
 ### Prerequisites
 
-- Node.js 24+
+- Node.js 22+
 
 ### Setup
 
@@ -171,6 +171,12 @@ MCP Server (StdioServerTransport)
 - **MSAL authentication** - interactive browser login with device code fallback, tokens cached locally
 - **Graph client** - lightweight wrapper around `fetch` (no Microsoft Graph SDK)
 - **Minimal dependencies** - three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR process.
 
 ---
 

@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # npm ecosystem — keep dependencies current
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: main
+    open-pull-requests-limit: 10
+    groups:
+      # Bundle minor + patch bumps into a single PR to reduce noise
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions — keep SHA-pinned actions current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: main
+    open-pull-requests-limit: 10
+    groups:
+      # Bundle minor + patch bumps into a single PR to reduce noise
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

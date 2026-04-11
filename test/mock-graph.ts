@@ -72,10 +72,20 @@ function errorResponse(
   jsonResponse(res, status, envelope);
 }
 
+const MAX_BODY_SIZE = 1_048_576; // 1 MB
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy(new Error("Payload Too Large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
@@ -273,7 +283,36 @@ function handleListTasks(
   parsed: URL,
   res: http.ServerResponse,
 ): void {
-  const items = state.todos.get(listId) ?? [];
+  let items = state.todos.get(listId) ?? [];
+
+  // Basic $filter support for testing (handles simple "field eq 'value'" patterns)
+  const filterParam = parsed.searchParams.get("$filter");
+  if (filterParam) {
+    const match = /^(\w+)\s+eq\s+'([^']*)'$/.exec(filterParam);
+    if (match) {
+      const [, field, value] = match;
+      items = items.filter((item) => {
+        const record = item as unknown as Record<string, unknown>;
+        return record[field ?? ""] === value;
+      });
+    }
+  }
+
+  // Basic $orderby support for testing (handles "field" or "field desc")
+  const orderByParam = parsed.searchParams.get("$orderby");
+  if (orderByParam) {
+    const parts = orderByParam.split(/\s+/);
+    const field = parts[0] ?? "";
+    const desc = parts[1] === "desc";
+    items = [...items].sort((a, b) => {
+      const recA = a as unknown as Record<string, unknown>;
+      const recB = b as unknown as Record<string, unknown>;
+      const aVal = typeof recA[field] === "string" ? recA[field] : "";
+      const bVal = typeof recB[field] === "string" ? recB[field] : "";
+      const cmp = aVal.localeCompare(bVal);
+      return desc ? -cmp : cmp;
+    });
+  }
 
   const skipParam = parsed.searchParams.get("$skip");
   const topParam = parsed.searchParams.get("$top");

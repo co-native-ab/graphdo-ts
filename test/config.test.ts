@@ -103,6 +103,54 @@ describe("loadConfig", () => {
 
     await expect(loadConfig(dir)).rejects.toThrow("failed to parse config");
   });
+
+  it("returns null for valid JSON with wrong shape", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ foo: 123 }),
+    );
+
+    const result = await loadConfig(dir);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for valid JSON with empty required fields", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ todoListId: "", todoListName: "" }),
+    );
+
+    const result = await loadConfig(dir);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for partial config missing todoListName", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ todoListId: "list-1" }),
+    );
+
+    const result = await loadConfig(dir);
+    expect(result).toBeNull();
+  });
+
+  it("strips extra fields and returns valid config", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ ...validConfig, extraField: "ignored" }),
+    );
+
+    const result = await loadConfig(dir);
+    expect(result).toEqual(validConfig);
+  });
 });
 
 describe("saveConfig", () => {
@@ -143,18 +191,6 @@ describe("saveConfig", () => {
 describe("validateConfig", () => {
   it("returns false for null", () => {
     expect(validateConfig(null)).toBe(false);
-  });
-
-  it("returns false for empty todoListId", () => {
-    expect(validateConfig({ todoListId: "", todoListName: "Tasks" })).toBe(
-      false,
-    );
-  });
-
-  it("returns false for empty todoListName", () => {
-    expect(validateConfig({ todoListId: "id-1", todoListName: "" })).toBe(
-      false,
-    );
   });
 
   it("returns true for valid config", () => {

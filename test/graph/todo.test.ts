@@ -67,6 +67,49 @@ describe("todo operations", () => {
       const page3 = await listTodos(client, "list-1", 2, 4);
       expect(page3).toHaveLength(0);
     });
+
+    it("filters by status using $filter", async () => {
+      env.state.todos.set("list-1", [
+        { id: "t1", title: "Task 1", status: "notStarted" },
+        { id: "t2", title: "Task 2", status: "completed" },
+        { id: "t3", title: "Task 3", status: "notStarted" },
+      ]);
+
+      const filtered = await listTodos(
+        client,
+        "list-1",
+        0,
+        0,
+        "status eq 'notStarted'",
+      );
+      expect(filtered).toHaveLength(2);
+      expect(filtered.every((t) => t.status === "notStarted")).toBe(true);
+    });
+
+    it("sorts by importance using $orderby", async () => {
+      env.state.todos.set("list-1", [
+        { id: "t1", title: "Low", status: "notStarted", importance: "low" },
+        { id: "t2", title: "High", status: "notStarted", importance: "high" },
+        {
+          id: "t3",
+          title: "Normal",
+          status: "notStarted",
+          importance: "normal",
+        },
+      ]);
+
+      const sorted = await listTodos(
+        client,
+        "list-1",
+        0,
+        0,
+        undefined,
+        "importance",
+      );
+      expect(sorted[0]!.importance).toBe("high");
+      expect(sorted[1]!.importance).toBe("low");
+      expect(sorted[2]!.importance).toBe("normal");
+    });
   });
 
   describe("getTodo", () => {

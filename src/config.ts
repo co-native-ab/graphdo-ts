@@ -3,6 +3,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
+import { z } from "zod/v4";
+
 import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 
@@ -10,6 +12,12 @@ export interface Config {
   todoListId: string;
   todoListName: string;
 }
+
+/** Zod schema for runtime validation of config.json content. */
+const ConfigSchema = z.object({
+  todoListId: z.string().min(1),
+  todoListName: z.string().min(1),
+});
 
 /**
  * Returns the configuration directory path.
@@ -65,7 +73,16 @@ export async function loadConfig(dir: string): Promise<Config | null> {
   }
 
   try {
-    return JSON.parse(content) as Config;
+    const raw: unknown = JSON.parse(content);
+    const result = ConfigSchema.safeParse(raw);
+    if (!result.success) {
+      logger.warn("config file failed validation", {
+        path: filePath,
+        error: z.prettifyError(result.error),
+      });
+      return null;
+    }
+    return result.data;
   } catch (cause: unknown) {
     throw new Error(`failed to parse config at ${filePath}`, { cause });
   }
@@ -103,15 +120,12 @@ export async function saveConfig(config: Config, dir: string): Promise<void> {
   }
 }
 
-/** Type guard that validates a Config has all required non-empty fields. */
+/**
+ * Type guard that checks whether a loaded config is non-null.
+ * Structural validation is handled by the Zod schema in loadConfig().
+ */
 export function validateConfig(config: Config | null): config is Config {
-  return (
-    config !== null &&
-    typeof config.todoListId === "string" &&
-    config.todoListId.length > 0 &&
-    typeof config.todoListName === "string" &&
-    config.todoListName.length > 0
-  );
+  return config !== null;
 }
 
 /** Loads config from disk and validates it. Throws a user-friendly error if missing or invalid. */

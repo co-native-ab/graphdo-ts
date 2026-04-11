@@ -6,30 +6,30 @@
 
 ## Summary Table
 
-| # | Item | Priority | Effort | Impact | Risk | Category |
-|---|------|----------|--------|--------|------|----------|
-| 1 | [No runtime validation of Graph API responses](#1-no-runtime-validation-of-graph-api-responses) | P0 | M | 🔴 High | 🔴 High | Type Safety |
-| 2 | [No request timeout on Graph API calls](#2-no-request-timeout-on-graph-api-calls) | P0 | S | 🔴 High | 🔴 High | Error Handling |
-| 3 | [No retry logic for transient Graph API errors](#3-no-retry-logic-for-transient-graph-api-errors) | P1 | M | 🔴 High | 🟡 Medium | Error Handling |
-| 4 | [Duplicated `isNodeError` utility function](#4-duplicated-isnodeerror-utility-function) | P2 | S | 🟢 Low | 🟢 Low | Code Quality |
-| 5 | [Inconsistent error formatting across tools](#5-inconsistent-error-formatting-across-tools) | P2 | S | 🟡 Medium | 🟢 Low | Code Quality |
-| 6 | [No unit tests for `browser.ts`](#6-no-unit-tests-for-browserts) | P2 | S | 🟡 Medium | 🟡 Medium | Test Coverage |
-| 7 | [No unit tests for `logger.ts`](#7-no-unit-tests-for-loggerts) | P2 | S | 🟢 Low | 🟢 Low | Test Coverage |
-| 8 | [No unit tests for `auth.ts` MsalAuthenticator](#8-no-unit-tests-for-authts-msalauthenticator) | P1 | L | 🔴 High | 🟡 Medium | Test Coverage |
-| 9 | [`tools/todo.ts` is oversized at 758 lines](#9-toolstodots-is-oversized-at-758-lines) | P2 | M | 🟡 Medium | 🟢 Low | Maintainability |
-| 10 | [Inline HTML templates mixed with server logic](#10-inline-html-templates-mixed-with-server-logic) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability |
-| 11 | [Graph API response types use `string` for enums](#11-graph-api-response-types-use-string-for-enums) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety |
-| 12 | [Node.js version inconsistency across configs](#12-nodejs-version-inconsistency-across-configs) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt |
-| 13 | [No automated dependency update configuration](#13-no-automated-dependency-update-configuration) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt |
-| 14 | [No `CONTRIBUTING.md` or `CHANGELOG.md`](#14-no-contributingmd-or-changelogmd) | P3 | S | 🟢 Low | 🟢 Low | Documentation |
-| 15 | [GraphClient created per tool call — no reuse](#15-graphclient-created-per-tool-call--no-reuse) | P3 | M | 🟢 Low | 🟢 Low | Performance |
-| 16 | [No body size limit in picker `handleSelection`](#16-no-body-size-limit-in-picker-handleselection) | P1 | S | 🟡 Medium | 🟡 Medium | Security |
-| 17 | [No `engines` field in `package.json`](#17-no-engines-field-in-packagejson) | P2 | S | 🟢 Low | 🟢 Low | Dependency Mgmt |
-| 18 | [`loadConfig` JSON parse lacks runtime validation](#18-loadconfig-json-parse-lacks-runtime-validation) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety |
-| 19 | [No test coverage reporting in CI](#19-no-test-coverage-reporting-in-ci) | P2 | S | 🟡 Medium | 🟢 Low | Test Coverage |
-| 20 | [No `$filter`/`$orderby` support for todo listing](#20-no-filterorderby-support-for-todo-listing) | P3 | M | 🟢 Low | 🟢 Low | Feature Gap |
-| 21 | [eslint-disable for non-null assertion in loopback.ts](#21-eslint-disable-for-non-null-assertion-in-loopbackts) | P3 | S | 🟢 Low | 🟢 Low | Code Quality |
-| 22 | [Integration test file is 1,249 lines](#22-integration-test-file-is-1249-lines) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability |
+| # | Item | Priority | Effort | Impact | Risk | Category | Status |
+|---|------|----------|--------|--------|------|----------|--------|
+| 1 | [No runtime validation of Graph API responses](#1-no-runtime-validation-of-graph-api-responses) | P0 | M | 🔴 High | 🔴 High | Type Safety | ✅ Resolved (PR #6) |
+| 2 | [No request timeout on Graph API calls](#2-no-request-timeout-on-graph-api-calls) | P0 | S | 🔴 High | 🔴 High | Error Handling | ✅ Resolved (PR #6) |
+| 3 | [No retry logic for transient Graph API errors](#3-no-retry-logic-for-transient-graph-api-errors) | P1 | M | 🔴 High | 🟡 Medium | Error Handling | ✅ Resolved (PR #6) |
+| 4 | [Duplicated `isNodeError` utility function](#4-duplicated-isnodeerror-utility-function) | P2 | S | 🟢 Low | 🟢 Low | Code Quality | ✅ Resolved (PR #6) |
+| 5 | [Inconsistent error formatting across tools](#5-inconsistent-error-formatting-across-tools) | P2 | S | 🟡 Medium | 🟢 Low | Code Quality | ✅ Resolved (PR #6) |
+| 6 | [No unit tests for `browser.ts`](#6-no-unit-tests-for-browserts) | P2 | S | 🟡 Medium | 🟡 Medium | Test Coverage | ✅ Resolved (PR #5) |
+| 7 | [No unit tests for `logger.ts`](#7-no-unit-tests-for-loggerts) | P2 | S | 🟢 Low | 🟢 Low | Test Coverage | ✅ Resolved (PR #6) |
+| 8 | [No unit tests for `auth.ts` MsalAuthenticator](#8-no-unit-tests-for-authts-msalauthenticator) | P1 | L | 🔴 High | 🟡 Medium | Test Coverage | ✅ Resolved (PR #6) |
+| 9 | [`tools/todo.ts` is oversized at 758 lines](#9-toolstodots-is-oversized-at-758-lines) | P2 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #6) |
+| 10 | [Inline HTML templates mixed with server logic](#10-inline-html-templates-mixed-with-server-logic) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #6) |
+| 11 | [Graph API response types use `string` for enums](#11-graph-api-response-types-use-string-for-enums) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety | ✅ Resolved (PR #6) |
+| 12 | [Node.js version inconsistency across configs](#12-nodejs-version-inconsistency-across-configs) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 13 | [No automated dependency update configuration](#13-no-automated-dependency-update-configuration) | P1 | S | 🟡 Medium | 🟡 Medium | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 14 | [No `CONTRIBUTING.md` or `CHANGELOG.md`](#14-no-contributingmd-or-changelogmd) | P3 | S | 🟢 Low | 🟢 Low | Documentation | ✅ Resolved (PR #7) |
+| 15 | [GraphClient created per tool call — no reuse](#15-graphclient-created-per-tool-call--no-reuse) | P3 | M | 🟢 Low | 🟢 Low | Performance | ✅ Resolved (PR #6) |
+| 16 | [No body size limit in picker `handleSelection`](#16-no-body-size-limit-in-picker-handleselection) | P1 | S | 🟡 Medium | 🟡 Medium | Security | ✅ Resolved (PR #7) |
+| 17 | [No `engines` field in `package.json`](#17-no-engines-field-in-packagejson) | P2 | S | 🟢 Low | 🟢 Low | Dependency Mgmt | ✅ Resolved (PR #7) |
+| 18 | [`loadConfig` JSON parse lacks runtime validation](#18-loadconfig-json-parse-lacks-runtime-validation) | P2 | S | 🟡 Medium | 🟢 Low | Type Safety | ✅ Resolved (PR #7) |
+| 19 | [No test coverage reporting in CI](#19-no-test-coverage-reporting-in-ci) | P2 | S | 🟡 Medium | 🟢 Low | Test Coverage | ✅ Resolved (PR #7) |
+| 20 | [No `$filter`/`$orderby` support for todo listing](#20-no-filterorderby-support-for-todo-listing) | P3 | M | 🟢 Low | 🟢 Low | Feature Gap | ✅ Resolved (PR #7) |
+| 21 | [eslint-disable for non-null assertion in loopback.ts](#21-eslint-disable-for-non-null-assertion-in-loopbackts) | P3 | S | 🟢 Low | 🟢 Low | Code Quality | ✅ Resolved (PR #7) |
+| 22 | [Integration test file is 1,249 lines](#22-integration-test-file-is-1249-lines) | P3 | M | 🟡 Medium | 🟢 Low | Maintainability | ✅ Resolved (PR #7) |
 
 ---
 

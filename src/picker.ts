@@ -42,6 +42,13 @@ export interface PickerHandle {
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Maximum POST body size for selection requests (1 MB). */
+const MAX_BODY_SIZE = 1_048_576;
+
+// ---------------------------------------------------------------------------
 // Picker server
 // ---------------------------------------------------------------------------
 
@@ -143,7 +150,15 @@ function handleSelection(
   onSelected: (result: PickerResult) => void,
 ): void {
   let body = "";
+  let size = 0;
   req.on("data", (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_BODY_SIZE) {
+      res.writeHead(413, { "Content-Type": "text/plain" });
+      res.end("Payload Too Large");
+      req.destroy();
+      return;
+    }
     body += chunk.toString();
   });
   req.on("end", () => {

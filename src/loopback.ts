@@ -50,18 +50,18 @@ export class LoginLoopbackClient implements ILoopbackClient {
     }
 
     return new Promise<AuthorizeResponse>((resolve, reject) => {
-      this.server = createServer((req, res) => {
+      const server = createServer((req, res) => {
         handleRequest(req, res, this, resolve);
       });
+      this.server = server;
 
       this.serverReady = new Promise<void>((readyResolve) => {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- server is set above
-        this.server!.listen(0, "127.0.0.1", () => {
+        server.listen(0, "127.0.0.1", () => {
           readyResolve();
         });
       });
 
-      this.server.on("error", (err) => {
+      server.on("error", (err) => {
         logger.error("login loopback server error", { error: err.message });
         reject(err);
       });
