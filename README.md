@@ -69,7 +69,7 @@ Use the `auth_status` tool to check whether you are logged in and see the curren
 
 Tokens are automatically refreshed using the cached refresh token. To sign out and clear cached tokens, use the `logout` tool.
 
-The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into the server. No client-side configuration is needed unless your organization uses a custom app registration.
+The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into the server. No client-side configuration is needed unless your organization uses a custom app registration. If you need to use your own app registration, set `GRAPHDO_CLIENT_ID` and optionally `GRAPHDO_TENANT_ID` (see [Environment Variables](#environment-variables)). When installed via MCPB, these can also be configured through the extension settings UI.
 
 ### Required Scopes
 
@@ -199,12 +199,16 @@ npm run mcpb        # Build + create MCPB bundle
 
 ### Environment Variables
 
-| Variable               | Description                                  | Default                            |
-| ---------------------- | -------------------------------------------- | ---------------------------------- |
-| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)        | `false`                            |
-| `GRAPHDO_CONFIG_DIR`   | Override config directory                    | OS default                         |
-| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                  | `https://graph.microsoft.com/v1.0` |
-| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token | -                                  |
+| Variable               | Description                                                     | Default                            |
+| ---------------------- | --------------------------------------------------------------- | ---------------------------------- |
+| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)                           | `false`                            |
+| `GRAPHDO_CLIENT_ID`    | Azure AD (Entra ID) application client ID                       | `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` |
+| `GRAPHDO_TENANT_ID`    | Azure AD tenant ID (`common`, `organizations`, `consumers`, or a GUID) | `common`                   |
+| `GRAPHDO_CONFIG_DIR`   | Override config directory                                       | OS default                         |
+| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                                     | `https://graph.microsoft.com/v1.0` |
+| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token                    | -                                  |
+
+When installed via [MCPB](https://github.com/anthropics/mcpb), `GRAPHDO_DEBUG`, `GRAPHDO_CLIENT_ID`, and `GRAPHDO_TENANT_ID` are exposed as configurable settings in the extension UI and automatically passed as environment variables.
 
 ---
 
