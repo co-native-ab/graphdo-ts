@@ -8,6 +8,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import * as msal from "@azure/msal-node";
+import { z } from "zod";
 
 import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
@@ -131,18 +132,35 @@ async function saveAccount(
   logger.debug("saved account", { path: accountPath });
 }
 
+const AccountInfoSchema = z.object({
+  username: z.string(),
+  // msal.AccountInfo has more fields, but we only care about username for now.
+}).loose();
+
 async function loadAccount(
   configDir: string,
 ): Promise<msal.AccountInfo | undefined> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   try {
     const data = await fs.readFile(accountPath, "utf-8");
-    const account = JSON.parse(data) as msal.AccountInfo;
+    let account: unknown;
+    try {
+      account = JSON.parse(data);
+    } catch {
+      logger.error("Failed to parse account.json as JSON", { path: accountPath });
+      return undefined;
+    }
+    // Validate minimal shape
+    const parsed = AccountInfoSchema.safeParse(account);
+    if (!parsed.success) {
+      logger.error("Account file failed validation", { path: accountPath, error: parsed.error.message });
+      return undefined;
+    }
     logger.debug("loaded account", {
       path: accountPath,
-      username: account.username,
+      username: parsed.data.username,
     });
-    return account;
+    return parsed.data as msal.AccountInfo;
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === "ENOENT") {
       logger.debug("account file not found", { path: accountPath });

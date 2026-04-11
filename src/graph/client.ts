@@ -2,6 +2,7 @@
 
 import type { GraphErrorEnvelope } from "./types.js";
 import { logger } from "../logger.js";
+import { ZodType, ZodError } from "zod";
 
 /** Error thrown when a Graph API request fails. */
 export class GraphRequestError extends Error {
@@ -17,6 +18,64 @@ export class GraphRequestError extends Error {
     );
     this.name = "GraphRequestError";
   }
+}
+
+/** Error thrown when a Graph API response cannot be parsed/validated. */
+export class GraphResponseParseError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly path: string,
+    public readonly statusCode: number,
+    public readonly zodError: ZodError,
+    public readonly rawBody: string,
+  ) {
+    super(
+      `Failed to parse Graph API response for ${method} ${path} (HTTP ${statusCode}): ${zodError.message}\nRaw body: ${rawBody}`,
+    );
+    this.name = "GraphResponseParseError";
+  }
+}
+
+/**
+ * Parse and validate a Graph API response using a Zod schema.
+ * Throws GraphResponseParseError on validation failure.
+ */
+export async function parseResponse<T>(
+  response: Response,
+  schema: ZodType<T>,
+  method?: string,
+  path?: string,
+): Promise<T> {
+  const rawBody = await response.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    throw new GraphResponseParseError(
+      method ?? response.url,
+      path ?? "",
+      response.status,
+      new ZodError([
+        {
+          code: "custom",
+          message: "Response body is not valid JSON",
+          path: [],
+        },
+      ]),
+      rawBody,
+    );
+  }
+  const result = schema.safeParse(json);
+  if (!result.success) {
+    throw new GraphResponseParseError(
+      method ?? response.url,
+      path ?? "",
+      response.status,
+      result.error,
+      rawBody,
+    );
+  }
+  return result.data;
 }
 
 /** HTTP client for Microsoft Graph API using native fetch. */

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestEnv, type TestEnv } from "../helpers.js";
-import { GraphClient, GraphRequestError } from "../../src/graph/client.js";
+import { GraphClient, GraphRequestError, GraphResponseParseError, parseResponse } from "../../src/graph/client.js";
+import { UserSchema, TodoItemSchema, GraphListResponseSchema } from "../../src/graph/types.js";
 
 describe("GraphClient", () => {
   let env: TestEnv;
@@ -98,5 +99,72 @@ describe("GraphClient", () => {
         badServer.close((e) => (e ? reject(e) : resolve())),
       );
     }
+  });
+});
+
+describe("parseResponse", () => {
+  function makeResponse(body: string, status = 200): Response {
+    return new Response(body, { status });
+  }
+
+  it("parses a valid User response", async () => {
+    const body = JSON.stringify({ id: "1", displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com" });
+    const user = await parseResponse(makeResponse(body), UserSchema, "GET", "/me");
+    expect(user.id).toBe("1");
+    expect(user.displayName).toBe("Test");
+  });
+
+  it("allows extra fields (loose schema)", async () => {
+    const body = JSON.stringify({ id: "1", displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com", extraField: true });
+    const user = await parseResponse(makeResponse(body), UserSchema, "GET", "/me");
+    expect(user.id).toBe("1");
+  });
+
+  it("throws GraphResponseParseError for missing required fields", async () => {
+    const body = JSON.stringify({ id: "1" }); // missing displayName, mail, userPrincipalName
+    await expect(
+      parseResponse(makeResponse(body), UserSchema, "GET", "/me"),
+    ).rejects.toThrow(GraphResponseParseError);
+  });
+
+  it("throws GraphResponseParseError for wrong types", async () => {
+    const body = JSON.stringify({ id: 123, displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com" });
+    await expect(
+      parseResponse(makeResponse(body), UserSchema, "GET", "/me"),
+    ).rejects.toThrow(GraphResponseParseError);
+  });
+
+  it("throws GraphResponseParseError for non-JSON body", async () => {
+    await expect(
+      parseResponse(makeResponse("not json"), UserSchema, "GET", "/me"),
+    ).rejects.toThrow(GraphResponseParseError);
+  });
+
+  it("error includes method, path, and raw body", async () => {
+    const body = "invalid json";
+    try {
+      await parseResponse(makeResponse(body), UserSchema, "GET", "/me");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraphResponseParseError);
+      const gpe = err as GraphResponseParseError;
+      expect(gpe.method).toBe("GET");
+      expect(gpe.path).toBe("/me");
+      expect(gpe.rawBody).toBe("invalid json");
+    }
+  });
+
+  it("validates TodoItem schema", async () => {
+    const body = JSON.stringify({ id: "t1", title: "Task", status: "notStarted" });
+    const item = await parseResponse(makeResponse(body), TodoItemSchema, "GET", "/tasks/t1");
+    expect(item.title).toBe("Task");
+  });
+
+  it("validates GraphListResponse schema", async () => {
+    const schema = GraphListResponseSchema(TodoItemSchema);
+    const body = JSON.stringify({ value: [{ id: "t1", title: "Task", status: "notStarted" }] });
+    const list = await parseResponse(makeResponse(body), schema, "GET", "/tasks");
+    expect(list.value).toHaveLength(1);
+    expect(list.value[0]?.title).toBe("Task");
   });
 });
