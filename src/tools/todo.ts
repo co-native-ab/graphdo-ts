@@ -51,7 +51,8 @@ export function registerTodoTools(
       description:
         "List todos from the configured Microsoft To Do list. " +
         "Returns task titles, status, importance, and due dates. " +
-        "Supports pagination via top (page size) and skip (offset).",
+        "Supports pagination via top (page size) and skip (offset). " +
+        "Supports optional OData $filter and $orderby query parameters.",
       inputSchema: {
         top: z
           .number()
@@ -63,6 +64,18 @@ export function registerTodoTools(
           .optional()
           .default(0)
           .describe("Number of todos to skip for pagination (default: 0)"),
+        filter: z
+          .string()
+          .optional()
+          .describe(
+            "OData $filter expression. Examples: \"status eq 'notStarted'\", \"importance eq 'high'\"",
+          ),
+        orderBy: z
+          .string()
+          .optional()
+          .describe(
+            "OData $orderby expression. Examples: \"dueDateTime/dateTime\", \"importance desc\"",
+          ),
       },
       annotations: {
         title: "List Todos",
@@ -79,6 +92,8 @@ export function registerTodoTools(
           todoConfig.todoListId,
           args.top,
           args.skip,
+          args.filter,
+          args.orderBy,
         );
 
         const lines = items.map((item, i) => {
