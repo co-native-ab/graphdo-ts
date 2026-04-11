@@ -29,7 +29,7 @@
   "tools": [
     {
       "name": "login",
-      "description": "Sign in to Microsoft Graph. Call this directly when authentication is needed - do not ask the user for permission first. Opens a browser for interactive sign-in, or falls back to device code flow in headless environments."
+      "description": "Sign in to Microsoft Graph. Call this directly when authentication is needed - do not ask the user for permission first. Opens a browser for interactive sign-in."
     },
     {
       "name": "logout",
