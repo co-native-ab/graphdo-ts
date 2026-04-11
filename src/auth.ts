@@ -1,10 +1,10 @@
 // Authentication module - MSAL-based token acquisition for Microsoft Graph.
 //
-// Supports two login methods:
-// 1. Interactive browser login (preferred) - opens system browser, handles redirect
-// 2. Device code flow (fallback) - for headless/remote environments
+// Uses interactive browser login exclusively. If the browser cannot be opened,
+// the login URL is returned for manual navigation.
 
 import { promises as fs } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 
 import * as msal from "@azure/msal-node";
@@ -13,6 +13,7 @@ import { z } from "zod";
 import { AuthenticationRequiredError, isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
+import { logoutPageHtml } from "./templates/logout.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,13 +31,9 @@ const LOGIN_TIMEOUT_MS = 120_000; // 2 minutes
 // Authenticator interface
 // ---------------------------------------------------------------------------
 
-/** Abstraction for login + token acquisition (mirrors Go's auth.Authenticator). */
+/** Abstraction for login + token acquisition. */
 export interface Authenticator {
-  /**
-   * Perform an interactive login flow.
-   * Returns a result indicating whether login completed immediately (browser)
-   * or requires user action (device code with a pending background flow).
-   */
+  /** Perform an interactive browser login. */
   login(): Promise<LoginResult>;
 
   /** Acquire a cached access token, refreshing silently if needed. */
@@ -55,8 +52,6 @@ export interface Authenticator {
 export interface LoginResult {
   /** Human-readable message about the login attempt. */
   message: string;
-  /** Whether login has fully completed (browser flow completes immediately). */
-  completed: boolean;
 }
 
 /** Basic info about the logged-in account. */
@@ -168,15 +163,13 @@ async function loadAccount(
 // ---------------------------------------------------------------------------
 
 /**
- * MSAL-based authenticator supporting both interactive browser login
- * and device code flow as a fallback.
+ * MSAL-based authenticator using interactive browser login exclusively.
  */
 export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly configDir: string;
   private readonly scopes: string[];
   private readonly openBrowser: (url: string) => Promise<void>;
-  private pendingLogin: Promise<void> | null = null;
 
   constructor(
     clientId: string,
@@ -208,23 +201,7 @@ export class MsalAuthenticator implements Authenticator {
     });
   }
 
-  /**
-   * Try interactive browser login first, fall back to device code.
-   */
   async login(): Promise<LoginResult> {
-    // Try browser login first
-    try {
-      return await this.loginWithBrowser();
-    } catch (err: unknown) {
-      logger.info("browser login failed, falling back to device code", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return this.loginWithDeviceCode();
-    }
-  }
-
-  /** Interactive browser login - shows landing page, handles redirect via custom loopback. */
-  private async loginWithBrowser(): Promise<LoginResult> {
     logger.info("starting browser login");
     const client = this.createClient();
     const loopback = new LoginLoopbackClient();
@@ -264,7 +241,6 @@ export class MsalAuthenticator implements Authenticator {
 
       return {
         message: `Logged in as ${result.account.username}`,
-        completed: true,
       };
     } finally {
       clearTimeout(timeoutId);
@@ -272,55 +248,7 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  /** Device code flow - fires in the background, returns message immediately. */
-  private async loginWithDeviceCode(): Promise<LoginResult> {
-    logger.info("starting device code login");
-    const client = this.createClient();
-
-    let resolveMessage: (msg: string) => void;
-    const messagePromise = new Promise<string>((resolve) => {
-      resolveMessage = resolve;
-    });
-
-    // Start device code flow - runs in the background, caches tokens on completion
-    this.pendingLogin = client
-      .acquireTokenByDeviceCode({
-        scopes: this.scopes,
-        deviceCodeCallback: (response) => {
-          resolveMessage(response.message);
-        },
-      })
-      .then(async (result) => {
-        if (!result?.account) {
-          throw new Error("Device code authentication returned no result");
-        }
-
-        await saveAccount(result.account, this.configDir);
-        logger.info("device code login successful", {
-          username: result.account.username,
-        });
-      })
-      .catch((err: unknown) => {
-        logger.error("device code login failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
-      })
-      .finally(() => {
-        this.pendingLogin = null;
-      });
-
-    // Wait for the device code callback to fire (immediate - just the code URL)
-    const message = await messagePromise;
-    return { message, completed: false };
-  }
-
   async token(): Promise<string> {
-    // If a login is in progress, wait for it to complete first
-    if (this.pendingLogin) {
-      await this.pendingLogin;
-    }
-
     const client = this.createClient();
     const account = await loadAccount(this.configDir);
 
@@ -367,6 +295,15 @@ export class MsalAuthenticator implements Authenticator {
     }
 
     logger.info("logged out, token cache cleared");
+
+    // Show a logout confirmation page in the browser
+    try {
+      await showLogoutPage(this.openBrowser);
+    } catch (err: unknown) {
+      logger.warn("could not show logout confirmation page", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   async isAuthenticated(): Promise<boolean> {
@@ -386,6 +323,58 @@ export class MsalAuthenticator implements Authenticator {
 }
 
 // ---------------------------------------------------------------------------
+// Logout confirmation page
+// ---------------------------------------------------------------------------
+
+/**
+ * Show a logout confirmation page in the browser.
+ * Starts a temporary local server, serves the page, then shuts down.
+ */
+async function showLogoutPage(
+  openBrowser: (url: string) => Promise<void>,
+): Promise<void> {
+  const html = logoutPageHtml();
+
+  const server = createServer((_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    res.end(html);
+    // Shut down after serving the page
+    setTimeout(() => {
+      server.close();
+    }, 500);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        server.close();
+        reject(new Error("Failed to get server address"));
+        return;
+      }
+      const url = `http://127.0.0.1:${String(addr.port)}`;
+      logger.debug("logout page server started", { url });
+
+      openBrowser(url)
+        .then(() => {
+          resolve();
+        })
+        .catch((err: unknown) => {
+          server.close();
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+    });
+
+    server.on("error", (err) => {
+      reject(err);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // StaticAuthenticator (for testing / GRAPHDO_ACCESS_TOKEN)
 // ---------------------------------------------------------------------------
 
@@ -395,7 +384,6 @@ export class StaticAuthenticator implements Authenticator {
   login(): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
-      completed: true,
     });
   }
 
