@@ -1,7 +1,7 @@
 // HTML template for the logout confirmation page.
 
 import { LOGOUT_CONFIRM_STYLE, SUCCESS_STYLE } from "./styles.js";
-import { iconDarkDataUri } from "./icons.js";
+import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
 export function logoutPageHtml(): string {
@@ -10,7 +10,6 @@ export function logoutPageHtml(): string {
     extraStyles: LOGOUT_CONFIRM_STYLE + SUCCESS_STYLE,
     body: `<div class="container">
     <div class="card">
-      <img src="${iconDarkDataUri}" alt="" class="page-icon">
       <div id="confirm-view">
         <h1>Sign out?</h1>
         <p class="subtitle">This will clear your cached tokens and sign you out of Microsoft Graph.</p>
@@ -27,6 +26,10 @@ export function logoutPageHtml(): string {
         <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
       </div>
     </div>
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
   </div>`,
     script: `    const signOutBtn = document.getElementById('sign-out-btn');
     const cancelBtn = document.getElementById('cancel-btn');

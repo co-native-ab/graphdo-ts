@@ -1,7 +1,7 @@
 // HTML template for the browser-based option picker page.
 
 import { escapeHtml, PICKER_STYLE } from "./styles.js";
-import { iconDarkDataUri } from "./icons.js";
+import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
 interface PickerPageOption {
@@ -27,8 +27,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     title: `graphdo - ${escapeHtml(config.title)}`,
     extraStyles: PICKER_STYLE,
     body: `<div class="container">
-    <div id="picker">
-      <img src="${iconDarkDataUri}" alt="" class="page-icon">
+    <div class="card" id="picker">
       <h1>${escapeHtml(config.title)}</h1>
       <p class="subtitle">${escapeHtml(config.subtitle)}</p>
       ${optionButtons}
@@ -36,14 +35,18 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
       </div>
     </div>
-    <div id="done" style="display:none" class="done">
-      <h2>&#10003; Done</h2>
-      <p>Selected: <strong id="selected-label"></strong></p>
-      <p style="margin-top: 24px;">You can switch back to your AI assistant now.</p>
+    <div class="card done" id="done" style="display:none">
+      <h1>&#10003; Done</h1>
+      <p class="message">Selected: <strong id="selected-label"></strong></p>
+      <p class="message" style="margin-top: 16px;">You can switch back to your AI assistant now.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
       <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
     <div id="error" class="error" style="display:none"></div>
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
   </div>`,
     script: `    document.querySelectorAll('.option-btn').forEach(btn => {
       btn.addEventListener('click', async () => {

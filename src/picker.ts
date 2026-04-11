@@ -118,6 +118,9 @@ function handleRequest(
 ): void {
   const url = req.url ?? "/";
 
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+
   if (req.method === "GET" && url === "/") {
     servePickerPage(res, config);
     return;
@@ -145,7 +148,6 @@ function handleRequest(
 function servePickerPage(res: ServerResponse, config: PickerConfig): void {
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-store",
   });
   res.end(pickerPageHtml(config));
 }

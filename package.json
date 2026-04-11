@@ -5,8 +5,11 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
-    "mcpb": "npm run build && npx @anthropic-ai/mcpb@latest pack . graphdo.mcpb",
+    "icons": "node scripts/encode-icons.mjs",
+    "icons:check": "node scripts/encode-icons.mjs --check",
+    "preview": "node scripts/preview-pages.mjs",
+    "build": "npm run icons && node build.mjs",
+    "mcpb": "node scripts/bundle-mcpb.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
@@ -14,7 +17,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
+    "check": "npm run format:check && npm run icons:check && npm run lint && npm run typecheck && npm run test"
   },
   "keywords": [
     "mcp",

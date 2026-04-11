@@ -35,13 +35,23 @@ describe("login templates", () => {
       expect(html).toContain(purple.brand);
     });
 
-    it("includes favicon data URI", () => {
-      expect(html).toContain('rel="icon"');
-      expect(html).toContain("data:image/png;base64,");
+    it("includes dark mode styles", () => {
+      expect(html).toContain("prefers-color-scheme: dark");
     });
 
-    it("includes page icon in body", () => {
-      expect(html).toContain('class="page-icon"');
+    it("includes favicon data URI", () => {
+      expect(html).toContain('rel="icon"');
+      expect(html).toContain("data:image/svg+xml;base64,");
+    });
+
+    it("includes brand logo footer below card", () => {
+      expect(html).toContain('class="brand-footer"');
+    });
+
+    it("uses picture element for dark mode logo swap", () => {
+      expect(html).toContain("<picture>");
+      expect(html).toContain("prefers-color-scheme: dark");
+      expect(html).toContain("</picture>");
     });
 
     it("includes the sign-in button", () => {
@@ -91,7 +101,7 @@ describe("login templates", () => {
 
     it("includes favicon data URI", () => {
       expect(html).toContain('rel="icon"');
-      expect(html).toContain("data:image/png;base64,");
+      expect(html).toContain("data:image/svg+xml;base64,");
     });
 
     it("does not contain Co-native text", () => {
@@ -134,7 +144,7 @@ describe("login templates", () => {
     it("includes favicon data URI", () => {
       const html = errorPageHtml("test");
       expect(html).toContain('rel="icon"');
-      expect(html).toContain("data:image/png;base64,");
+      expect(html).toContain("data:image/svg+xml;base64,");
     });
 
     it("does not contain Co-native text", () => {

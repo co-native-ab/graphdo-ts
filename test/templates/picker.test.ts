@@ -41,11 +41,17 @@ describe("picker template", () => {
 
   it("includes favicon data URI", () => {
     expect(html).toContain('rel="icon"');
-    expect(html).toContain("data:image/png;base64,");
+    expect(html).toContain("data:image/svg+xml;base64,");
   });
 
-  it("includes page icon in body", () => {
-    expect(html).toContain('class="page-icon"');
+  it("includes brand logo footer below card", () => {
+    expect(html).toContain('class="brand-footer"');
+  });
+
+  it("uses picture element for dark mode logo swap", () => {
+    expect(html).toContain("<picture>");
+    expect(html).toContain("prefers-color-scheme: dark");
+    expect(html).toContain("</picture>");
   });
 
   it("renders title and subtitle", () => {

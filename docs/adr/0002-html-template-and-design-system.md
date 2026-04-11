@@ -96,9 +96,9 @@ No `font-display: block` or other strategies that would delay rendering while wa
 
 ### 5. Favicon and Icon as Base64 Data URIs
 
-The `co-*` icon assets from the `assets/` directory (`icon.png`, `icon-light.png`, `icon-dark.png`) are embedded in served HTML as base64-encoded data URIs in `<link rel="icon">` tags. No external image requests are made — the MCPB bundle is self-contained.
+The SVG icon assets from the `assets/` directory (`symbol.svg`, `symbol-light.svg`, `symbol-dark.svg` for favicons; `logo.svg`, `logo-light.svg`, `logo-dark.svg` for page icons) are embedded in served HTML as base64-encoded SVG data URIs. The favicon uses the symbol (compact mark) and page icons use the logo (full wordmark). No external image requests are made — the MCPB bundle is self-contained.
 
-The base64 encoding is performed at build time or as a constant in `tokens.ts` / `styles.ts`, not at request time. The favicon gives served pages a recognizable identity in the browser tab without requiring any network request.
+The base64 encoding is performed by `scripts/encode-icons.mjs`, which generates `src/templates/icons.ts` from the SVG source files. The favicon gives served pages a recognizable identity in the browser tab without requiring any network request.
 
 ### 6. XSS Escaping for All Dynamic Values
 

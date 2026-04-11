@@ -22,11 +22,15 @@ coverage/
 *.tmp
 *.log
 
+# Preview output
+html-preview/
+
 # Environment
 .env
 .env.local
 
 # MCPB bundles
 *.mcpb
+.mcpb-stage/
 tsconfig.tsbuildinfo
 .agents/
