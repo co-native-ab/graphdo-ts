@@ -96,6 +96,7 @@ export class GraphClient {
   private readonly maxRetries: number;
   private readonly _delayFn: (ms: number) => Promise<void>;
   private static readonly retryableStatusCodes = new Set([429, 503, 504]);
+  private static readonly BASE_RETRY_DELAY_MS = 1000;
 
   /**
    * @param baseUrl  Graph API base URL (default: https://graph.microsoft.com/v1.0)
@@ -109,7 +110,10 @@ export class GraphClient {
     maxRetries = 3,
     delayFn?: (ms: number) => Promise<void>,
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    // Strip trailing slashes without a backtracking regex (avoids ReDoS on untrusted input).
+    let cleanUrl = baseUrl;
+    while (cleanUrl.endsWith("/")) cleanUrl = cleanUrl.slice(0, -1);
+    this.baseUrl = cleanUrl;
     this.credential =
       typeof credential === "string"
         ? { getToken: () => Promise.resolve(credential) }
@@ -216,7 +220,7 @@ export class GraphClient {
           }
         }
         if (delayMs === 0) {
-          delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+          delayMs = GraphClient.BASE_RETRY_DELAY_MS * Math.pow(2, attempt); // 1s, 2s, 4s
         }
         logger.info("graph retry", {
           method,
@@ -234,8 +238,10 @@ export class GraphClient {
       // Not retryable or out of retries
       throw error;
     }
-    // Should not reach here, but throw last error if so
-    throw lastError ?? new GraphRequestError(method, path, 0, "UnknownError", "Unknown error after retries");
+    // lastError is always set when the loop exits without throwing (all attempts
+    // were retryable and exhausted), so the non-null assertion is safe.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    throw lastError!;
   }
 }
 
