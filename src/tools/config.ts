@@ -11,6 +11,7 @@ import { saveConfig } from "../config.js";
 import { GraphClient } from "../graph/client.js";
 import { listTodoLists } from "../graph/todo.js";
 import type { ServerConfig } from "../index.js";
+import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
 
@@ -28,7 +29,7 @@ export function registerConfigTools(
         "they want, this tool opens a browser picker where the user makes the " +
         "selection themselves. This is a human-only action - the AI agent cannot " +
         "choose the list programmatically.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Configure Todo List",
         readOnlyHint: false,

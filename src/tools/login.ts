@@ -10,6 +10,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
+import { z } from "zod";
 import { logger } from "../logger.js";
 
 /** Check whether the connected client supports form-based elicitation. */
@@ -34,11 +35,12 @@ export function registerLoginTools(
         "Opens a browser for interactive sign-in. If a browser is unavailable, " +
         "falls back to device code authentication (returns a URL and code for manual entry). " +
         "Once signed in, all other tools work automatically.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Login to Microsoft",
         readOnlyHint: false,
         openWorldHint: true,
+        idempotentHint: true,
       },
     },
     async () => {
@@ -166,11 +168,12 @@ export function registerLoginTools(
       description:
         "Sign out of Microsoft Graph and clear all cached tokens. " +
         "After logging out, the login tool must be used to re-authenticate.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: {
         title: "Logout from Microsoft",
         readOnlyHint: false,
         destructiveHint: true,
+        idempotentHint: true,
       },
     },
     async () => {
