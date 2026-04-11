@@ -248,4 +248,28 @@ describe("LoginLoopbackClient", () => {
     expect(result.code).toBe("REAL_CODE");
     expect(result.state).toBe("REAL_STATE");
   });
+
+  it("rejects with UserCancelledError when /cancel is posted", async () => {
+    const { client: c, uri, authPromise } = await startClient();
+    client = c;
+
+    const [res] = await Promise.all([
+      fetch(`${uri}/cancel`, { method: "POST" }),
+      expect(authPromise).rejects.toThrow("Login cancelled by user"),
+    ]);
+    expect(res.status).toBe(200);
+  });
+
+  it("landing page includes a Cancel button", async () => {
+    const { client: c, uri } = await startClient();
+    client = c;
+
+    c.setAuthUrl("https://login.microsoftonline.com/test");
+
+    const res = await request(uri);
+    const html = await res.text();
+
+    expect(html).toContain('id="cancel-btn"');
+    expect(html).toContain("Cancel");
+  });
 });

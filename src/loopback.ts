@@ -11,6 +11,7 @@ import type { AuthorizeResponse } from "@azure/msal-node";
 import type { ILoopbackClient } from "@azure/msal-node";
 
 import { logger } from "./logger.js";
+import { UserCancelledError } from "./errors.js";
 import {
   landingPageHtml,
   successPageHtml,
@@ -51,7 +52,7 @@ export class LoginLoopbackClient implements ILoopbackClient {
 
     return new Promise<AuthorizeResponse>((resolve, reject) => {
       const server = createServer((req, res) => {
-        handleRequest(req, res, this, resolve);
+        handleRequest(req, res, this, resolve, reject);
       });
       this.server = server;
 
@@ -113,6 +114,7 @@ function handleRequest(
   res: ServerResponse,
   client: LoginLoopbackClient,
   resolve: (response: AuthorizeResponse) => void,
+  reject: (err: Error) => void,
 ): void {
   const rawUrl = req.url ?? "/";
   const redirectUri = client.getRedirectUri();
@@ -151,6 +153,15 @@ function handleRequest(
   // Success page (shown after redirect from auth code capture)
   if (pathname === "/done" && req.method === "GET") {
     serveSuccessPage(res);
+    return;
+  }
+
+  // Cancel login
+  if (pathname === "/cancel" && req.method === "POST") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    client.closeServer();
+    reject(new UserCancelledError("Login cancelled by user"));
     return;
   }
 

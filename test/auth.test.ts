@@ -10,7 +10,7 @@ import {
   StaticAuthenticator,
   MsalAuthenticator,
 } from "../src/auth.js";
-import { AuthenticationRequiredError } from "../src/errors.js";
+import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
 
 // ---------------------------------------------------------------------------
 // vi.mock must be at the top level (hoisted by vitest)
@@ -61,14 +61,12 @@ afterEach(async () => {
 
 interface FakePCA {
   acquireTokenInteractive: ReturnType<typeof vi.fn>;
-  acquireTokenByDeviceCode: ReturnType<typeof vi.fn>;
   acquireTokenSilent: ReturnType<typeof vi.fn>;
 }
 
 function installFakePCA(): FakePCA {
   const fakePCA: FakePCA = {
     acquireTokenInteractive: vi.fn(),
-    acquireTokenByDeviceCode: vi.fn(),
     acquireTokenSilent: vi.fn(),
   };
 
@@ -113,10 +111,9 @@ function authResult(
 // =========================================================================
 
 describe("StaticAuthenticator", () => {
-  it("login resolves with completed: true and a static message", async () => {
+  it("login resolves with a static message", async () => {
     const auth = new StaticAuthenticator("my-token");
     const result = await auth.login();
-    expect(result.completed).toBe(true);
     expect(result.message).toMatch(/static token/i);
   });
 
@@ -148,7 +145,7 @@ describe("StaticAuthenticator", () => {
 // =========================================================================
 
 describe("MsalAuthenticator.login", () => {
-  it("completes immediately via browser login when interactive succeeds", async () => {
+  it("completes via browser login when interactive succeeds", async () => {
     const dir = getTempDir();
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
@@ -158,7 +155,6 @@ describe("MsalAuthenticator.login", () => {
 
     const result = await auth.login();
 
-    expect(result.completed).toBe(true);
     expect(result.message).toContain("user@example.com");
     // Account file should be saved
     const accountPath = path.join(dir, "account.json");
@@ -167,7 +163,7 @@ describe("MsalAuthenticator.login", () => {
     expect(parsed.username).toBe("user@example.com");
   });
 
-  it("falls back to device code when browser login throws", async () => {
+  it("throws when browser login fails (no device code fallback)", async () => {
     const dir = getTempDir();
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
@@ -177,20 +173,8 @@ describe("MsalAuthenticator.login", () => {
     fakePCA.acquireTokenInteractive.mockRejectedValue(
       new Error("cannot open browser"),
     );
-    // Device code flow succeeds
-    fakePCA.acquireTokenByDeviceCode.mockImplementation(
-      ((req: { deviceCodeCallback: (r: { message: string }) => void }) => {
-        req.deviceCodeCallback({
-          message: "Go to https://device.login and enter code ABCD1234",
-        });
-        return Promise.resolve(authResult());
-      }) as never,
-    );
 
-    const result = await auth.login();
-
-    expect(result.completed).toBe(false);
-    expect(result.message).toContain("ABCD1234");
+    await expect(auth.login()).rejects.toThrow("cannot open browser");
   });
 
   it("saves the account file with mode 0o600", async () => {
@@ -307,14 +291,59 @@ describe("MsalAuthenticator.token", () => {
 // MsalAuthenticator — logout
 // =========================================================================
 
+/** Helper: openBrowser mock that auto-POSTs to a given path after a short delay. */
+function makeBrowserSpy(
+  path: string,
+): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
+  return vi.fn((url: string) => {
+    setTimeout(() => {
+      void fetch(`${url}${path}`, { method: "POST" }).catch(() => { /* fire and forget */ });
+    }, 30);
+    return Promise.resolve();
+  });
+}
+
 describe("MsalAuthenticator.logout", () => {
-  it("deletes msal_cache.json and account.json", async () => {
+  it("clears cache files when user confirms", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
     await fs.writeFile(path.join(dir, "account.json"), "{}");
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await auth.logout();
+
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
+    await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
+  });
+
+  it("throws UserCancelledError when user cancels", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+
+    const openBrowser = makeBrowserSpy("/cancel");
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await expect(auth.logout()).rejects.toThrow(UserCancelledError);
+
+    // Files should NOT be deleted when cancelled
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dir, "account.json"))).resolves.toBeUndefined();
+  });
+
+  it("clears tokens silently when browser cannot be opened", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockRejectedValue(
+      new Error("no browser available"),
+    );
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await auth.logout();
@@ -328,19 +357,19 @@ describe("MsalAuthenticator.logout", () => {
     await fs.mkdir(dir, { recursive: true });
     // No cache files exist
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await expect(auth.logout()).resolves.toBeUndefined();
   });
 
-  it("still deletes the remaining file when only one cache file exists", async () => {
+  it("still clears the remaining file when only one cache file exists", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "account.json"), "{}");
     // msal_cache.json does NOT exist
 
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
 
     await auth.logout();
@@ -476,56 +505,5 @@ describe("MsalAuthenticator.accountInfo", () => {
 
     const info = await auth.accountInfo();
     expect(info).toBeNull();
-  });
-});
-
-// =========================================================================
-// MsalAuthenticator — login + token integration (pending login)
-// =========================================================================
-
-describe("MsalAuthenticator pending login", () => {
-  it("token() waits for pending device code login to complete", async () => {
-    const dir = getTempDir();
-    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
-    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
-
-    const fakePCA = installFakePCA();
-
-    // Browser login fails → device code kicks in
-    fakePCA.acquireTokenInteractive.mockRejectedValue(
-      new Error("no browser"),
-    );
-
-    // Device code flow: callback fires immediately, but the promise resolves
-    // only after we manually resolve it (simulating user completing login)
-    let resolveDeviceCode!: (v: MsalTypes.AuthenticationResult) => void;
-    fakePCA.acquireTokenByDeviceCode.mockImplementation(
-      ((req: { deviceCodeCallback: (r: { message: string }) => void }) => {
-        req.deviceCodeCallback({ message: "Enter code ABC" });
-        return new Promise<MsalTypes.AuthenticationResult>((resolve) => {
-          resolveDeviceCode = resolve;
-        });
-      }) as never,
-    );
-
-    // Start login — returns immediately with the device code message
-    const loginResult = await auth.login();
-    expect(loginResult.completed).toBe(false);
-    expect(loginResult.message).toContain("ABC");
-
-    // Now complete the device code flow in the background
-    resolveDeviceCode(authResult({ accessToken: "dc-token" }));
-
-    // token() should wait for the pending login. Since the device code
-    // flow saved the account, we need acquireTokenSilent to succeed.
-    fakePCA.acquireTokenSilent.mockResolvedValue(
-      authResult({ accessToken: "silent-after-dc" }),
-    );
-
-    // Small delay to let the pending promise chain resolve
-    await new Promise((r) => setTimeout(r, 50));
-
-    const token = await auth.token();
-    expect(token).toBe("silent-after-dc");
   });
 });

@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { saveConfig } from "../config.js";
 import { listTodoLists } from "../graph/todo.js";
 import type { ServerConfig } from "../index.js";
+import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
@@ -94,6 +95,13 @@ export function registerConfigTools(
           ],
         };
       } catch (err: unknown) {
+        if (err instanceof UserCancelledError) {
+          return {
+            content: [
+              { type: "text", text: "Todo list configuration cancelled." },
+            ],
+          };
+        }
         const isTimeout =
           err instanceof Error &&
           err.message.toLowerCase().includes("timed out");

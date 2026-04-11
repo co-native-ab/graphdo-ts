@@ -1,24 +1,15 @@
 // Login tools - authentication management via MCP tools.
 //
-// Supports two login methods:
-// 1. Interactive browser login (preferred) - opens system browser, completes immediately
-// 2. Device code flow (fallback) - returns URL + code for manual entry
-//
-// When the client supports elicitation and device code is used, a form prompt
-// displays the URL + code and waits for the user to confirm.
+// Uses interactive browser login exclusively. If the browser cannot be opened,
+// the tool returns an error with the login URL for manual navigation.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
+import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { formatError } from "./shared.js";
-
-/** Check whether the connected client supports form-based elicitation. */
-function clientSupportsElicitation(config: ServerConfig): boolean {
-  const caps = config.mcpServer.server.getClientCapabilities();
-  return caps?.elicitation?.form !== undefined;
-}
 
 /** Register login/logout tools on the given MCP server. */
 export function registerLoginTools(
@@ -33,8 +24,7 @@ export function registerLoginTools(
       description:
         "Sign in to Microsoft Graph. Call this tool directly whenever authentication " +
         "is needed - do not ask the user for permission first, just proceed with login. " +
-        "Opens a browser for interactive sign-in. If a browser is unavailable, " +
-        "falls back to device code authentication (returns a URL and code for manual entry). " +
+        "Opens a browser for interactive sign-in. " +
         "Once signed in, all other tools work automatically.",
       inputSchema: z.object({}),
       annotations: {
@@ -58,92 +48,23 @@ export function registerLoginTools(
           };
         }
 
-        // Start login - may complete immediately (browser) or need user action (device code)
         const loginResult = await config.authenticator.login();
 
-        // Browser login completed immediately
-        if (loginResult.completed) {
-          logger.info("browser login completed");
-          return {
-            content: [
-              {
-                type: "text",
-                text: loginResult.message,
-              },
-            ],
-          };
-        }
-
-        // Device code flow - login is pending in the background
-        logger.info("device code flow initiated, waiting for user");
-
-        // If the client supports elicitation, show a form prompt and wait
-        // for the user to confirm they've completed sign-in.
-        if (clientSupportsElicitation(config)) {
-          const elicitResult = await config.mcpServer.server.elicitInput({
-            message: loginResult.message,
-            requestedSchema: {
-              type: "object" as const,
-              properties: {
-                confirmed: {
-                  type: "boolean" as const,
-                  title: "I've completed sign-in",
-                  description:
-                    "Check this after you've visited the URL and entered the code.",
-                  default: false,
-                },
-              },
-            },
-          });
-
-          if (elicitResult.action !== "accept") {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "Login cancelled. Use the login tool when you're ready to sign in.",
-                },
-              ],
-            };
-          }
-
-          // Wait for the background MSAL flow to complete
-          try {
-            await config.authenticator.token();
-          } catch {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "Sign-in not yet complete. Please visit the URL, enter the code, and try again.",
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Logged in successfully. You can now use the other tools.",
-              },
-            ],
-          };
-        }
-
-        // Fallback: return the device code message as text (non-blocking).
+        logger.info("browser login completed");
         return {
           content: [
             {
               type: "text",
-              text:
-                loginResult.message +
-                "\n\nOnce you've signed in, you can use the other tools.",
+              text: loginResult.message,
             },
           ],
         };
       } catch (error: unknown) {
+        if (error instanceof UserCancelledError) {
+          return {
+            content: [{ type: "text", text: "Login cancelled." }],
+          };
+        }
         return formatError("login", error, {
           prefix: "Login failed: ",
           suffix: "\n\nYou can call this tool again if the user would like to retry.",
@@ -180,6 +101,11 @@ export function registerLoginTools(
           ],
         };
       } catch (error: unknown) {
+        if (error instanceof UserCancelledError) {
+          return {
+            content: [{ type: "text", text: "Logout cancelled." }],
+          };
+        }
         return formatError("logout", error, { prefix: "Logout failed: " });
       }
     },

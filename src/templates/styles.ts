@@ -74,7 +74,33 @@ export const BASE_STYLE = `
       margin-top: ${spacing.xl};
       font-size: ${fontSize.xs};
       color: ${grey.grey3};
-    }`;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: ${spacing.md};
+      width: 100%;
+    }
+    .cancel-btn {
+      display: inline-block;
+      padding: 10px ${spacing.xxl};
+      background: transparent;
+      cursor: pointer;
+      color: ${grey.grey4};
+      border: 1px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      font-weight: ${fontWeight.regular};
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .cancel-btn:hover {
+      border-color: ${grey.grey3};
+      color: ${purple.plus1};
+    }
+    .cancel-btn:disabled { opacity: 0.5; cursor: not-allowed; }`;
 
 // ---------------------------------------------------------------------------
 // Login-specific styles
@@ -130,6 +156,24 @@ export const ERROR_STYLE = `
       color: ${complementary.peach.base};
       word-break: break-word;
     }`;
+
+export const LOGOUT_CONFIRM_STYLE = `
+    .sign-out-btn {
+      display: block;
+      width: 100%;
+      padding: 14px ${spacing.xxl};
+      background: ${complementary.peach.base};
+      cursor: pointer;
+      color: ${grey.white};
+      border: none;
+      border-radius: ${borderRadius.md};
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      font-weight: ${fontWeight.semibold};
+      transition: background 0.15s;
+    }
+    .sign-out-btn:hover { background: ${complementary.peach.hover}; }
+    .sign-out-btn:disabled { opacity: 0.6; cursor: not-allowed; }`;
 
 // ---------------------------------------------------------------------------
 // Picker-specific styles

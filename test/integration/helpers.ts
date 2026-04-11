@@ -11,8 +11,6 @@ import type { Server } from "node:http";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { createMcpServer } from "../../src/index.js";
 import { createMockGraphServer, MockState } from "../mock-graph.js";
@@ -31,13 +29,6 @@ export interface ToolResult {
   content: ToolContent[];
   isError?: boolean;
 }
-
-/** Elicitation response handler - returns the configured result. */
-/** Handler that produces an elicitation response for testing MCP clients with form-based elicitation support. */
-export type ElicitHandler = (params: {
-  message: string;
-  requestedSchema?: unknown;
-}) => ElicitResult;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,46 +106,6 @@ export async function createTestClient(
     InMemoryTransport.createLinkedPair();
 
   const c = new Client({ name: "test-client", version: "1.0.0" });
-
-  await server.connect(serverTransport);
-  await c.connect(clientTransport);
-
-  return c;
-}
-
-/**
- * Create a client that supports form-based elicitation.
- * The handler function is called for each elicitation request.
- */
-export async function createElicitingClient(
-  env: IntegrationEnv,
-  authenticator: MockAuthenticator,
-  handler: ElicitHandler,
-): Promise<Client> {
-  const server = createMcpServer({
-    authenticator,
-    graphBaseUrl: env.graphUrl,
-    configDir: env.configDir,
-    openBrowser: () => Promise.reject(new Error("no browser in tests")),
-  });
-  const [clientTransport, serverTransport] =
-    InMemoryTransport.createLinkedPair();
-
-  const c = new Client(
-    { name: "test-client", version: "1.0.0" },
-    { capabilities: { elicitation: { form: {} } } },
-  );
-
-  c.setRequestHandler(ElicitRequestSchema, (request) => {
-    const params = request.params;
-    return Promise.resolve(
-      handler({
-        message: params.message,
-        requestedSchema:
-          "requestedSchema" in params ? params.requestedSchema : undefined,
-      }),
-    );
-  });
 
   await server.connect(serverTransport);
   await c.connect(clientTransport);

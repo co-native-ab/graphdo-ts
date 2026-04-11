@@ -32,6 +32,9 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       <h1>${escapeHtml(config.title)}</h1>
       <p class="subtitle">${escapeHtml(config.subtitle)}</p>
       ${optionButtons}
+      <div class="btn-group" style="margin-top: 16px">
+        <button id="cancel-btn" class="cancel-btn">Cancel</button>
+      </div>
     </div>
     <div id="done" style="display:none" class="done">
       <h2>&#10003; Done</h2>
@@ -48,6 +51,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         const label = btn.dataset.label;
         btn.classList.add('selected');
         document.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
+        document.getElementById('cancel-btn').disabled = true;
         try {
           const res = await fetch('/select', {
             method: 'POST',
@@ -76,9 +80,17 @@ export function pickerPageHtml(config: PickerPageConfig): string {
           document.getElementById('error').style.display = 'block';
           document.getElementById('error').textContent = 'Failed: ' + err.message;
           document.querySelectorAll('.option-btn').forEach(b => { b.disabled = false; });
+          document.getElementById('cancel-btn').disabled = false;
           btn.classList.remove('selected');
         }
       });
+    });
+
+    document.getElementById('cancel-btn').addEventListener('click', async () => {
+      document.getElementById('cancel-btn').disabled = true;
+      document.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
+      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      window.close();
     });`,
   });
 }

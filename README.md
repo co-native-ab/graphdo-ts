@@ -12,7 +12,7 @@ graphdo-ts currently exposes **11 MCP tools**:
 
 | Tool            | Description                                                                          |
 | --------------- | ------------------------------------------------------------------------------------ |
-| `login`         | Authenticate via browser login (with device code fallback)                           |
+| `login`         | Authenticate via browser login                                                       |
 | `logout`        | Clear cached tokens and sign out                                                     |
 | `auth_status`   | Check authentication status, current user, and configuration                         |
 | `mail_send`     | Send an email to yourself (from and to your Microsoft account)                       |
@@ -57,16 +57,13 @@ Replace the path with the actual path to the downloaded bundle.
 
 graphdo-ts uses MSAL to authenticate with Microsoft. When the agent calls the `login` tool:
 
-1. The tool first tries **interactive browser login** - opens your default browser to Microsoft's sign-in page
+1. The tool opens **interactive browser login** - your default browser navigates to Microsoft's sign-in page
 2. You authenticate in the browser, which redirects to a local server that captures the auth code
 3. Login completes immediately - no manual code entry needed
 
-If a browser cannot be opened (headless environments, SSH, containers), the tool automatically falls back to **device code flow**:
+If a browser cannot be opened automatically, the tool returns the login URL as an error message. You can copy and paste this URL into any browser to complete authentication.
 
-1. Returns a URL and code: _"Visit https://microsoft.com/devicelogin and enter code: ABC123"_
-2. If the client supports [MCP elicitation](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/elicitation), a form prompt is shown with the URL and code - confirm once you've signed in
-3. Otherwise the tool returns the message as text
-4. You authenticate in any browser on any device
+When you use the `logout` tool, cached tokens are cleared and a confirmation page opens in the browser.
 
 Use the `auth_status` tool to check whether you are logged in and see the current user and configuration.
 
@@ -151,14 +148,11 @@ As new Graph surfaces are added, the same principle applies: minimize blast radi
 **"I need admin approval"**
 Your organization's IT administrator needs to approve graphdo-ts. See [Organization Setup](#organization-setup) for what to tell them.
 
-**"The login code expired"**
-Call the `login` tool again. The device code is valid for about 15 minutes, so complete the sign-in promptly.
-
 **"No todo lists found"**
 Create a list in Microsoft To Do first. Open [to-do.office.com](https://to-do.office.com), create a list, then call `todo_config` again.
 
 **"The browser didn't open"**
-The `login` tool automatically falls back to device code flow when a browser cannot be opened. In headless environments (SSH, containers), this is expected.
+The `login` tool will return the login URL in its error message. Copy and paste the URL into your browser to complete authentication.
 
 ---
 
@@ -223,7 +217,7 @@ Claude Desktop / MCP Client
   ▼
 MCP Server (StdioServerTransport)
   │
-  ├─── MSAL Auth (browser + device code) ──→ Azure AD
+  ├─── MSAL Auth (browser-only) ──→ Azure AD
   │
   ├─── Graph Client (native fetch)
   │         │
@@ -235,7 +229,7 @@ MCP Server (StdioServerTransport)
 ```
 
 - **Stdio transport** - communicates via stdin/stdout JSON-RPC (designed for MCPB)
-- **MSAL authentication** - interactive browser login with device code fallback, tokens cached locally
+- **MSAL authentication** - interactive browser login only, tokens cached locally
 - **Graph client** - lightweight wrapper around `fetch` (no Microsoft Graph SDK)
 - **Minimal dependencies** - three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
 

@@ -17,7 +17,7 @@ Review code for security vulnerabilities with focus on:
 - MSAL authentication and token handling
 - File permission security for sensitive cache files
 - Input validation via zod schemas
-- MCP protocol security (elicitation, stdio transport)
+- MCP protocol security (stdio transport)
 - Information disclosure through error messages or logs
 - Supply chain and dependency security
 
@@ -144,19 +144,7 @@ await fs.writeFile(tempPath, data, { encoding: "utf-8", mode: 0o600 });
 await fs.rename(tempPath, targetPath);
 ```
 
-## Step 6: Elicitation Input Validation
-
-When the `login` tool uses `mcpServer.server.elicitInput()`, the response from the MCP client must be validated:
-
-```typescript
-// The elicitation result can be "accept", "decline", or "cancel"
-// Verify the handler checks result.action before proceeding
-if (result.action !== "accept") {
-  return { content: [{ type: "text", text: "Login cancelled." }] };
-}
-```
-
-## Step 7: OWASP Top 10 (as applicable to an MCP server)
+## Step 6: OWASP Top 10 (as applicable to an MCP server)
 
 **A01 - Broken Access Control**:
 - Verify `todo_config` uses human-only browser picker — AI agents must not be able to change the configured list programmatically
