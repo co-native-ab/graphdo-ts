@@ -65,5 +65,9 @@ describe("logout template", () => {
     it("does not contain Co-native text", () => {
       expect(html.toLowerCase()).not.toContain("co-native");
     });
+
+    it("contains graphdo branding", () => {
+      expect(html).toContain("graphdo");
+    });
   });
 });

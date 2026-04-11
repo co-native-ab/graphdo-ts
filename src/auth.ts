@@ -341,10 +341,12 @@ async function showLogoutPage(
       "Cache-Control": "no-store",
     });
     res.end(html);
-    // Shut down after serving the page
-    setTimeout(() => {
-      server.close();
-    }, 500);
+    // Shut down after the response is fully sent
+    res.on("finish", () => {
+      setTimeout(() => {
+        server.close();
+      }, 100);
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -352,7 +354,7 @@ async function showLogoutPage(
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         server.close();
-        reject(new Error("Failed to get server address"));
+        reject(new Error("Server bound to unexpected address type (expected port number)"));
         return;
       }
       const url = `http://127.0.0.1:${String(addr.port)}`;
