@@ -1,14 +1,25 @@
 // Unit tests for the openBrowser URL validation logic.
 //
-// The actual browser-opening side effect is not tested here (it requires a
-// real display), but the validation guards that run before spawning any
-// process are fully exercised.
+// The actual browser-opening side effect is mocked — execFile is stubbed so
+// no real process is spawned. This keeps tests safe on desktop machines.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock node:child_process before importing the module under test.
+vi.mock("node:child_process", () => ({
+  execFile: (_cmd: string, _args: string[], cb: (err: Error | null) => void) => {
+    // Simulate "browser not found" so the promise rejects predictably.
+    cb(new Error("mocked: no browser"));
+  },
+}));
 
 import { openBrowser } from "../src/browser.js";
 
 describe("openBrowser", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("rejects an invalid URL", async () => {
     await expect(openBrowser("not a url")).rejects.toThrow("Invalid URL");
   });
@@ -38,8 +49,8 @@ describe("openBrowser", () => {
   });
 
   it("accepts http://localhost with a port", async () => {
-    // Validation passes — the actual execFile call will fail in CI (no browser),
-    // so we only assert the rejection message is about the browser, not validation.
+    // Validation passes — the mocked execFile rejects, confirming we reached
+    // the actual browser-open step (past all validation guards).
     const result = openBrowser("http://localhost:12345/");
     await expect(result).rejects.toThrow("Failed to open browser:");
   });

@@ -1,7 +1,7 @@
 // HTML templates for the MSAL login loopback pages.
 
 import { escapeHtml, LOGIN_STYLE, SUCCESS_STYLE, ERROR_STYLE } from "./styles.js";
-import { iconDarkDataUri } from "./icons.js";
+import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
 export function landingPageHtml(authUrl: string): string {
@@ -12,8 +12,6 @@ export function landingPageHtml(authUrl: string): string {
     extraStyles: LOGIN_STYLE,
     body: `<div class="container">
     <div class="card">
-      <img src="${iconDarkDataUri}" alt="" class="page-icon">
-      <div class="logo">graphdo</div>
       <h1>Sign in to continue</h1>
       <p class="subtitle">Connect your Microsoft account to enable email and task management through your AI assistant.</p>
       <div class="btn-group">
@@ -21,7 +19,10 @@ export function landingPageHtml(authUrl: string): string {
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
       </div>
     </div>
-    <p class="footer">Your credentials are handled directly by Microsoft. graphdo never sees your password.</p>
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
   </div>`,
     script: `    document.getElementById('cancel-btn').addEventListener('click', async () => {
       document.getElementById('cancel-btn').disabled = true;
@@ -37,13 +38,16 @@ export function successPageHtml(): string {
     extraStyles: SUCCESS_STYLE,
     body: `<div class="container">
     <div class="card">
-      <img src="${iconDarkDataUri}" alt="" class="page-icon">
       <div class="checkmark">&#10003;</div>
       <h1 class="success">Authentication successful</h1>
       <p class="message">You can close this window and return to your AI assistant.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
       <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
   </div>`,
     script: `    let remaining = 5;
     const el = document.getElementById('countdown');
@@ -70,12 +74,15 @@ export function errorPageHtml(errorMessage: string): string {
     extraStyles: ERROR_STYLE,
     body: `<div class="container">
     <div class="card">
-      <img src="${iconDarkDataUri}" alt="" class="page-icon">
       <div class="icon">&#10007;</div>
       <h1 class="error">Authentication failed</h1>
       <p class="message">Please close this window and try again.</p>
       <div class="error-detail">${safeMessage}</div>
     </div>
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
   </div>`,
   });
 }

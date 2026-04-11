@@ -117,6 +117,9 @@ function handleRequest(
   const parsedUrl = new URL(rawUrl, redirectUri);
   const pathname = parsedUrl.pathname;
 
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+
   // Auth code redirect from Microsoft: /?code=...&state=...
   if (pathname === "/" && parsedUrl.searchParams.has("code")) {
     const authResponse = parseAuthResponse(parsedUrl.searchParams);
@@ -180,7 +183,6 @@ function parseAuthResponse(params: URLSearchParams): AuthorizeResponse {
 function serveHtml(res: ServerResponse, html: string): void {
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-store",
   });
   res.end(html);
 }

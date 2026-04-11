@@ -358,10 +358,12 @@ async function showLogoutPage(
     const server = createServer((req, res) => {
       const url = req.url ?? "/";
 
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+
       if (req.method === "GET" && url === "/") {
         res.writeHead(200, {
           "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store",
         });
         res.end(html);
         return;

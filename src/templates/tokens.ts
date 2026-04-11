@@ -98,6 +98,23 @@ export const shadow = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Dark mode overrides — used in @media (prefers-color-scheme: dark)
+// ---------------------------------------------------------------------------
+
+export const dark = {
+  bg1: "#0d0c14",
+  bg2: "#141320",
+  surface: "#1c1b29",
+  surfaceHover: "#24233a",
+  text: "#c2c1cf",
+  textMuted: "#7d7c8f",
+  heading: "#e0dded",
+  border: "#2c2b3d",
+  borderHover: "#3c3b50",
+  cardShadow: `0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)`,
+} as const;
+
+// ---------------------------------------------------------------------------
 // Google Fonts URL
 // ---------------------------------------------------------------------------
 

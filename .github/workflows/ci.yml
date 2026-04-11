@@ -29,6 +29,8 @@ jobs:
         run: npm ci
       - name: Format check
         run: npm run format:check
+      - name: Icons check
+        run: npm run icons:check
       - name: Lint
         run: npm run lint
       - name: Typecheck

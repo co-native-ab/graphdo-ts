@@ -1,25 +1,37 @@
-// Tests for icon data URIs — verifies base64-encoded assets are valid.
+// Tests for icon data URIs — verifies SVG assets are valid.
 
 import { describe, it, expect } from "vitest";
-import { iconDataUri, iconLightDataUri, iconDarkDataUri } from "../../src/templates/icons.js";
+import {
+  symbolDataUri,
+  symbolDarkDataUri,
+  symbolLightDataUri,
+  logoDataUri,
+  logoDarkDataUri,
+  logoLightDataUri,
+} from "../../src/templates/icons.js";
 
 describe("icon data URIs", () => {
-  it("exports a valid PNG data URI for default icon", () => {
-    expect(iconDataUri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
+  const allIcons = [
+    ["symbolDataUri", symbolDataUri],
+    ["symbolDarkDataUri", symbolDarkDataUri],
+    ["symbolLightDataUri", symbolLightDataUri],
+    ["logoDataUri", logoDataUri],
+    ["logoDarkDataUri", logoDarkDataUri],
+    ["logoLightDataUri", logoLightDataUri],
+  ] as const;
+
+  it.each(allIcons)("%s is a valid SVG data URI", (_name, uri) => {
+    expect(uri).toMatch(/^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+=*$/);
   });
 
-  it("exports a valid PNG data URI for light icon", () => {
-    expect(iconLightDataUri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
+  it.each(allIcons)("%s is non-trivial size (actual image data)", (_name, uri) => {
+    expect(uri.length).toBeGreaterThan(500);
   });
 
-  it("exports a valid PNG data URI for dark icon", () => {
-    expect(iconDarkDataUri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
-  });
-
-  it("icons are non-trivial size (actual image data)", () => {
-    // Each icon is ~2–3 KB raw, so base64 should be at least 1000 chars
-    expect(iconDataUri.length).toBeGreaterThan(1000);
-    expect(iconLightDataUri.length).toBeGreaterThan(1000);
-    expect(iconDarkDataUri.length).toBeGreaterThan(1000);
+  it.each(allIcons)("%s decodes to valid SVG content", (_name, uri) => {
+    const b64 = uri.replace("data:image/svg+xml;base64,", "");
+    const svg = Buffer.from(b64, "base64").toString("utf-8");
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("</svg>");
   });
 });

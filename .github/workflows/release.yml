@@ -28,7 +28,6 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Stamping version: $VERSION"
-          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
           jq --arg v "$VERSION" '.version = $v' manifest.json > tmp.json && mv tmp.json manifest.json
       - name: Install dependencies
         run: npm ci
@@ -39,7 +38,7 @@ jobs:
       - name: Create MCPB bundle
         env:
           TAG_NAME: ${{ github.ref_name }}
-        run: npx @anthropic-ai/mcpb@latest pack . "graphdo-ts-${TAG_NAME}.mcpb"
+        run: node scripts/bundle-mcpb.mjs --no-build "graphdo-ts-${TAG_NAME}.mcpb"
       - name: Generate checksums
         run: sha256sum graphdo-ts-*.mcpb > checksums-sha256.txt
       - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1

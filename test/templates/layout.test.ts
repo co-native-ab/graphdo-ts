@@ -32,7 +32,7 @@ describe("layout template", () => {
 
   it("includes favicon as data URI", () => {
     expect(html).toContain('rel="icon"');
-    expect(html).toContain("data:image/png;base64,");
+    expect(html).toContain("data:image/svg+xml;base64,");
   });
 
   it("includes Google Fonts preconnect hints", () => {

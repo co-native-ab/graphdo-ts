@@ -30,8 +30,12 @@ describe("shared styles", () => {
       expect(BASE_STYLE).toContain(grey.white);
     });
 
-    it("uses brand purple for logo color", () => {
-      expect(BASE_STYLE).toContain(purple.brand);
+    it("uses low opacity for brand footer", () => {
+      expect(BASE_STYLE).toContain("opacity: 0.18");
+    });
+
+    it("includes dark mode media query", () => {
+      expect(BASE_STYLE).toContain("prefers-color-scheme: dark");
     });
   });
 
@@ -80,6 +84,10 @@ describe("shared styles", () => {
 
     it("uses Lexend font family", () => {
       expect(PICKER_STYLE).toContain("Lexend");
+    });
+
+    it("includes dark mode media query", () => {
+      expect(PICKER_STYLE).toContain("prefers-color-scheme: dark");
     });
   });
 });
