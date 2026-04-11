@@ -83,15 +83,22 @@ export class GraphClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly token: string;
+  private readonly maxRetries: number;
+  private readonly _delayFn: (ms: number) => Promise<void>;
+  private static readonly retryableStatusCodes = new Set([429, 503, 504]);
 
   constructor(
     baseUrl = "https://graph.microsoft.com/v1.0",
     token: string,
     timeoutMs = 30000,
+    maxRetries = 3,
+    delayFn?: (ms: number) => Promise<void>,
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.token = token;
     this.timeoutMs = timeoutMs;
+    this.maxRetries = maxRetries;
+    this._delayFn = delayFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /** Send an HTTP request to the Graph API and return the raw Response. */
@@ -115,25 +122,31 @@ export class GraphClient {
     // Add timeout using AbortSignal.timeout (Node.js 18+)
     init.signal = AbortSignal.timeout(this.timeoutMs);
 
-    let response: Response;
-    try {
-      response = await fetch(url, init);
-    } catch (err) {
-      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-        throw new GraphRequestError(
-          method,
-          path,
-          0,
-          "TimeoutError",
-          `Graph API request timed out after ${this.timeoutMs}ms`,
-        );
+    let lastError: GraphRequestError | undefined;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(url, init);
+      } catch (err) {
+        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+          throw new GraphRequestError(
+            method,
+            path,
+            0,
+            "TimeoutError",
+            `Graph API request timed out after ${this.timeoutMs}ms`,
+          );
+        }
+        throw err;
       }
-      throw err;
-    }
 
-    logger.debug("graph response", { method, url, status: response.status });
+      logger.debug("graph response", { method, url, status: response.status });
 
-    if (response.status >= 400) {
+      if (response.status < 400) {
+        return response;
+      }
+
+      // Parse error body for code/message
       const rawBody = await response.text();
       let code = "UnknownError";
       let message = rawBody;
@@ -148,18 +161,57 @@ export class GraphClient {
         // Use raw body text as message
       }
 
-      throw new GraphRequestError(
+      const error = new GraphRequestError(
         method,
         path,
         response.status,
         code,
         message,
       );
-    }
 
-    return response;
+      if (
+        attempt < this.maxRetries &&
+        GraphClient.retryableStatusCodes.has(response.status)
+      ) {
+        // Determine delay
+        let delayMs = 0;
+        const retryAfter = response.headers.get("Retry-After");
+        if (retryAfter) {
+          const retryAfterSeconds = parseInt(retryAfter, 10);
+          if (!isNaN(retryAfterSeconds)) {
+            delayMs = retryAfterSeconds * 1000;
+          } else {
+            // Try HTTP-date format (not common, but spec allows)
+            const retryDate = Date.parse(retryAfter);
+            if (!isNaN(retryDate)) {
+              delayMs = Math.max(0, retryDate - Date.now());
+            }
+          }
+        }
+        if (delayMs === 0) {
+          delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+        }
+        logger.info("graph retry", {
+          method,
+          path,
+          status: response.status,
+          attempt: attempt + 1,
+          delayMs,
+          code,
+          message,
+        });
+        await this._delayFn(delayMs);
+        lastError = error;
+        continue;
+      }
+      // Not retryable or out of retries
+      throw error;
+    }
+    // Should not reach here, but throw last error if so
+    throw lastError ?? new GraphRequestError(method, path, 0, "UnknownError", "Unknown error after retries");
   }
 }
+
 
 function isGraphErrorEnvelope(value: unknown): value is GraphErrorEnvelope {
   if (typeof value !== "object" || value === null) return false;

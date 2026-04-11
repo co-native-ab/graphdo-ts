@@ -1,7 +1,38 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import http from "node:http";
 import { createTestEnv, type TestEnv } from "../helpers.js";
 import { GraphClient, GraphRequestError, GraphResponseParseError, parseResponse } from "../../src/graph/client.js";
 import { UserSchema, TodoItemSchema, GraphListResponseSchema } from "../../src/graph/types.js";
+
+/** Start a local HTTP server with sequential request handlers. */
+async function makeServer(handlers: ((req: http.IncomingMessage, res: http.ServerResponse) => void)[]) {
+  let call = 0;
+  const server = http.createServer((req, res) => {
+    const handler = handlers[call] ?? handlers[handlers.length - 1];
+    call++;
+    handler!(req, res);
+  });
+  const url = await new Promise<string>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr === null || typeof addr === "string") {
+        reject(new Error("unexpected address"));
+        return;
+      }
+      resolve(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+  return { server, url };
+}
+
+async function closeServer(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) =>
+    server.close((e) => (e ? reject(e) : resolve())),
+  );
+}
+
+const noDelay = (): Promise<void> => Promise.resolve();
 
 describe("GraphClient", () => {
   let env: TestEnv;
@@ -22,7 +53,6 @@ describe("GraphClient", () => {
   });
 
   it("sends Content-Type: application/json", async () => {
-    // POST with a body to verify content-type is sent
     const response = await client.request("POST", "/me/sendMail", {
       message: {
         subject: "test",
@@ -62,25 +92,12 @@ describe("GraphClient", () => {
   });
 
   it("handles unparseable error bodies gracefully (UnknownError)", async () => {
-    // Create a minimal HTTP server that returns non-JSON error body
-    const http = await import("node:http");
-    const badServer = http.createServer((_req, res) => {
-      res.writeHead(500, { "Content-Type": "text/plain" });
-      res.end("something went wrong");
-    });
-
-    const url = await new Promise<string>((resolve, reject) => {
-      badServer.once("error", reject);
-      badServer.listen(0, "127.0.0.1", () => {
-        const addr = badServer.address();
-        if (addr === null || typeof addr === "string") {
-          reject(new Error("unexpected address"));
-          return;
-        }
-        resolve(`http://127.0.0.1:${addr.port}`);
-      });
-    });
-
+    const { server, url } = await makeServer([
+      (_req, res) => {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("something went wrong");
+      },
+    ]);
     try {
       const badClient = new GraphClient(url, "tok");
       await expect(badClient.request("GET", "/anything")).rejects.toSatisfy(
@@ -95,30 +112,18 @@ describe("GraphClient", () => {
         },
       );
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        badServer.close((e) => (e ? reject(e) : resolve())),
-      );
+      await closeServer(server);
     }
   });
 });
 
 describe("GraphClient timeouts", () => {
   it("throws GraphRequestError on request timeout", async () => {
-    const http = await import("node:http");
-    const server = http.createServer((_req, _res) => {
-      // Intentionally hang - never respond
-    });
-    const url = await new Promise<string>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        const addr = server.address();
-        if (addr === null || typeof addr === "string") {
-          reject(new Error("unexpected address"));
-          return;
-        }
-        resolve(`http://127.0.0.1:${addr.port}`);
-      });
-    });
+    const { server, url } = await makeServer([
+      () => {
+        // Intentionally hang - never respond
+      },
+    ]);
     try {
       const timeoutClient = new GraphClient(url, "tok", 100);
       await expect(timeoutClient.request("GET", "/hang")).rejects.toSatisfy(
@@ -132,9 +137,90 @@ describe("GraphClient timeouts", () => {
         },
       );
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((e) => (e ? reject(e) : resolve())),
-      );
+      await closeServer(server);
+    }
+  });
+});
+
+describe("GraphClient retry logic", () => {
+  it("retries on 429 then succeeds", async () => {
+    const { server, url } = await makeServer([
+      (_req, res) => {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "TooManyRequests", message: "slow down" } }));
+      },
+      (_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end('{"ok":true}');
+      },
+    ]);
+    try {
+      const client = new GraphClient(url, "tok", 30000, 3, noDelay);
+      const resp = await client.request("GET", "/foo");
+      expect(resp.status).toBe(200);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("parses Retry-After header (seconds)", async () => {
+    let capturedDelayMs = -1;
+    const capturingDelay = (ms: number): Promise<void> => {
+      capturedDelayMs = ms;
+      return Promise.resolve();
+    };
+    const { server, url } = await makeServer([
+      (_req, res) => {
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+        res.end(JSON.stringify({ error: { code: "TooManyRequests", message: "wait" } }));
+      },
+      (_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end('{"ok":true}');
+      },
+    ]);
+    try {
+      const client = new GraphClient(url, "tok", 30000, 3, capturingDelay);
+      await client.request("GET", "/foo");
+      expect(capturedDelayMs).toBe(1000);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("does not retry on 400/404", async () => {
+    let callCount = 0;
+    const { server, url } = await makeServer([
+      (_req, res) => {
+        callCount++;
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "NotFound", message: "nope" } }));
+      },
+    ]);
+    try {
+      const client = new GraphClient(url, "tok", 30000, 3, noDelay);
+      await expect(client.request("GET", "/foo")).rejects.toThrow(GraphRequestError);
+      expect(callCount).toBe(1);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("throws after max retries are exhausted", async () => {
+    let callCount = 0;
+    const { server, url } = await makeServer([
+      (_req, res) => {
+        callCount++;
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "ServiceUnavailable", message: "try again" } }));
+      },
+    ]);
+    try {
+      const client = new GraphClient(url, "tok", 30000, 2, noDelay);
+      await expect(client.request("GET", "/foo")).rejects.toThrow(GraphRequestError);
+      expect(callCount).toBe(3); // 1 initial + 2 retries
+    } finally {
+      await closeServer(server);
     }
   });
 });
@@ -158,7 +244,7 @@ describe("parseResponse", () => {
   });
 
   it("throws GraphResponseParseError for missing required fields", async () => {
-    const body = JSON.stringify({ id: "1" }); // missing displayName, mail, userPrincipalName
+    const body = JSON.stringify({ id: "1" });
     await expect(
       parseResponse(makeResponse(body), UserSchema, "GET", "/me"),
     ).rejects.toThrow(GraphResponseParseError);
