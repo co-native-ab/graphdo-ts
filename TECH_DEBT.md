@@ -209,7 +209,7 @@
 
 **Overview:** `MsalAuthenticator` is the production authentication implementation (417 lines) with zero direct test coverage. Only `MockAuthenticator` and `StaticAuthenticator` are tested.
 
-**Explanation:** The MSAL integration includes complex logic: file-based cache plugin, account persistence, browser login with timeout, token acquisition with silent refresh, and logout cleanup. All of this is only exercised through the mock in tests. A regression in the cache plugin or login flow would not be caught by the test suite.
+**Explanation:** The MSAL integration includes complex logic: file-based cache plugin, account persistence, browser login with timeout, device code flow with background completion, token acquisition with silent refresh, and logout cleanup. All of this is only exercised through the mock in tests. A regression in the cache plugin or login flow would not be caught by the test suite.
 
 **Requirements:**
 - Need to mock `@azure/msal-node` module
@@ -219,7 +219,7 @@
 1. Create `test/auth.test.ts`
 2. Test `createFileCachePlugin`: verify cache file creation, reads, ENOENT handling, and mode `0o600`
 3. Test `saveAccount` / `loadAccount`: round-trip, ENOENT handling, file permissions
-4. Test `MsalAuthenticator.login()`: mock `PublicClientApplication` to verify browser login succeeds and saves account; verify error is thrown when browser login fails
+4. Test `MsalAuthenticator.login()`: mock `PublicClientApplication` to verify browser login attempted first, device code fallback on failure
 5. Test `MsalAuthenticator.token()`: mock silent acquisition, `InteractionRequiredAuthError` → `AuthenticationRequiredError`
 6. Test `MsalAuthenticator.logout()`: verify cache files are deleted, ENOENT ignored
 7. Test `MsalAuthenticator.isAuthenticated()`: returns true/false based on token availability
@@ -532,20 +532,20 @@
 
 **Priority:** P3 · **Effort:** M · **Impact:** 🟡 Medium · **Risk:** 🟢 Low
 
-**Overview:** `test/integration.test.ts` at 1,249 lines is the largest file in the entire codebase, covering tool discovery, login flows, mail, todo config, todo CRUD, enhanced features, checklist items, error handling, and status.
+**Overview:** `test/integration.test.ts` at 1,249 lines is the largest file in the entire codebase, covering tool discovery, login flows, mail, todo config, todo CRUD, enhanced features, checklist items, error handling, status, and elicitation.
 
-**Explanation:** While a single integration test file is common, this size makes it hard to navigate and increases merge conflict risk when multiple features are developed in parallel. The file also contains helper function definitions (`createTestClient`, `firstText`) that could be shared.
+**Explanation:** While a single integration test file is common, this size makes it hard to navigate and increases merge conflict risk when multiple features are developed in parallel. The file also contains helper function definitions (`createTestClient`, `createElicitingClient`, `firstText`) that could be shared.
 
 **Requirements:** None
 
 **Implementation Steps:**
 1. Split into focused integration test files:
-   - `test/integration/login.test.ts` — login flows
+   - `test/integration/login.test.ts` — login flows + elicitation
    - `test/integration/mail.test.ts` — mail operations
    - `test/integration/todo.test.ts` — todo CRUD + enhanced features
    - `test/integration/config.test.ts` — todo config browser picker
    - `test/integration/status.test.ts` — auth status tool
-2. Extract shared setup (`createTestClient`, graph server init) into `test/integration/helpers.ts`
+2. Extract shared setup (`createTestClient`, `createElicitingClient`, graph server init) into `test/integration/setup.ts`
 3. Use vitest's `beforeAll`/`afterAll` with shared server state across files
 4. Update `vitest.config.ts` include pattern if needed
 
