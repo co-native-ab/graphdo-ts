@@ -23,7 +23,7 @@ import { registerStatusTool } from "./tools/status.js";
 declare const __VERSION__: string;
 export const VERSION: string = __VERSION__;
 
-/** Azure AD app registration client ID (same as Go graphdo). */
+/** Azure AD (Entra ID) multi-tenant app registration client ID, published by Co-native AB. */
 export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
 
 export const SCOPES: readonly string[] = [

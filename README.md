@@ -2,9 +2,7 @@
 
 A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents scoped, low-risk access to Microsoft Graph.
 
-The design intentionally limits blast radius - agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
-
-This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration.
+The design intentionally minimizes blast radius — agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Critical decisions like signing in and choosing which list to operate on require a human in the loop via the browser. Using an AI agent is never risk-free, but graphdo-ts is designed to keep the exposure as small as possible while still being useful. Current capabilities cover email and Microsoft To Do; more Graph surfaces will be added over time with the same focus on minimizing risk.
 
 ---
 
@@ -105,9 +103,78 @@ The configuration is stored in the OS config directory:
 
 ## Organization Setup
 
-> Personal Microsoft accounts (@outlook.com, @hotmail.com) can skip this section.
+> **Personal Microsoft accounts** (like @outlook.com or @hotmail.com) can skip this section entirely. This is only relevant for work or school accounts managed by an organization.
 
-For work or school accounts, your IT administrator may need to grant admin consent for the application. The app ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`, published by Co-native AB. See the [graphdo README](https://github.com/co-native-ab/graphdo#organization-setup) for detailed admin consent instructions - the same app registration is shared between both projects.
+### For regular users
+
+When you first use the `login` tool, Microsoft may tell you that you need admin approval. This means your IT administrator needs to grant graphdo-ts permission to access your email and tasks on behalf of your organization.
+
+**What to tell your IT admin:**
+
+> "I'd like to use an AI tool called graphdo-ts that helps me send emails to myself and manage my todo list. It needs admin consent for the following **delegated** permissions: User.Read, Mail.Send, Tasks.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
+
+### For IT administrators
+
+graphdo-ts uses a multi-tenant application published by Co-native AB. To grant consent for your organization:
+
+1. Go to the [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **Enterprise applications**.
+2. Click **New application** → **All applications** → search for the application ID: `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`.
+3. If the app doesn't appear, a user can trigger the consent flow by calling the `login` tool — this will create a service principal in your tenant.
+4. Go to **Permissions** and click **Grant admin consent for [your organization]**.
+5. Review and approve the following delegated permissions:
+
+   | Permission       | Type      | Description                                                                    |
+   | ---------------- | --------- | ------------------------------------------------------------------------------ |
+   | `User.Read`      | Delegated | Read the signed-in user's basic profile                                        |
+   | `Mail.Send`      | Delegated | Send mail as the signed-in user                                                |
+   | `Tasks.ReadWrite`| Delegated | Read and write the signed-in user's tasks                                      |
+   | `offline_access` | Delegated | Maintain access to data you have given it access to (enables refresh tokens)   |
+
+6. Once consent is granted, all users in your organization can use the `login` tool without further approval.
+
+**Security — minimizing blast radius:**
+
+graphdo-ts is designed to keep AI agent access as limited as possible while still being useful. Using an AI agent with access to your Microsoft account is never risk-free, but the following measures minimize the exposure:
+
+- **Scoped permissions** — only delegated permissions are used (User.Read, Mail.Send, Tasks.ReadWrite, offline_access). The agent acts as the signed-in user, never as an application with broader access.
+- **Email to self only** — the agent can only send emails to the signed-in user themselves, not to other recipients.
+- **Single todo list** — the agent can only access tasks in one specific list, chosen by you.
+- **Human-in-the-loop for critical decisions** — signing in and selecting which todo list to use both require human interaction via the browser. The AI agent cannot perform these actions programmatically.
+- **Open source** — the source code is available at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) for review.
+
+As new Graph surfaces are added, the same principle applies: minimize blast radius, require human confirmation for sensitive operations, and request only the scopes that are strictly needed.
+
+---
+
+## Troubleshooting
+
+**"I need admin approval"**
+Your organization's IT administrator needs to approve graphdo-ts. See [Organization Setup](#organization-setup) for what to tell them.
+
+**"The login code expired"**
+Call the `login` tool again. The device code is valid for about 15 minutes, so complete the sign-in promptly.
+
+**"No todo lists found"**
+Create a list in Microsoft To Do first. Open [to-do.office.com](https://to-do.office.com), create a list, then call `todo_config` again.
+
+**"The browser didn't open"**
+The `login` tool automatically falls back to device code flow when a browser cannot be opened. In headless environments (SSH, containers), this is expected.
+
+---
+
+## Privacy & Security
+
+graphdo-ts is designed around the principle of **minimizing blast radius** — keeping AI agent access as narrow as possible while still enabling useful work. Using an AI agent is never risk-free, but the following measures reduce the exposure:
+
+- 🔒 **Scoped access** — graphdo-ts only accesses **your own** email and tasks. It cannot access anyone else's data.
+- 📧 **Email to self only** — the agent can **only send emails to yourself**. It cannot send to other recipients.
+- 📋 **Single todo list** — the agent operates on **one specific list** that you choose via the browser. It cannot switch lists on its own.
+- 🧑 **Human-in-the-loop** — signing in and selecting which todo list to use both require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
+- 💻 **Local credentials** — your login credentials are cached **locally on your computer** and nowhere else.
+- 🌐 **Microsoft only** — no data is sent anywhere except to **Microsoft's official servers** (the same ones Outlook and To Do use).
+- 📖 **Open source** — the source code is **fully open** at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) — anyone can review exactly what it does.
+
+As new capabilities are added, the same principle applies: minimize blast radius, require human confirmation for sensitive operations, and request only the permissions that are strictly needed.
 
 ---
 
