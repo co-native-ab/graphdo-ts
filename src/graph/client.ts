@@ -81,12 +81,17 @@ export async function parseResponse<T>(
 /** HTTP client for Microsoft Graph API using native fetch. */
 export class GraphClient {
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly token: string;
 
   constructor(
     baseUrl = "https://graph.microsoft.com/v1.0",
-    private readonly token: string,
+    token: string,
+    timeoutMs = 30000,
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.token = token;
+    this.timeoutMs = timeoutMs;
   }
 
   /** Send an HTTP request to the Graph API and return the raw Response. */
@@ -107,8 +112,24 @@ export class GraphClient {
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
+    // Add timeout using AbortSignal.timeout (Node.js 18+)
+    init.signal = AbortSignal.timeout(this.timeoutMs);
 
-    const response = await fetch(url, init);
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (err) {
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new GraphRequestError(
+          method,
+          path,
+          0,
+          "TimeoutError",
+          `Graph API request timed out after ${this.timeoutMs}ms`,
+        );
+      }
+      throw err;
+    }
 
     logger.debug("graph response", { method, url, status: response.status });
 

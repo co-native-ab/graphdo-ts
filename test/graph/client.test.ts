@@ -102,6 +102,43 @@ describe("GraphClient", () => {
   });
 });
 
+describe("GraphClient timeouts", () => {
+  it("throws GraphRequestError on request timeout", async () => {
+    const http = await import("node:http");
+    const server = http.createServer((_req, _res) => {
+      // Intentionally hang - never respond
+    });
+    const url = await new Promise<string>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        if (addr === null || typeof addr === "string") {
+          reject(new Error("unexpected address"));
+          return;
+        }
+        resolve(`http://127.0.0.1:${addr.port}`);
+      });
+    });
+    try {
+      const timeoutClient = new GraphClient(url, "tok", 100);
+      await expect(timeoutClient.request("GET", "/hang")).rejects.toSatisfy(
+        (err: unknown) => {
+          const gre = err as GraphRequestError;
+          return (
+            gre instanceof GraphRequestError &&
+            gre.code === "TimeoutError" &&
+            gre.graphMessage.includes("timed out")
+          );
+        },
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((e) => (e ? reject(e) : resolve())),
+      );
+    }
+  });
+});
+
 describe("parseResponse", () => {
   function makeResponse(body: string, status = 200): Response {
     return new Response(body, { status });
