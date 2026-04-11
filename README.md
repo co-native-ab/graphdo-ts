@@ -28,7 +28,7 @@ graphdo-ts currently exposes **11 MCP tools**:
 
 ## Installation
 
-graphdo-ts is distributed as an [MCPB](https://github.com/anthropics/mcpb) bundle - a self-contained package that includes the server and a bundled Node.js runtime. No separate Node.js installation required.
+graphdo-ts is distributed as an [MCPB](https://github.com/modelcontextprotocol/mcpb) bundle - a self-contained package that includes the server and a bundled Node.js runtime. No separate Node.js installation required.
 
 ### Download
 
@@ -36,20 +36,12 @@ Download the latest MCPB bundle from [GitHub Releases](https://github.com/co-nat
 
 ### Claude Desktop
 
-Add the following to your Claude Desktop MCP configuration (`claude_desktop_config.json`):
+Install the bundle using one of these methods:
 
-```json
-{
-  "mcpServers": {
-    "graphdo": {
-      "type": "mcpb",
-      "bundle_path": "/path/to/graphdo-ts-v0.1.0.mcpb"
-    }
-  }
-}
-```
+1. **Double-click** the downloaded `.mcpb` file — Claude Desktop will open and install it automatically.
+2. **Or** open Claude Desktop → **Settings** → **Extensions** → **Install Extension**, then select the `.mcpb` file.
 
-Replace the path with the actual path to the downloaded bundle.
+After installation, graphdo appears in your extensions list. You can configure optional settings (debug logging, custom client ID, tenant ID) through the extension settings UI.
 
 ---
 
@@ -208,7 +200,7 @@ npm run mcpb        # Build + create MCPB bundle
 | `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                                     | `https://graph.microsoft.com/v1.0` |
 | `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token                    | -                                  |
 
-When installed via [MCPB](https://github.com/anthropics/mcpb), `GRAPHDO_DEBUG`, `GRAPHDO_CLIENT_ID`, and `GRAPHDO_TENANT_ID` are exposed as configurable settings in the extension UI and automatically passed as environment variables.
+When installed via [MCPB](https://github.com/modelcontextprotocol/mcpb), `GRAPHDO_DEBUG`, `GRAPHDO_CLIENT_ID`, and `GRAPHDO_TENANT_ID` are exposed as configurable settings in the extension UI and automatically passed as environment variables.
 
 ---
 
