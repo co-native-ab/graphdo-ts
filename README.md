@@ -4,7 +4,7 @@ A TypeScript [MCP server](https://modelcontextprotocol.io) that gives AI agents 
 
 The design intentionally limits blast radius - agents can only mail _you_, only touch tasks in a single configured list, and never see resources outside the scopes you've granted. Current capabilities cover email and Microsoft To Do; more Graph surfaces may be added over time.
 
-This is the MCP-native counterpart to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI). Both share the same Azure AD app registration.
+This is the successor to [graphdo](https://github.com/co-native-ab/graphdo) (the Go CLI, now deprecated). Both share the same Azure AD app registration.
 
 ---
 
@@ -105,9 +105,65 @@ The configuration is stored in the OS config directory:
 
 ## Organization Setup
 
-> Personal Microsoft accounts (@outlook.com, @hotmail.com) can skip this section.
+> **Personal Microsoft accounts** (like @outlook.com or @hotmail.com) can skip this section entirely. This is only relevant for work or school accounts managed by an organization.
 
-For work or school accounts, your IT administrator may need to grant admin consent for the application. The app ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`, published by Co-native AB. See the [graphdo README](https://github.com/co-native-ab/graphdo#organization-setup) for detailed admin consent instructions - the same app registration is shared between both projects.
+### For regular users
+
+When you first use the `login` tool, Microsoft may tell you that you need admin approval. This means your IT administrator needs to grant graphdo permission to access your email and tasks on behalf of your organization.
+
+**What to tell your IT admin:**
+
+> "I'd like to use an AI tool called graphdo that helps me send emails to myself and manage my todo list. It needs admin consent for these permissions: User.Read, Mail.Send, Tasks.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
+
+### For IT administrators
+
+graphdo uses a multi-tenant application published by Co-native AB. To grant consent for your organization:
+
+1. Go to the [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **Enterprise applications**.
+2. Click **New application** → **All applications** → search for the application ID: `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`.
+3. If the app doesn't appear, a user can trigger the consent flow by calling the `login` tool — this will create a service principal in your tenant.
+4. Go to **Permissions** and click **Grant admin consent for [your organization]**.
+5. Review and approve the following delegated permissions:
+
+   | Permission       | Type      | Description                                                                    |
+   | ---------------- | --------- | ------------------------------------------------------------------------------ |
+   | `User.Read`      | Delegated | Read the signed-in user's basic profile                                        |
+   | `Mail.Send`      | Delegated | Send mail as the signed-in user                                                |
+   | `Tasks.ReadWrite`| Delegated | Read and write the signed-in user's tasks                                      |
+   | `offline_access` | Delegated | Maintain access to data you have given it access to (enables refresh tokens)   |
+
+6. Once consent is granted, all users in your organization can use the `login` tool without further approval.
+
+**Security notes:**
+- graphdo can **only send emails to the signed-in user themselves** — it cannot send to other recipients.
+- graphdo only accesses the user's **own tasks** in Microsoft To Do.
+- The source code is open at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts).
+
+---
+
+## Troubleshooting
+
+**"I need admin approval"**
+Your organization's IT administrator needs to approve graphdo. See [Organization Setup](#organization-setup) for what to tell them.
+
+**"The login code expired"**
+Call the `login` tool again. The device code is valid for about 15 minutes, so complete the sign-in promptly.
+
+**"No todo lists found"**
+Create a list in Microsoft To Do first. Open [to-do.office.com](https://to-do.office.com), create a list, then call `todo_config` again.
+
+**"The browser didn't open"**
+The `login` tool automatically falls back to device code flow when a browser cannot be opened. In headless environments (SSH, containers), this is expected.
+
+---
+
+## Privacy & Security
+
+- 🔒 graphdo only accesses **your own** email and tasks. It cannot access anyone else's.
+- 📧 It can **only send emails to yourself** — it cannot send emails to other people.
+- 💻 Your login credentials are cached **locally on your computer** and nowhere else.
+- 🌐 No data is sent anywhere except to **Microsoft's official servers** (the same ones Outlook and To Do use).
+- 📖 The source code is **fully open** at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) — anyone can review exactly what it does.
 
 ---
 
