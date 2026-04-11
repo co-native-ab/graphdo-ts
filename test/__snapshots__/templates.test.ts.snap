@@ -1,0 +1,68 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`design tokens > is deeply frozen (read-only) 1`] = `
+{
+  "color": {
+    "background": "#f5f5f5",
+    "border": "#dddddd",
+    "error": "#d13438",
+    "errorBackground": "#fef0f0",
+    "errorLight": "#a4262c",
+    "primary": "#70638c",
+    "primaryActive": "#4a4260",
+    "primaryHover": "#5d5275",
+    "primaryLight": "rgba(112, 99, 140, 0.15)",
+    "primaryLightSolid": "#f0edf4",
+    "success": "#107c10",
+    "surface": "#ffffff",
+    "textMuted": "#999999",
+    "textPrimary": "#333333",
+    "textSecondary": "#666666",
+  },
+  "font": {
+    "family": "-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif",
+    "sizeBody": "0.95rem",
+    "sizeButton": "1rem",
+    "sizeHeading": "1.3rem",
+    "sizeIcon": "3rem",
+    "sizeLogo": "1.8rem",
+    "sizePickerHeading": "1.4rem",
+    "sizeSmall": "0.8rem",
+    "weightBold": "700",
+    "weightMedium": "500",
+    "weightNormal": "400",
+    "weightSemibold": "600",
+  },
+  "layout": {
+    "containerMaxWidth": "420px",
+    "pickerContainerMaxWidth": "480px",
+  },
+  "radius": {
+    "button": "8px",
+    "card": "12px",
+    "detail": "6px",
+  },
+  "shadow": {
+    "buttonHover": "0 2px 8px rgba(112, 99, 140, 0.25)",
+    "card": "0 2px 12px rgba(0, 0, 0, 0.08)",
+    "optionHover": "0 2px 8px rgba(112, 99, 140, 0.15)",
+  },
+  "spacing": {
+    "buttonPaddingOption": "14px 18px",
+    "buttonPaddingPrimary": "14px 32px",
+    "cardPadding": "40px 32px",
+    "gap10": "10px",
+    "gap12": "12px",
+    "gap16": "16px",
+    "gap24": "24px",
+    "gap32": "32px",
+    "gap4": "4px",
+    "gap8": "8px",
+    "pagePadding": "60px 20px",
+    "pickerPagePadding": "40px 20px",
+  },
+  "transition": {
+    "fast": "0.15s",
+  },
+}
+`;
