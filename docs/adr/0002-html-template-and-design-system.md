@@ -16,7 +16,7 @@ superseded_by: ""
 
 ## Context
 
-graphdo-ts is a CLI tool distributed as an MCPB bundle with only three runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`). It serves HTML locally for transient authentication and configuration flows via loopback HTTP servers — specifically the MSAL login flow (`src/loopback.ts`) and the browser-based option picker (`src/picker.ts`).
+graphdo-ts is a stdio-based MCP server distributed as an MCPB bundle with only three runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`). It serves HTML locally for transient authentication and configuration flows via loopback HTTP servers — specifically the MSAL login flow (`src/loopback.ts`) and the browser-based option picker (`src/picker.ts`).
 
 Currently, HTML templates live in `src/templates/` as TypeScript functions that return HTML strings. However, several problems exist in the current implementation:
 
