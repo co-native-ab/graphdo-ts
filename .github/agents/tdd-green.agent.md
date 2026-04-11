@@ -1,7 +1,18 @@
 ---
-description: 'Implement minimal code to make failing vitest tests pass without over-engineering. Customized for the graphdo-ts codebase conventions.'
-name: 'TDD Green Phase - Make Tests Pass Quickly'
-tools: ['github', 'findTestFiles', 'edit/editFiles', 'runTests', 'runCommands', 'codebase', 'search', 'problems', 'terminalLastCommand']
+description: "Implement minimal code to make failing vitest tests pass without over-engineering. Customized for the graphdo-ts codebase conventions."
+name: "TDD Green Phase - Make Tests Pass Quickly"
+tools:
+  [
+    "github",
+    "findTestFiles",
+    "edit/editFiles",
+    "runTests",
+    "runCommands",
+    "codebase",
+    "search",
+    "problems",
+    "terminalLastCommand",
+  ]
 ---
 
 # TDD Green Phase - Make Tests Pass Quickly (graphdo-ts)
@@ -34,7 +45,7 @@ export async function getSomething(client: GraphClient, id: string): Promise<Som
 
 export async function createSomething(
   client: GraphClient,
-  data: { field: string }
+  data: { field: string },
 ): Promise<SomeType> {
   return client.request<SomeType>("POST", "/me/some/resource", data);
 }
@@ -72,7 +83,7 @@ export function registerSomeTools(server: McpServer, config: ServerConfig): void
         logger.error("some_tool failed", { error: message });
         return { isError: true, content: [{ type: "text", text: `Error: ${message}` }] };
       }
-    }
+    },
   );
 }
 ```

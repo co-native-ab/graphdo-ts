@@ -16,10 +16,7 @@ import { startBrowserPicker } from "../picker.js";
 import { createAuthenticatedClient, formatError } from "./shared.js";
 
 /** Register the todo_config tool on the given MCP server. */
-export function registerConfigTools(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerConfigTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "todo_config",
     {
@@ -97,14 +94,10 @@ export function registerConfigTools(
       } catch (err: unknown) {
         if (err instanceof UserCancelledError) {
           return {
-            content: [
-              { type: "text", text: "Todo list configuration cancelled." },
-            ],
+            content: [{ type: "text", text: "Todo list configuration cancelled." }],
           };
         }
-        const isTimeout =
-          err instanceof Error &&
-          err.message.toLowerCase().includes("timed out");
+        const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
         const retryHint = isTimeout
           ? "\n\nThe user did not make a selection in time. " +
             "You can call this tool again if the user would like to retry."

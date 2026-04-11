@@ -53,32 +53,32 @@ A single `src/templates/tokens.ts` file defines all visual constants as typed Ty
 The token palette:
 
 **Primary Purple Scale**
-| Token               | Hex       | Usage                          |
+| Token | Hex | Usage |
 |---------------------|-----------|--------------------------------|
-| Brand Purple        | `#6659a7` | Primary brand color, buttons   |
-| Purple +1           | `#3c2f7f` | Hover states, emphasis         |
-| Purple +2           | `#120457` | Deepest purple, active states  |
-| Purple −1           | `#9289c0` | Lighter tint, secondary text   |
-| Purple −2           | `#beb8da` | Subtle backgrounds, borders    |
-| Purple −3           | `#eae8f3` | Page backgrounds               |
+| Brand Purple | `#6659a7` | Primary brand color, buttons |
+| Purple +1 | `#3c2f7f` | Hover states, emphasis |
+| Purple +2 | `#120457` | Deepest purple, active states |
+| Purple −1 | `#9289c0` | Lighter tint, secondary text |
+| Purple −2 | `#beb8da` | Subtle backgrounds, borders |
+| Purple −3 | `#eae8f3` | Page backgrounds |
 
 **Greyscale**
-| Token       | Hex       | Usage                                |
+| Token | Hex | Usage |
 |-------------|-----------|--------------------------------------|
-| Black       | `#000000` | Headings, high-contrast text         |
-| Grey 700    | `#636466` | Body text                            |
-| Grey 500    | `#8a8c8e` | Secondary text, placeholders         |
-| Grey 300    | `#c7c8ca` | Borders, dividers                    |
-| Grey 100    | `#efeff0` | Subtle backgrounds                   |
-| White       | `#ffffff` | Card backgrounds, button text        |
+| Black | `#000000` | Headings, high-contrast text |
+| Grey 700 | `#636466` | Body text |
+| Grey 500 | `#8a8c8e` | Secondary text, placeholders |
+| Grey 300 | `#c7c8ca` | Borders, dividers |
+| Grey 100 | `#efeff0` | Subtle backgrounds |
+| White | `#ffffff` | Card backgrounds, button text |
 
 **Complementary (functional use only — success, error, warning — NOT decorative)**
-| Token          | Primary     | Light       | Usage              |
+| Token | Primary | Light | Usage |
 |----------------|-------------|-------------|--------------------|
-| Sandstone      | `#dac48a`   | `#F8F2E6`   | Warning states     |
-| Teal           | `#AABDB5`   | `#dae2df`   | Success states     |
-| Cobalt         | `#5271AC`   | `#DCE2EE`   | Info states        |
-| Peach          | `#F9AA8F`   | `#FDE4DC`   | Error states       |
+| Sandstone | `#dac48a` | `#F8F2E6` | Warning states |
+| Teal | `#AABDB5` | `#dae2df` | Success states |
+| Cobalt | `#5271AC` | `#DCE2EE` | Info states |
+| Peach | `#F9AA8F` | `#FDE4DC` | Error states |
 
 **Typography**: Lexend (Google Fonts), fallback Arial, then sans-serif.
 

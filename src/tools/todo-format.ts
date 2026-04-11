@@ -1,6 +1,11 @@
 // Formatting helpers for To Do tool output.
 
-import type { DateTimeTimeZone, PatternedRecurrence, TodoStatus, Importance } from "../graph/types.js";
+import type {
+  DateTimeTimeZone,
+  PatternedRecurrence,
+  TodoStatus,
+  Importance,
+} from "../graph/types.js";
 
 export function statusEmoji(status: TodoStatus): string {
   return status === "completed" ? "✅" : "⬜";

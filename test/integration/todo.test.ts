@@ -76,9 +76,7 @@ describe("integration: todo", () => {
         { id: "list-2", displayName: "Work" },
       ];
 
-      const tempConfigDir = await mkdtemp(
-        path.join(tmpdir(), "graphdo-config-e2e-"),
-      );
+      const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-config-e2e-"));
 
       try {
         let capturedUrl = "";
@@ -133,9 +131,7 @@ describe("integration: todo", () => {
       const originalLists = env.graphState.todoLists;
       env.graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
-      const tempConfigDir = await mkdtemp(
-        path.join(tmpdir(), "graphdo-config-e2e-"),
-      );
+      const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-config-e2e-"));
 
       try {
         let capturedUrl = "";
@@ -207,10 +203,7 @@ describe("integration: todo", () => {
 
   describe("todo CRUD", () => {
     beforeAll(async () => {
-      await saveConfig(
-        { todoListId: "list-1", todoListName: "My Tasks" },
-        env.configDir,
-      );
+      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Buy milk", status: "notStarted" },
@@ -320,10 +313,7 @@ describe("integration: todo", () => {
 
   describe("enhanced todo features", () => {
     beforeAll(async () => {
-      await saveConfig(
-        { todoListId: "list-1", todoListName: "My Tasks" },
-        env.configDir,
-      );
+      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Base task", status: "notStarted" },
@@ -428,13 +418,7 @@ describe("integration: todo", () => {
       const task = tasks.find((t) => t.title === "Weekday check");
       expect(task?.recurrence?.pattern.type).toBe("weekly");
       expect(task?.recurrence?.pattern.daysOfWeek).toEqual(
-        expect.arrayContaining([
-          "monday",
-          "tuesday",
-          "wednesday",
-          "thursday",
-          "friday",
-        ]),
+        expect.arrayContaining(["monday", "tuesday", "wednesday", "thursday", "friday"]),
       );
     });
 
@@ -559,10 +543,7 @@ describe("integration: todo", () => {
 
   describe("checklist items", () => {
     beforeAll(async () => {
-      await saveConfig(
-        { todoListId: "list-1", todoListName: "My Tasks" },
-        env.configDir,
-      );
+      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Task with steps", status: "notStarted" },

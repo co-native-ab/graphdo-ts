@@ -1,7 +1,19 @@
 ---
-description: 'Clean any codebase by eliminating tech debt. Customized for graphdo-ts conventions.'
-name: 'Janitor'
-tools: ['codebase', 'edit/editFiles', 'search', 'terminalCommand', 'findTestFiles', 'runTests', 'runCommands', 'problems', 'usages', 'changes']
+description: "Clean any codebase by eliminating tech debt. Customized for graphdo-ts conventions."
+name: "Janitor"
+tools:
+  [
+    "codebase",
+    "edit/editFiles",
+    "search",
+    "terminalCommand",
+    "findTestFiles",
+    "runTests",
+    "runCommands",
+    "problems",
+    "usages",
+    "changes",
+  ]
 ---
 
 # Janitor (graphdo-ts)

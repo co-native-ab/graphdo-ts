@@ -109,31 +109,24 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
 // Account persistence (mirrors Go's saveAccount/loadAccount)
 // ---------------------------------------------------------------------------
 
-async function saveAccount(
-  account: msal.AccountInfo,
-  configDir: string,
-): Promise<void> {
+async function saveAccount(account: msal.AccountInfo, configDir: string): Promise<void> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   await fs.mkdir(path.dirname(accountPath), {
     recursive: true,
     mode: 0o700,
   });
-  await fs.writeFile(
-    accountPath,
-    JSON.stringify(account, undefined, 2) + "\n",
-    { mode: 0o600 },
-  );
+  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", { mode: 0o600 });
   logger.debug("saved account", { path: accountPath });
 }
 
-const AccountInfoSchema = z.object({
-  username: z.string(),
-  // msal.AccountInfo has more fields, but we only care about username for now.
-}).loose();
+const AccountInfoSchema = z
+  .object({
+    username: z.string(),
+    // msal.AccountInfo has more fields, but we only care about username for now.
+  })
+  .loose();
 
-async function loadAccount(
-  configDir: string,
-): Promise<msal.AccountInfo | undefined> {
+async function loadAccount(configDir: string): Promise<msal.AccountInfo | undefined> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   try {
     const data = await fs.readFile(accountPath, "utf-8");
@@ -147,7 +140,10 @@ async function loadAccount(
     // Validate minimal shape
     const parsed = AccountInfoSchema.safeParse(account);
     if (!parsed.success) {
-      logger.error("Account file failed validation", { path: accountPath, error: parsed.error.message });
+      logger.error("Account file failed validation", {
+        path: accountPath,
+        error: parsed.error.message,
+      });
       return undefined;
     }
     logger.debug("loaded account", {
@@ -417,11 +413,7 @@ async function showLogoutPage(
       if (!addr || typeof addr === "string") {
         server.close();
         settle(() =>
-          reject(
-            new Error(
-              "Server bound to unexpected address type (expected port number)",
-            ),
-          ),
+          reject(new Error("Server bound to unexpected address type (expected port number)")),
         );
         return;
       }
@@ -430,9 +422,7 @@ async function showLogoutPage(
 
       openBrowser(url).catch((err: unknown) => {
         server.close();
-        settle(() =>
-          reject(err instanceof Error ? err : new Error(String(err))),
-        );
+        settle(() => reject(err instanceof Error ? err : new Error(String(err))));
       });
     });
 
@@ -471,5 +461,3 @@ export class StaticAuthenticator implements Authenticator {
     return Promise.resolve({ username: "static-token" });
   }
 }
-
-

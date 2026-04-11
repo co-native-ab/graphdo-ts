@@ -169,9 +169,7 @@ describe("LoginLoopbackClient", () => {
     const { client: c } = await startClient();
     client = c;
 
-    await expect(c.listenForAuthCode()).rejects.toThrow(
-      "Loopback server already exists",
-    );
+    await expect(c.listenForAuthCode()).rejects.toThrow("Loopback server already exists");
   });
 
   it("throws when getting redirect URI before server starts", () => {
@@ -230,10 +228,9 @@ describe("LoginLoopbackClient", () => {
     //  Here we simulate Microsoft redirecting back with the auth code.)
 
     // Step 6: Microsoft redirects back with auth code
-    const callbackRes = await request(
-      `${redirectUri}/?code=REAL_CODE&state=REAL_STATE`,
-      { redirect: "manual" },
-    );
+    const callbackRes = await request(`${redirectUri}/?code=REAL_CODE&state=REAL_STATE`, {
+      redirect: "manual",
+    });
     expect(callbackRes.status).toBe(302);
     expect(callbackRes.headers.get("location")).toBe("/done");
 

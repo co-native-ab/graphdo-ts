@@ -23,12 +23,15 @@ import { parseResponse } from "./client.js";
 // ---------------------------------------------------------------------------
 
 /** List all To Do task lists. */
-export async function listTodoLists(
-  client: GraphClient,
-): Promise<TodoList[]> {
+export async function listTodoLists(client: GraphClient): Promise<TodoList[]> {
   logger.debug("listing todo lists");
   const response = await client.request("GET", "/me/todo/lists");
-  const data = await parseResponse(response, GraphListResponseSchema(TodoListSchema), "GET", "/me/todo/lists");
+  const data = await parseResponse(
+    response,
+    GraphListResponseSchema(TodoListSchema),
+    "GET",
+    "/me/todo/lists",
+  );
   return data.value;
 }
 
@@ -120,11 +123,7 @@ export async function createTodo(
   }
 
   const path = `/me/todo/lists/${listId}/tasks`;
-  const response = await client.request(
-    "POST",
-    path,
-    payload,
-  );
+  const response = await client.request("POST", path, payload);
   return await parseResponse(response, TodoItemSchema, "POST", path);
 }
 
@@ -161,11 +160,7 @@ export async function updateTodo(
   if (opts.recurrence !== undefined) payload["recurrence"] = opts.recurrence;
 
   const path = `/me/todo/lists/${listId}/tasks/${taskId}`;
-  const response = await client.request(
-    "PATCH",
-    path,
-    payload,
-  );
+  const response = await client.request("PATCH", path, payload);
   return await parseResponse(response, TodoItemSchema, "PATCH", path);
 }
 
@@ -179,11 +174,9 @@ export async function completeTodo(
   if (!taskId) throw new Error("completeTodo: taskId must not be empty");
 
   logger.debug("completing todo", { listId, taskId });
-  await client.request(
-    "PATCH",
-    `/me/todo/lists/${listId}/tasks/${taskId}`,
-    { status: "completed" },
-  );
+  await client.request("PATCH", `/me/todo/lists/${listId}/tasks/${taskId}`, {
+    status: "completed",
+  });
 }
 
 /** Delete a task from a To Do list. */
@@ -196,10 +189,7 @@ export async function deleteTodo(
   if (!taskId) throw new Error("deleteTodo: taskId must not be empty");
 
   logger.debug("deleting todo", { listId, taskId });
-  await client.request(
-    "DELETE",
-    `/me/todo/lists/${listId}/tasks/${taskId}`,
-  );
+  await client.request("DELETE", `/me/todo/lists/${listId}/tasks/${taskId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,11 +207,13 @@ export async function listChecklistItems(
 
   logger.debug("listing checklist items", { listId, taskId });
   const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`;
-  const response = await client.request(
+  const response = await client.request("GET", path);
+  const data = await parseResponse(
+    response,
+    GraphListResponseSchema(ChecklistItemSchema),
     "GET",
     path,
   );
-  const data = await parseResponse(response, GraphListResponseSchema(ChecklistItemSchema), "GET", path);
   return data.value;
 }
 
@@ -238,11 +230,7 @@ export async function createChecklistItem(
 
   logger.debug("creating checklist item", { listId, taskId, displayName });
   const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`;
-  const response = await client.request(
-    "POST",
-    path,
-    { displayName },
-  );
+  const response = await client.request("POST", path, { displayName });
   return await parseResponse(response, ChecklistItemSchema, "POST", path);
 }
 
@@ -270,11 +258,7 @@ export async function updateChecklistItem(
   if (opts.isChecked !== undefined) payload["isChecked"] = opts.isChecked;
 
   const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems/${itemId}`;
-  const response = await client.request(
-    "PATCH",
-    path,
-    payload,
-  );
+  const response = await client.request("PATCH", path, payload);
   return await parseResponse(response, ChecklistItemSchema, "PATCH", path);
 }
 

@@ -134,9 +134,7 @@ describe("logger", () => {
     });
 
     it("writes to console.error, not console.log", () => {
-      const logSpy = vi
-        .spyOn(console, "log")
-        .mockImplementation((): void => undefined);
+      const logSpy = vi.spyOn(console, "log").mockImplementation((): void => undefined);
       setLogLevel("debug");
       logger.debug("stderr only");
 

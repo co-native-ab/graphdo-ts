@@ -12,10 +12,7 @@ import { logger } from "../logger.js";
 import { formatError } from "./shared.js";
 
 /** Register login/logout tools on the given MCP server. */
-export function registerLoginTools(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerLoginTools(server: McpServer, config: ServerConfig): void {
   // ---- login ----
 
   server.registerTool(

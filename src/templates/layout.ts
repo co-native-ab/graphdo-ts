@@ -16,9 +16,7 @@ export interface LayoutParams {
 }
 
 export function layoutHtml(params: LayoutParams): string {
-  const scriptBlock = params.script
-    ? `\n  <script>\n${params.script}\n  </script>`
-    : "";
+  const scriptBlock = params.script ? `\n  <script>\n${params.script}\n  </script>` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">

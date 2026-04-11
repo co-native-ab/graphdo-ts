@@ -24,10 +24,7 @@ let env: IntegrationEnv;
 describe("integration: status & errors", () => {
   beforeAll(async () => {
     env = await setupIntegrationEnv();
-    await saveConfig(
-      { todoListId: "list-1", todoListName: "My Tasks" },
-      env.configDir,
-    );
+    await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
   });
 
   afterAll(async () => {
@@ -66,9 +63,7 @@ describe("integration: status & errors", () => {
     });
 
     it("returns error when todo list not configured", async () => {
-      const emptyConfigDir = await mkdtemp(
-        path.join(tmpdir(), "graphdo-test-empty-"),
-      );
+      const emptyConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-test-empty-"));
 
       try {
         const emptyAuth = new MockAuthenticator({ token: "token" });
@@ -151,9 +146,7 @@ describe("integration: status & errors", () => {
     });
 
     it("shows todo list not configured", async () => {
-      const emptyConfigDir = await mkdtemp(
-        path.join(tmpdir(), "graphdo-test-status-"),
-      );
+      const emptyConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-test-status-"));
 
       try {
         const authed = new MockAuthenticator({ token: "status-token" });

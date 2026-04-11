@@ -58,9 +58,7 @@ export interface ServerConfig {
 // ---------------------------------------------------------------------------
 
 /** Create a configured McpServer instance with all tools registered. */
-export function createMcpServer(
-  opts: Omit<ServerConfig, "graphClient">,
-): McpServer {
+export function createMcpServer(opts: Omit<ServerConfig, "graphClient">): McpServer {
   const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
     {
@@ -117,8 +115,7 @@ async function main(): Promise<void> {
     ? new StaticAuthenticator(staticToken)
     : new MsalAuthenticator(clientId, tenantId, cfgDir, [...SCOPES], openBrowser);
 
-  const graphBaseUrl =
-    process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
+  const graphBaseUrl = process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
 
   const server = createMcpServer({
     authenticator,

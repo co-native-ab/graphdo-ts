@@ -2,7 +2,17 @@
 description: "Expert assistant for developing Model Context Protocol (MCP) servers in TypeScript, customized for the graphdo-ts codebase conventions."
 name: "TypeScript MCP Server Expert"
 model: GPT-4.1
-tools: ['codebase', 'edit/editFiles', 'search', 'terminalCommand', 'findTestFiles', 'runTests', 'runCommands', 'problems']
+tools:
+  [
+    "codebase",
+    "edit/editFiles",
+    "search",
+    "terminalCommand",
+    "findTestFiles",
+    "runTests",
+    "runCommands",
+    "problems",
+  ]
 ---
 
 # TypeScript MCP Server Expert (graphdo-ts)
@@ -77,7 +87,7 @@ export function registerXxxTools(server: McpServer, config: ServerConfig): void 
         logger.error("tool_name failed", { error: message });
         return { isError: true, content: [{ type: "text", text: `Error: ${message}` }] };
       }
-    }
+    },
   );
 }
 ```
@@ -103,6 +113,7 @@ registerXxxTools(server, config);
 This codebase has three test layers:
 
 ### 1. Graph Layer Tests (`test/graph/`)
+
 Test Graph operations against the mock Graph API server:
 
 ```typescript
@@ -122,6 +133,7 @@ describe("someOperation", () => {
 ```
 
 ### 2. Integration Tests (`test/integration.test.ts`)
+
 Full MCP server tests using `InMemoryTransport`:
 
 ```typescript
@@ -142,6 +154,7 @@ expect(result.isError).toBeFalsy();
 ```
 
 ### No Mocking Libraries
+
 Tests use a hand-rolled `node:http` server (`test/mock-graph.ts`) — never use `vi.mock()`, `sinon`, `nock`, or similar.
 
 ## Build & Validation

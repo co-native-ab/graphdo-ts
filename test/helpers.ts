@@ -19,9 +19,7 @@ export async function createTestEnv(): Promise<TestEnv> {
 
   state.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
-  state.todos.set("list-1", [
-    { id: "task-1", title: "Buy milk", status: "notStarted" },
-  ]);
+  state.todos.set("list-1", [{ id: "task-1", title: "Buy milk", status: "notStarted" }]);
 
   const { server, url } = await createMockGraphServer(state);
 

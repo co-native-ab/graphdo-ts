@@ -28,7 +28,9 @@ function getTempDir(): string {
 
 afterEach(async () => {
   for (const dir of tempDirs) {
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => { /* ignore cleanup errors */ });
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {
+      /* ignore cleanup errors */
+    });
   }
   tempDirs.length = 0;
 });
@@ -54,9 +56,7 @@ describe("configDir", () => {
       const base = appData ?? path.join(home, "AppData", "Roaming");
       expect(result).toBe(path.join(base, "graphdo-ts"));
     } else if (platform === "darwin") {
-      expect(result).toBe(
-        path.join(home, "Library", "Application Support", "graphdo-ts"),
-      );
+      expect(result).toBe(path.join(home, "Library", "Application Support", "graphdo-ts"));
     } else {
       const xdg = process.env["XDG_CONFIG_HOME"];
       const base = xdg ?? path.join(home, ".config");
@@ -87,10 +87,7 @@ describe("loadConfig", () => {
   it("returns parsed Config when valid file exists", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(
-      path.join(dir, "config.json"),
-      JSON.stringify(validConfig),
-    );
+    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfig));
 
     const result = await loadConfig(dir);
     expect(result).toEqual(validConfig);
@@ -107,10 +104,7 @@ describe("loadConfig", () => {
   it("returns null for valid JSON with wrong shape", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(
-      path.join(dir, "config.json"),
-      JSON.stringify({ foo: 123 }),
-    );
+    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
     const result = await loadConfig(dir);
     expect(result).toBeNull();
@@ -131,10 +125,7 @@ describe("loadConfig", () => {
   it("returns null for partial config missing todoListName", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(
-      path.join(dir, "config.json"),
-      JSON.stringify({ todoListId: "list-1" }),
-    );
+    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir);
     expect(result).toBeNull();
@@ -201,9 +192,7 @@ describe("validateConfig", () => {
 describe("loadAndValidateConfig", () => {
   it("throws helpful error when config file missing", async () => {
     const dir = getTempDir();
-    await expect(loadAndValidateConfig(dir)).rejects.toThrow(
-      /not configured/,
-    );
+    await expect(loadAndValidateConfig(dir)).rejects.toThrow(/not configured/);
   });
 
   it("throws helpful error when config invalid", async () => {
@@ -214,9 +203,7 @@ describe("loadAndValidateConfig", () => {
       JSON.stringify({ todoListId: "", todoListName: "" }),
     );
 
-    await expect(loadAndValidateConfig(dir)).rejects.toThrow(
-      /not configured/,
-    );
+    await expect(loadAndValidateConfig(dir)).rejects.toThrow(/not configured/);
   });
 
   it("returns config when valid", async () => {

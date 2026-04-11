@@ -12,11 +12,7 @@ import type { ILoopbackClient } from "@azure/msal-node";
 
 import { logger } from "./logger.js";
 import { UserCancelledError } from "./errors.js";
-import {
-  landingPageHtml,
-  successPageHtml,
-  errorPageHtml,
-} from "./templates/login.js";
+import { landingPageHtml, successPageHtml, errorPageHtml } from "./templates/login.js";
 
 // ---------------------------------------------------------------------------
 // LoginLoopbackClient
@@ -189,10 +185,7 @@ function serveHtml(res: ServerResponse, html: string): void {
   res.end(html);
 }
 
-function serveLandingPage(
-  res: ServerResponse,
-  authUrl: string | undefined,
-): void {
+function serveLandingPage(res: ServerResponse, authUrl: string | undefined): void {
   if (!authUrl) {
     serveErrorPage(
       res,

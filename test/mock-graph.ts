@@ -52,11 +52,7 @@ export class MockState {
   }
 }
 
-function jsonResponse(
-  res: http.ServerResponse,
-  status: number,
-  body: unknown,
-): void {
+function jsonResponse(res: http.ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(data);
@@ -100,11 +96,9 @@ export function createMockGraphServer(state: MockState): Promise<{
   url: string;
 }> {
   return new Promise((resolve, reject) => {
-    const server = http.createServer(
-      (req: http.IncomingMessage, res: http.ServerResponse) => {
-        void handleRequest(state, req, res);
-      },
-    );
+    const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
+      void handleRequest(state, req, res);
+    });
 
     server.once("error", reject);
 

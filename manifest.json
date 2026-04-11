@@ -92,15 +92,7 @@
       "description": "Send an email to yourself via Outlook. The email is sent from and to your Microsoft account. Useful for notes, reminders, and forwarding information to your inbox."
     }
   ],
-  "keywords": [
-    "microsoft",
-    "graph",
-    "todo",
-    "tasks",
-    "mail",
-    "outlook",
-    "productivity"
-  ],
+  "keywords": ["microsoft", "graph", "todo", "tasks", "mail", "outlook", "productivity"],
   "license": "MIT",
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],

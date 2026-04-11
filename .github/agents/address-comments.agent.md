@@ -1,6 +1,6 @@
 ---
 description: "Address PR comments"
-name: 'Universal PR Comment Addresser'
+name: "Universal PR Comment Addresser"
 tools:
   [
     "changes",

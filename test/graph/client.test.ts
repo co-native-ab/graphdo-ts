@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import { createTestEnv, type TestEnv } from "../helpers.js";
-import { GraphClient, GraphRequestError, GraphResponseParseError, parseResponse } from "../../src/graph/client.js";
+import {
+  GraphClient,
+  GraphRequestError,
+  GraphResponseParseError,
+  parseResponse,
+} from "../../src/graph/client.js";
 import { UserSchema, TodoItemSchema, GraphListResponseSchema } from "../../src/graph/types.js";
 
 /** Start a local HTTP server with sequential request handlers. */
-async function makeServer(handlers: ((req: http.IncomingMessage, res: http.ServerResponse) => void)[]) {
+async function makeServer(
+  handlers: ((req: http.IncomingMessage, res: http.ServerResponse) => void)[],
+) {
   let call = 0;
   const server = http.createServer((req, res) => {
     const handler = handlers[call] ?? handlers[handlers.length - 1];
@@ -27,9 +34,7 @@ async function makeServer(handlers: ((req: http.IncomingMessage, res: http.Serve
 }
 
 async function closeServer(server: http.Server): Promise<void> {
-  await new Promise<void>((resolve, reject) =>
-    server.close((e) => (e ? reject(e) : resolve())),
-  );
+  await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
 }
 
 const noDelay = (): Promise<void> => Promise.resolve();
@@ -64,16 +69,14 @@ describe("GraphClient", () => {
   });
 
   it("throws GraphRequestError on 4xx responses", async () => {
-    await expect(
-      client.request("GET", "/me/todo/lists/nonexistent/tasks"),
-    ).rejects.toThrow(GraphRequestError);
+    await expect(client.request("GET", "/me/todo/lists/nonexistent/tasks")).rejects.toThrow(
+      GraphRequestError,
+    );
   });
 
   it("throws GraphRequestError on 401 when token is missing", async () => {
     const badClient = new GraphClient(env.graphUrl, "");
-    await expect(badClient.request("GET", "/me")).rejects.toThrow(
-      GraphRequestError,
-    );
+    await expect(badClient.request("GET", "/me")).rejects.toThrow(GraphRequestError);
   });
 
   it("GraphRequestError has correct code, message, and statusCode", async () => {
@@ -100,17 +103,15 @@ describe("GraphClient", () => {
     ]);
     try {
       const badClient = new GraphClient(url, "tok");
-      await expect(badClient.request("GET", "/anything")).rejects.toSatisfy(
-        (err: unknown) => {
-          const gre = err as GraphRequestError;
-          return (
-            gre instanceof GraphRequestError &&
-            gre.code === "UnknownError" &&
-            gre.graphMessage === "something went wrong" &&
-            gre.statusCode === 500
-          );
-        },
-      );
+      await expect(badClient.request("GET", "/anything")).rejects.toSatisfy((err: unknown) => {
+        const gre = err as GraphRequestError;
+        return (
+          gre instanceof GraphRequestError &&
+          gre.code === "UnknownError" &&
+          gre.graphMessage === "something went wrong" &&
+          gre.statusCode === 500
+        );
+      });
     } finally {
       await closeServer(server);
     }
@@ -126,16 +127,14 @@ describe("GraphClient timeouts", () => {
     ]);
     try {
       const timeoutClient = new GraphClient(url, "tok", 100);
-      await expect(timeoutClient.request("GET", "/hang")).rejects.toSatisfy(
-        (err: unknown) => {
-          const gre = err as GraphRequestError;
-          return (
-            gre instanceof GraphRequestError &&
-            gre.code === "TimeoutError" &&
-            gre.graphMessage.includes("timed out")
-          );
-        },
-      );
+      await expect(timeoutClient.request("GET", "/hang")).rejects.toSatisfy((err: unknown) => {
+        const gre = err as GraphRequestError;
+        return (
+          gre instanceof GraphRequestError &&
+          gre.code === "TimeoutError" &&
+          gre.graphMessage.includes("timed out")
+        );
+      });
     } finally {
       await closeServer(server);
     }
@@ -231,36 +230,52 @@ describe("parseResponse", () => {
   }
 
   it("parses a valid User response", async () => {
-    const body = JSON.stringify({ id: "1", displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com" });
+    const body = JSON.stringify({
+      id: "1",
+      displayName: "Test",
+      mail: "t@e.com",
+      userPrincipalName: "t@e.com",
+    });
     const user = await parseResponse(makeResponse(body), UserSchema, "GET", "/me");
     expect(user.id).toBe("1");
     expect(user.displayName).toBe("Test");
   });
 
   it("allows extra fields (loose schema)", async () => {
-    const body = JSON.stringify({ id: "1", displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com", extraField: true });
+    const body = JSON.stringify({
+      id: "1",
+      displayName: "Test",
+      mail: "t@e.com",
+      userPrincipalName: "t@e.com",
+      extraField: true,
+    });
     const user = await parseResponse(makeResponse(body), UserSchema, "GET", "/me");
     expect(user.id).toBe("1");
   });
 
   it("throws GraphResponseParseError for missing required fields", async () => {
     const body = JSON.stringify({ id: "1" });
-    await expect(
-      parseResponse(makeResponse(body), UserSchema, "GET", "/me"),
-    ).rejects.toThrow(GraphResponseParseError);
+    await expect(parseResponse(makeResponse(body), UserSchema, "GET", "/me")).rejects.toThrow(
+      GraphResponseParseError,
+    );
   });
 
   it("throws GraphResponseParseError for wrong types", async () => {
-    const body = JSON.stringify({ id: 123, displayName: "Test", mail: "t@e.com", userPrincipalName: "t@e.com" });
-    await expect(
-      parseResponse(makeResponse(body), UserSchema, "GET", "/me"),
-    ).rejects.toThrow(GraphResponseParseError);
+    const body = JSON.stringify({
+      id: 123,
+      displayName: "Test",
+      mail: "t@e.com",
+      userPrincipalName: "t@e.com",
+    });
+    await expect(parseResponse(makeResponse(body), UserSchema, "GET", "/me")).rejects.toThrow(
+      GraphResponseParseError,
+    );
   });
 
   it("throws GraphResponseParseError for non-JSON body", async () => {
-    await expect(
-      parseResponse(makeResponse("not json"), UserSchema, "GET", "/me"),
-    ).rejects.toThrow(GraphResponseParseError);
+    await expect(parseResponse(makeResponse("not json"), UserSchema, "GET", "/me")).rejects.toThrow(
+      GraphResponseParseError,
+    );
   });
 
   it("error includes method, path, and raw body", async () => {

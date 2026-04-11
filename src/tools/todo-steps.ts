@@ -14,10 +14,7 @@ import type { ServerConfig } from "../index.js";
 import { createAuthenticatedClient, formatError } from "./shared.js";
 
 /** Register checklist step tools on the given MCP server. */
-export function registerStepTools(
-  server: McpServer,
-  config: ServerConfig,
-): void {
+export function registerStepTools(server: McpServer, config: ServerConfig): void {
   // ---- todo_steps ----
   server.registerTool(
     "todo_steps",
@@ -38,11 +35,7 @@ export function registerStepTools(
       try {
         const client = await createAuthenticatedClient(config);
         const todoConfig = await loadAndValidateConfig(config.configDir);
-        const items = await listChecklistItems(
-          client,
-          todoConfig.todoListId,
-          args.taskId,
-        );
+        const items = await listChecklistItems(client, todoConfig.todoListId, args.taskId);
 
         if (items.length === 0) {
           return {
@@ -108,19 +101,12 @@ export function registerStepTools(
   server.registerTool(
     "todo_update_step",
     {
-      description:
-        "Update a checklist step - rename it, check it off, or uncheck it.",
+      description: "Update a checklist step - rename it, check it off, or uncheck it.",
       inputSchema: {
         taskId: z.string().min(1).describe("The ID of the parent todo task"),
         stepId: z.string().min(1).describe("The ID of the checklist step to update"),
-        displayName: z
-          .string()
-          .optional()
-          .describe("New text label for the step"),
-        isChecked: z
-          .boolean()
-          .optional()
-          .describe("Set to true to check off, false to uncheck"),
+        displayName: z.string().optional().describe("New text label for the step"),
+        isChecked: z.boolean().optional().describe("Set to true to check off, false to uncheck"),
       },
       annotations: {
         title: "Update Step",
@@ -190,12 +176,7 @@ export function registerStepTools(
       try {
         const client = await createAuthenticatedClient(config);
         const todoConfig = await loadAndValidateConfig(config.configDir);
-        await deleteChecklistItem(
-          client,
-          todoConfig.todoListId,
-          args.taskId,
-          args.stepId,
-        );
+        await deleteChecklistItem(client, todoConfig.todoListId, args.taskId, args.stepId);
 
         return {
           content: [

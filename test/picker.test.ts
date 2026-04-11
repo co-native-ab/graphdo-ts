@@ -14,9 +14,7 @@ const sampleOptions: PickerOption[] = [
 
 describe("browser picker", () => {
   it("serves HTML page with options", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Pick Something",
@@ -49,9 +47,7 @@ describe("browser picker", () => {
   });
 
   it("calls onSelect and resolves with the selected option", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -74,9 +70,7 @@ describe("browser picker", () => {
   });
 
   it("rejects invalid selection", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -104,9 +98,7 @@ describe("browser picker", () => {
   });
 
   it("returns 404 for unknown paths", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -129,9 +121,7 @@ describe("browser picker", () => {
   });
 
   it("times out when no selection is made", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -146,12 +136,8 @@ describe("browser picker", () => {
   });
 
   it("escapes HTML in option labels", async () => {
-    const xssOptions: PickerOption[] = [
-      { id: "xss", label: '<script>alert("xss")</script>' },
-    ];
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const xssOptions: PickerOption[] = [{ id: "xss", label: '<script>alert("xss")</script>' }];
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -179,9 +165,7 @@ describe("browser picker", () => {
   });
 
   it("returns 413 when POST body exceeds size limit", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -243,9 +227,7 @@ describe("browser picker", () => {
   });
 
   it("rejects waitForSelection with UserCancelledError when /cancel is posted", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Test",
@@ -264,9 +246,7 @@ describe("browser picker", () => {
   });
 
   it("picker page includes a Cancel button", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
-      .mockResolvedValue(undefined);
+    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
 
     const handle = await startBrowserPicker({
       title: "Choose a list",
@@ -277,14 +257,18 @@ describe("browser picker", () => {
     });
 
     // Attach cleanup handler before any requests to avoid unhandled rejection
-    const cleanup = handle.waitForSelection.catch(() => { /* expected rejection */ });
+    const cleanup = handle.waitForSelection.catch(() => {
+      /* expected rejection */
+    });
     try {
       const response = await fetch(handle.url);
       const html = await response.text();
       expect(html).toContain('id="cancel-btn"');
       expect(html).toContain("Cancel");
     } finally {
-      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => { /* ignore */ });
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => {
+        /* ignore */
+      });
       await cleanup;
     }
   });

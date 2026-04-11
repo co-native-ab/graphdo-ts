@@ -1,7 +1,18 @@
 ---
 description: "Improve code quality, apply security best practices, and enhance design whilst maintaining green vitest tests. Customized for graphdo-ts conventions."
 name: "TDD Refactor Phase - Improve Quality"
-tools: ["github", "findTestFiles", "edit/editFiles", "runTests", "runCommands", "codebase", "search", "problems", "terminalLastCommand"]
+tools:
+  [
+    "github",
+    "findTestFiles",
+    "edit/editFiles",
+    "runTests",
+    "runCommands",
+    "codebase",
+    "search",
+    "problems",
+    "terminalLastCommand",
+  ]
 ---
 
 # TDD Refactor Phase - Improve Quality (graphdo-ts)
@@ -117,6 +128,7 @@ const { graphState, graphBaseUrl, cleanup } = await createTestEnv();
 ### Add Missing Edge Case Tests
 
 Common gaps to check:
+
 - Unauthenticated call (mock auth with no token, verify `isError: true`)
 - Graph API 404 response
 - Graph API 429 / 500 response
@@ -127,11 +139,11 @@ Common gaps to check:
 
 ```typescript
 // Vague
-it("works correctly")
+it("works correctly");
 
 // Clear
-it("returns isError when the Graph API responds with 404")
-it("creates the task and returns the new task id on success")
+it("returns isError when the Graph API responds with 404");
+it("creates the task and returns the new task id on success");
 ```
 
 ## Linting & Type Checking
