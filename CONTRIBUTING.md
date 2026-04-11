@@ -18,11 +18,13 @@ npm install
 ## Development Workflow
 
 ```bash
-npm run lint        # ESLint (strict + stylistic)
-npm run typecheck   # tsc --noEmit
-npm run test        # Run tests via vitest
-npm run check       # lint + typecheck + test (all three)
-npm run build       # Build with esbuild (dist/index.js)
+npm run lint         # ESLint (strict + stylistic)
+npm run typecheck    # tsc --noEmit
+npm run test         # Run tests via vitest
+npm run format       # Format code with Prettier
+npm run format:check # Check formatting without writing
+npm run check        # format:check + lint + typecheck + test (all four)
+npm run build        # Build with esbuild (dist/index.js)
 ```
 
 Always run `npm run check` before submitting a PR.

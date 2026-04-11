@@ -8,21 +8,25 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 ## Features
 
-graphdo-ts currently exposes **11 MCP tools**:
+graphdo-ts currently exposes **15 MCP tools**:
 
-| Tool            | Description                                                                          |
-| --------------- | ------------------------------------------------------------------------------------ |
-| `login`         | Authenticate via browser login                                                       |
-| `logout`        | Clear cached tokens and sign out                                                     |
-| `auth_status`   | Check authentication status, current user, and configuration                         |
-| `mail_send`     | Send an email to yourself (from and to your Microsoft account)                       |
-| `todo_config`   | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
-| `todo_list`     | List todos with pagination                                                           |
-| `todo_show`     | Show a single todo with full details                                                 |
-| `todo_create`   | Create a new todo                                                                    |
-| `todo_update`   | Update an existing todo (title and/or body)                                          |
-| `todo_complete` | Mark a todo as completed                                                             |
-| `todo_delete`   | Delete a todo                                                                        |
+| Tool               | Description                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `login`            | Authenticate via browser login                                                       |
+| `logout`           | Clear cached tokens and sign out                                                     |
+| `auth_status`      | Check authentication status, current user, and configuration                         |
+| `mail_send`        | Send an email to yourself (from and to your Microsoft account)                       |
+| `todo_config`      | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
+| `todo_list`        | List todos with pagination, filtering, and sorting                                   |
+| `todo_show`        | Show a single todo with full details including checklist steps                       |
+| `todo_create`      | Create a new todo with optional due date, importance, reminder, and recurrence       |
+| `todo_update`      | Update an existing todo (title, body, importance, due date, reminder, recurrence)    |
+| `todo_complete`    | Mark a todo as completed                                                             |
+| `todo_delete`      | Delete a todo                                                                        |
+| `todo_steps`       | List all checklist steps (sub-items) within a todo                                   |
+| `todo_add_step`    | Add a new checklist step to a todo                                                   |
+| `todo_update_step` | Update a checklist step — rename it, check it off, or uncheck it                     |
+| `todo_delete_step` | Delete a checklist step from a todo                                                  |
 
 ---
 
@@ -181,12 +185,14 @@ npm install
 ### Scripts
 
 ```bash
-npm run build       # Build with esbuild (dist/index.js)
-npm run lint        # ESLint (strict + stylistic)
-npm run typecheck   # tsc --noEmit
-npm run test        # Run tests via vitest
-npm run check       # lint + typecheck + test (all three)
-npm run mcpb        # Build + create MCPB bundle
+npm run build        # Build with esbuild (dist/index.js)
+npm run lint         # ESLint (strict + stylistic)
+npm run typecheck    # tsc --noEmit
+npm run test         # Run tests via vitest
+npm run format       # Format code with Prettier
+npm run format:check # Check formatting without writing
+npm run check        # format:check + lint + typecheck + test (all four)
+npm run mcpb         # Build + create MCPB bundle
 ```
 
 ### Environment Variables
