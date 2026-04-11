@@ -1,16 +1,16 @@
 // Formatting helpers for To Do tool output.
 
-import type { DateTimeTimeZone, PatternedRecurrence } from "../graph/types.js";
+import type { DateTimeTimeZone, PatternedRecurrence, TodoStatus, Importance } from "../graph/types.js";
 
-export function statusEmoji(status: string): string {
+export function statusEmoji(status: TodoStatus): string {
   return status === "completed" ? "✅" : "⬜";
 }
 
-export function statusLabel(status: string): string {
+export function statusLabel(status: TodoStatus): string {
   return status === "completed" ? "Completed" : "Not Started";
 }
 
-export function importanceLabel(importance?: string): string {
+export function importanceLabel(importance?: Importance): string {
   if (!importance || importance === "normal") return "";
   return importance === "high" ? " ❗" : " ↓";
 }

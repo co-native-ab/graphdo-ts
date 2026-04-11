@@ -6,6 +6,7 @@ import type {
   ChecklistItem,
   DateTimeTimeZone,
   PatternedRecurrence,
+  Importance,
 } from "./types.js";
 import {
   TodoListSchema,
@@ -76,7 +77,7 @@ export async function getTodo(
 export interface CreateTodoOptions {
   title: string;
   body?: string;
-  importance?: string;
+  importance?: Importance;
   isReminderOn?: boolean;
   reminderDateTime?: DateTimeTimeZone;
   dueDateTime?: DateTimeTimeZone;
@@ -127,7 +128,7 @@ export async function createTodo(
 export interface UpdateTodoOptions {
   title?: string;
   body?: string;
-  importance?: string;
+  importance?: Importance;
   isReminderOn?: boolean;
   reminderDateTime?: DateTimeTimeZone | null;
   dueDateTime?: DateTimeTimeZone | null;

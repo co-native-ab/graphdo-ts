@@ -1,6 +1,6 @@
 // Parsing helpers for To Do tool input (recurrence, dates).
 
-import type { DateTimeTimeZone, PatternedRecurrence } from "../graph/types.js";
+import type { DateTimeTimeZone, PatternedRecurrence, RecurrenceRangeType } from "../graph/types.js";
 
 /**
  * Parse a simplified repeat string into a full PatternedRecurrence.
@@ -13,7 +13,7 @@ export function parseRecurrence(
 ): PatternedRecurrence {
   const todayParts = new Date().toISOString().split("T");
   const today = todayParts[0] ?? new Date().toISOString().slice(0, 10);
-  const range = { type: "noEnd", startDate: today };
+  const range = { type: "noEnd" as RecurrenceRangeType, startDate: today };
 
   switch (repeat) {
     case "daily":

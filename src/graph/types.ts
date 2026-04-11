@@ -2,6 +2,14 @@
 // Mirrors the Go types in internal/graph/.
 import { z } from "zod";
 
+// --- String literal union types for Graph API enums ---
+
+export type TodoStatus = "notStarted" | "completed" | "inProgress" | "waitingOnOthers" | "deferred";
+export type Importance = "low" | "normal" | "high";
+export type BodyContentType = "text" | "html" | "Text" | "HTML";
+export type RecurrencePatternType = "daily" | "weekly" | "absoluteMonthly" | "relativeMonthly" | "absoluteYearly" | "relativeYearly";
+export type RecurrenceRangeType = "noEnd" | "endDate" | "numbered";
+
 /** Microsoft Graph user profile. */
 export interface User {
   id: string;
@@ -29,11 +37,11 @@ export const TodoListSchema = z.object({
 /** Content and format of a todo item body. */
 export interface ItemBody {
   content: string;
-  contentType: string;
+  contentType: BodyContentType;
 }
 export const ItemBodySchema = z.object({
   content: z.string(),
-  contentType: z.string(),
+  contentType: z.enum(["text", "html", "Text", "HTML"]),
 }).loose();
 
 /** Date and time with timezone (Graph API pattern). */
@@ -48,7 +56,7 @@ export const DateTimeTimeZoneSchema = z.object({
 
 /** Recurrence pattern (daily, weekly, monthly, yearly). */
 export interface RecurrencePattern {
-  type: string;
+  type: RecurrencePatternType;
   interval: number;
   daysOfWeek?: string[];
   dayOfMonth?: number;
@@ -57,7 +65,7 @@ export interface RecurrencePattern {
   index?: string;
 }
 export const RecurrencePatternSchema = z.object({
-  type: z.string(),
+  type: z.enum(["daily", "weekly", "absoluteMonthly", "relativeMonthly", "absoluteYearly", "relativeYearly"]),
   interval: z.number(),
   daysOfWeek: z.array(z.string()).optional(),
   dayOfMonth: z.number().optional(),
@@ -68,13 +76,13 @@ export const RecurrencePatternSchema = z.object({
 
 /** Recurrence range (end condition). */
 export interface RecurrenceRange {
-  type: string;
+  type: RecurrenceRangeType;
   startDate: string;
   endDate?: string;
   numberOfOccurrences?: number;
 }
 export const RecurrenceRangeSchema = z.object({
-  type: z.string(),
+  type: z.enum(["noEnd", "endDate", "numbered"]),
   startDate: z.string(),
   endDate: z.string().optional(),
   numberOfOccurrences: z.number().optional(),
@@ -110,9 +118,9 @@ export const ChecklistItemSchema = z.object({
 export interface TodoItem {
   id: string;
   title: string;
-  status: string;
+  status: TodoStatus;
   body?: ItemBody;
-  importance?: string;
+  importance?: Importance;
   isReminderOn?: boolean;
   reminderDateTime?: DateTimeTimeZone;
   dueDateTime?: DateTimeTimeZone;
@@ -122,9 +130,9 @@ export interface TodoItem {
 export const TodoItemSchema = z.object({
   id: z.string(),
   title: z.string(),
-  status: z.string(),
+  status: z.enum(["notStarted", "completed", "inProgress", "waitingOnOthers", "deferred"]),
   body: ItemBodySchema.optional(),
-  importance: z.string().optional(),
+  importance: z.enum(["low", "normal", "high"]).optional(),
   isReminderOn: z.boolean().optional(),
   reminderDateTime: DateTimeTimeZoneSchema.optional(),
   dueDateTime: DateTimeTimeZoneSchema.optional(),
@@ -171,11 +179,11 @@ export const SendMailRecipientSchema = z.object({
 }).loose();
 
 export interface SendMailBody {
-  contentType: string;
+  contentType: BodyContentType;
   content: string;
 }
 export const SendMailBodySchema = z.object({
-  contentType: z.string(),
+  contentType: z.enum(["text", "html", "Text", "HTML"]),
   content: z.string(),
 }).loose();
 
