@@ -8,6 +8,7 @@ import type { Authenticator } from "./auth.js";
 import { MsalAuthenticator, StaticAuthenticator } from "./auth.js";
 import { openBrowser } from "./browser.js";
 import { configDir } from "./config.js";
+import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
 import { registerLoginTools } from "./tools/login.js";
 import { registerMailTools } from "./tools/mail.js";
@@ -41,6 +42,13 @@ export interface ServerConfig {
   authenticator: Authenticator;
   graphBaseUrl: string;
   configDir: string;
+  /**
+   * Single GraphClient instance shared across all tool handlers.
+   * Uses the authenticator as a TokenCredential — tokens are fetched (and
+   * silently refreshed) on every Graph API request, which is correct for
+   * long-running MCP server instances.
+   */
+  graphClient: GraphClient;
   /** McpServer instance for elicitation and capability checks. */
   mcpServer: McpServer;
   /** Opens a URL in the system browser. Injected for testability. */
@@ -53,7 +61,7 @@ export interface ServerConfig {
 
 /** Create a configured McpServer instance with all tools registered. */
 export function createMcpServer(
-  opts: Omit<ServerConfig, "mcpServer">,
+  opts: Omit<ServerConfig, "mcpServer" | "graphClient">,
 ): McpServer {
   const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
@@ -73,7 +81,14 @@ export function createMcpServer(
     },
   );
 
-  const config: ServerConfig = { ...opts, mcpServer };
+  // Create a single GraphClient instance for the lifetime of this server.
+  // The credential calls authenticator.token() on every request, so MSAL's
+  // silent refresh keeps tokens current even in long-running server sessions.
+  const graphClient = new GraphClient(opts.graphBaseUrl, {
+    getToken: () => opts.authenticator.token(),
+  });
+
+  const config: ServerConfig = { ...opts, mcpServer, graphClient };
 
   registerLoginTools(mcpServer, config);
   registerMailTools(mcpServer, config);

@@ -3,11 +3,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { AuthenticationRequiredError } from "../auth.js";
-import { GraphClient } from "../graph/client.js";
 import { getMe, sendMail } from "../graph/mail.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
+import { createAuthenticatedClient, formatError } from "./shared.js";
 
 /** Register mail-related tools on the given MCP server. */
 export function registerMailTools(
@@ -34,8 +33,7 @@ export function registerMailTools(
     },
     async ({ subject, body, html }) => {
       try {
-        const token = await config.authenticator.token();
-        const client = new GraphClient(config.graphBaseUrl, token);
+        const client = await createAuthenticatedClient(config);
         const user = await getMe(client);
         await sendMail(client, user.mail, subject, body, html);
         logger.info("mail sent", { to: user.mail, subject });
@@ -45,21 +43,7 @@ export function registerMailTools(
           ],
         };
       } catch (error: unknown) {
-        if (error instanceof AuthenticationRequiredError) {
-          return {
-            content: [{ type: "text", text: error.message }],
-            isError: true,
-          };
-        }
-        const message =
-          error instanceof Error
-            ? error.message
-            : String(error);
-        logger.error("mail_send failed", { error: message });
-        return {
-          content: [{ type: "text", text: message }],
-          isError: true,
-        };
+        return formatError("mail_send", error);
       }
     },
   );

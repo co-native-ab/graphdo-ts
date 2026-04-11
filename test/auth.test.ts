@@ -1,0 +1,531 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
+import * as crypto from "node:crypto";
+
+import type * as MsalTypes from "@azure/msal-node";
+
+import {
+  StaticAuthenticator,
+  MsalAuthenticator,
+} from "../src/auth.js";
+import { AuthenticationRequiredError } from "../src/errors.js";
+
+// ---------------------------------------------------------------------------
+// vi.mock must be at the top level (hoisted by vitest)
+// ---------------------------------------------------------------------------
+
+vi.mock("@azure/msal-node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@azure/msal-node")>();
+  return {
+    ...actual,
+    PublicClientApplication: vi.fn(),
+  };
+});
+
+// Lazy import so the mock is in place before we reference it.
+let msal: typeof import("@azure/msal-node");
+
+beforeEach(async () => {
+  msal = await import("@azure/msal-node");
+});
+
+// ---------------------------------------------------------------------------
+// Temp-dir helpers (same pattern as config.test.ts)
+// ---------------------------------------------------------------------------
+
+const tempDirs: string[] = [];
+
+function getTempDir(): string {
+  const dir = path.join(os.tmpdir(), `graphdo-auth-test-${crypto.randomUUID()}`);
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  for (const dir of tempDirs) {
+    await fs
+      .rm(dir, { recursive: true, force: true })
+      .catch(() => {
+        /* ignore cleanup errors */
+      });
+  }
+  tempDirs.length = 0;
+  vi.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// Helper: build a fake PCA returned by the mocked constructor
+// ---------------------------------------------------------------------------
+
+interface FakePCA {
+  acquireTokenInteractive: ReturnType<typeof vi.fn>;
+  acquireTokenByDeviceCode: ReturnType<typeof vi.fn>;
+  acquireTokenSilent: ReturnType<typeof vi.fn>;
+}
+
+function installFakePCA(): FakePCA {
+  const fakePCA: FakePCA = {
+    acquireTokenInteractive: vi.fn(),
+    acquireTokenByDeviceCode: vi.fn(),
+    acquireTokenSilent: vi.fn(),
+  };
+
+  // Must use a regular function (not arrow) so it can be called with `new`
+  const ctor = vi.mocked(msal.PublicClientApplication);
+  ctor.mockImplementation(function (this: Record<string, unknown>) {
+    Object.assign(this, fakePCA);
+  } as never);
+
+  return fakePCA;
+}
+
+// Helper to build a minimal AuthenticationResult
+function authResult(
+  overrides: Partial<MsalTypes.AuthenticationResult> = {},
+): MsalTypes.AuthenticationResult {
+  return {
+    authority: "https://login.microsoftonline.com/common",
+    uniqueId: "uid-1",
+    tenantId: "tid-1",
+    scopes: ["User.Read"],
+    account: {
+      homeAccountId: "home-1",
+      environment: "login.microsoftonline.com",
+      tenantId: "tid-1",
+      username: "user@example.com",
+      localAccountId: "local-1",
+    },
+    idToken: "id-token",
+    idTokenClaims: {},
+    accessToken: "access-token-123",
+    fromCache: false,
+    expiresOn: new Date(Date.now() + 3600 * 1000),
+    tokenType: "Bearer",
+    correlationId: "corr-1",
+    ...overrides,
+  };
+}
+
+// =========================================================================
+// StaticAuthenticator
+// =========================================================================
+
+describe("StaticAuthenticator", () => {
+  it("login resolves with completed: true and a static message", async () => {
+    const auth = new StaticAuthenticator("my-token");
+    const result = await auth.login();
+    expect(result.completed).toBe(true);
+    expect(result.message).toMatch(/static token/i);
+  });
+
+  it("token returns the fixed access token", async () => {
+    const auth = new StaticAuthenticator("fixed-token");
+    const token = await auth.token();
+    expect(token).toBe("fixed-token");
+  });
+
+  it("logout is a no-op (does not throw)", async () => {
+    const auth = new StaticAuthenticator("t");
+    await expect(auth.logout()).resolves.toBeUndefined();
+  });
+
+  it("isAuthenticated always returns true", async () => {
+    const auth = new StaticAuthenticator("t");
+    expect(await auth.isAuthenticated()).toBe(true);
+  });
+
+  it("accountInfo returns username 'static-token'", async () => {
+    const auth = new StaticAuthenticator("t");
+    const info = await auth.accountInfo();
+    expect(info).toEqual({ username: "static-token" });
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — login
+// =========================================================================
+
+describe("MsalAuthenticator.login", () => {
+  it("completes immediately via browser login when interactive succeeds", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenInteractive.mockResolvedValue(authResult());
+
+    const result = await auth.login();
+
+    expect(result.completed).toBe(true);
+    expect(result.message).toContain("user@example.com");
+    // Account file should be saved
+    const accountPath = path.join(dir, "account.json");
+    const raw = await fs.readFile(accountPath, "utf-8");
+    const parsed = JSON.parse(raw) as { username: string };
+    expect(parsed.username).toBe("user@example.com");
+  });
+
+  it("falls back to device code when browser login throws", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    // Browser login fails
+    fakePCA.acquireTokenInteractive.mockRejectedValue(
+      new Error("cannot open browser"),
+    );
+    // Device code flow succeeds
+    fakePCA.acquireTokenByDeviceCode.mockImplementation(
+      ((req: { deviceCodeCallback: (r: { message: string }) => void }) => {
+        req.deviceCodeCallback({
+          message: "Go to https://device.login and enter code ABCD1234",
+        });
+        return Promise.resolve(authResult());
+      }) as never,
+    );
+
+    const result = await auth.login();
+
+    expect(result.completed).toBe(false);
+    expect(result.message).toContain("ABCD1234");
+  });
+
+  it("saves the account file with mode 0o600", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenInteractive.mockResolvedValue(authResult());
+
+    await auth.login();
+
+    const accountPath = path.join(dir, "account.json");
+    const stat = await fs.stat(accountPath);
+    const mode = stat.mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — token
+// =========================================================================
+
+describe("MsalAuthenticator.token", () => {
+  it("returns access token when silent acquisition succeeds", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    // Write a valid account file so loadAccount succeeds
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenSilent.mockResolvedValue(
+      authResult({ accessToken: "silent-token-xyz" }),
+    );
+
+    const token = await auth.token();
+    expect(token).toBe("silent-token-xyz");
+  });
+
+  it("throws AuthenticationRequiredError when no account file exists", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    installFakePCA();
+
+    await expect(auth.token()).rejects.toThrow(AuthenticationRequiredError);
+  });
+
+  it("throws AuthenticationRequiredError on InteractionRequiredAuthError", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenSilent.mockRejectedValue(
+      new msal.InteractionRequiredAuthError("interaction_required"),
+    );
+
+    await expect(auth.token()).rejects.toThrow(AuthenticationRequiredError);
+  });
+
+  it("re-throws non-InteractionRequired errors from silent acquisition", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenSilent.mockRejectedValue(new Error("network failure"));
+
+    await expect(auth.token()).rejects.toThrow("network failure");
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — logout
+// =========================================================================
+
+describe("MsalAuthenticator.logout", () => {
+  it("deletes msal_cache.json and account.json", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "msal_cache.json"), "{}");
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await auth.logout();
+
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
+    await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
+  });
+
+  it("does not throw when cache files do not exist (ENOENT ignored)", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    // No cache files exist
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await expect(auth.logout()).resolves.toBeUndefined();
+  });
+
+  it("still deletes the remaining file when only one cache file exists", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "account.json"), "{}");
+    // msal_cache.json does NOT exist
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    await auth.logout();
+
+    await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — isAuthenticated
+// =========================================================================
+
+describe("MsalAuthenticator.isAuthenticated", () => {
+  it("returns true when token() succeeds", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenSilent.mockResolvedValue(authResult());
+
+    expect(await auth.isAuthenticated()).toBe(true);
+  });
+
+  it("returns false when no account file exists", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    installFakePCA();
+
+    expect(await auth.isAuthenticated()).toBe(false);
+  });
+
+  it("returns false when silent acquisition fails", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenSilent.mockRejectedValue(new Error("expired"));
+
+    expect(await auth.isAuthenticated()).toBe(false);
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — accountInfo
+// =========================================================================
+
+describe("MsalAuthenticator.accountInfo", () => {
+  it("returns username from saved account file", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "alice@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const info = await auth.accountInfo();
+    expect(info).toEqual({ username: "alice@example.com" });
+  });
+
+  it("returns null when no account file exists", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const info = await auth.accountInfo();
+    expect(info).toBeNull();
+  });
+
+  it("returns null when account file contains invalid JSON", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "account.json"), "not-json{{{");
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const info = await auth.accountInfo();
+    expect(info).toBeNull();
+  });
+
+  it("returns null when account file fails schema validation", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    // Valid JSON but missing required 'username' field
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({ homeAccountId: "h-1" }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const info = await auth.accountInfo();
+    expect(info).toBeNull();
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — login + token integration (pending login)
+// =========================================================================
+
+describe("MsalAuthenticator pending login", () => {
+  it("token() waits for pending device code login to complete", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", dir, ["User.Read"], openBrowser);
+
+    const fakePCA = installFakePCA();
+
+    // Browser login fails → device code kicks in
+    fakePCA.acquireTokenInteractive.mockRejectedValue(
+      new Error("no browser"),
+    );
+
+    // Device code flow: callback fires immediately, but the promise resolves
+    // only after we manually resolve it (simulating user completing login)
+    let resolveDeviceCode!: (v: MsalTypes.AuthenticationResult) => void;
+    fakePCA.acquireTokenByDeviceCode.mockImplementation(
+      ((req: { deviceCodeCallback: (r: { message: string }) => void }) => {
+        req.deviceCodeCallback({ message: "Enter code ABC" });
+        return new Promise<MsalTypes.AuthenticationResult>((resolve) => {
+          resolveDeviceCode = resolve;
+        });
+      }) as never,
+    );
+
+    // Start login — returns immediately with the device code message
+    const loginResult = await auth.login();
+    expect(loginResult.completed).toBe(false);
+    expect(loginResult.message).toContain("ABC");
+
+    // Now complete the device code flow in the background
+    resolveDeviceCode(authResult({ accessToken: "dc-token" }));
+
+    // token() should wait for the pending login. Since the device code
+    // flow saved the account, we need acquireTokenSilent to succeed.
+    fakePCA.acquireTokenSilent.mockResolvedValue(
+      authResult({ accessToken: "silent-after-dc" }),
+    );
+
+    // Small delay to let the pending promise chain resolve
+    await new Promise((r) => setTimeout(r, 50));
+
+    const token = await auth.token();
+    expect(token).toBe("silent-after-dc");
+  });
+});

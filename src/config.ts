@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
+import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 
 export interface Config {
@@ -124,6 +125,3 @@ export async function loadAndValidateConfig(dir: string): Promise<Config> {
   return config;
 }
 
-function isNodeError(err: unknown): err is NodeJS.ErrnoException {
-  return err instanceof Error && "code" in err;
-}

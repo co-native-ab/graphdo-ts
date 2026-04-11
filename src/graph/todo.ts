@@ -4,12 +4,19 @@ import type {
   TodoList,
   TodoItem,
   ChecklistItem,
-  GraphListResponse,
   DateTimeTimeZone,
   PatternedRecurrence,
+  Importance,
+} from "./types.js";
+import {
+  TodoListSchema,
+  TodoItemSchema,
+  ChecklistItemSchema,
+  GraphListResponseSchema,
 } from "./types.js";
 import type { GraphClient } from "./client.js";
 import { logger } from "../logger.js";
+import { parseResponse } from "./client.js";
 
 // ---------------------------------------------------------------------------
 // Todo lists
@@ -21,7 +28,7 @@ export async function listTodoLists(
 ): Promise<TodoList[]> {
   logger.debug("listing todo lists");
   const response = await client.request("GET", "/me/todo/lists");
-  const data = (await response.json()) as GraphListResponse<TodoList>;
+  const data = await parseResponse(response, GraphListResponseSchema(TodoListSchema), "GET", "/me/todo/lists");
   return data.value;
 }
 
@@ -47,7 +54,7 @@ export async function listTodos(
 
   logger.debug("listing todos", { listId, top, skip });
   const response = await client.request("GET", path);
-  const data = (await response.json()) as GraphListResponse<TodoItem>;
+  const data = await parseResponse(response, GraphListResponseSchema(TodoItemSchema), "GET", path);
   return data.value;
 }
 
@@ -61,18 +68,16 @@ export async function getTodo(
   if (!taskId) throw new Error("getTodo: taskId must not be empty");
 
   logger.debug("getting todo", { listId, taskId });
-  const response = await client.request(
-    "GET",
-    `/me/todo/lists/${listId}/tasks/${taskId}`,
-  );
-  return (await response.json()) as TodoItem;
+  const path = `/me/todo/lists/${listId}/tasks/${taskId}`;
+  const response = await client.request("GET", path);
+  return await parseResponse(response, TodoItemSchema, "GET", path);
 }
 
 /** Options for creating a new task. */
 export interface CreateTodoOptions {
   title: string;
   body?: string;
-  importance?: string;
+  importance?: Importance;
   isReminderOn?: boolean;
   reminderDateTime?: DateTimeTimeZone;
   dueDateTime?: DateTimeTimeZone;
@@ -110,19 +115,20 @@ export async function createTodo(
     payload["recurrence"] = opts.recurrence;
   }
 
+  const path = `/me/todo/lists/${listId}/tasks`;
   const response = await client.request(
     "POST",
-    `/me/todo/lists/${listId}/tasks`,
+    path,
     payload,
   );
-  return (await response.json()) as TodoItem;
+  return await parseResponse(response, TodoItemSchema, "POST", path);
 }
 
 /** Options for updating an existing task. */
 export interface UpdateTodoOptions {
   title?: string;
   body?: string;
-  importance?: string;
+  importance?: Importance;
   isReminderOn?: boolean;
   reminderDateTime?: DateTimeTimeZone | null;
   dueDateTime?: DateTimeTimeZone | null;
@@ -150,12 +156,13 @@ export async function updateTodo(
   if (opts.dueDateTime !== undefined) payload["dueDateTime"] = opts.dueDateTime;
   if (opts.recurrence !== undefined) payload["recurrence"] = opts.recurrence;
 
+  const path = `/me/todo/lists/${listId}/tasks/${taskId}`;
   const response = await client.request(
     "PATCH",
-    `/me/todo/lists/${listId}/tasks/${taskId}`,
+    path,
     payload,
   );
-  return (await response.json()) as TodoItem;
+  return await parseResponse(response, TodoItemSchema, "PATCH", path);
 }
 
 /** Mark a task as completed. */
@@ -205,11 +212,12 @@ export async function listChecklistItems(
   if (!taskId) throw new Error("listChecklistItems: taskId must not be empty");
 
   logger.debug("listing checklist items", { listId, taskId });
+  const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`;
   const response = await client.request(
     "GET",
-    `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`,
+    path,
   );
-  const data = (await response.json()) as GraphListResponse<ChecklistItem>;
+  const data = await parseResponse(response, GraphListResponseSchema(ChecklistItemSchema), "GET", path);
   return data.value;
 }
 
@@ -225,12 +233,13 @@ export async function createChecklistItem(
   if (!displayName) throw new Error("createChecklistItem: displayName must not be empty");
 
   logger.debug("creating checklist item", { listId, taskId, displayName });
+  const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`;
   const response = await client.request(
     "POST",
-    `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems`,
+    path,
     { displayName },
   );
-  return (await response.json()) as ChecklistItem;
+  return await parseResponse(response, ChecklistItemSchema, "POST", path);
 }
 
 /** Options for updating a checklist item. */
@@ -256,12 +265,13 @@ export async function updateChecklistItem(
   if (opts.displayName !== undefined) payload["displayName"] = opts.displayName;
   if (opts.isChecked !== undefined) payload["isChecked"] = opts.isChecked;
 
+  const path = `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems/${itemId}`;
   const response = await client.request(
     "PATCH",
-    `/me/todo/lists/${listId}/tasks/${taskId}/checklistItems/${itemId}`,
+    path,
     payload,
   );
-  return (await response.json()) as ChecklistItem;
+  return await parseResponse(response, ChecklistItemSchema, "PATCH", path);
 }
 
 /** Delete a checklist item from a task. */
