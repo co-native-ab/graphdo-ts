@@ -32,20 +32,42 @@ graphdo-ts currently exposes **15 MCP tools**:
 
 ## Installation
 
-graphdo-ts is distributed as an [MCPB](https://github.com/modelcontextprotocol/mcpb) bundle - a self-contained package that includes the server and a bundled Node.js runtime. No separate Node.js installation required.
+graphdo-ts is distributed in three formats:
 
-### Download
+### MCPB Bundle (Recommended for Claude Desktop)
 
-Download the latest MCPB bundle from [GitHub Releases](https://github.com/co-native-ab/graphdo-ts/releases/latest).
+The [MCPB](https://github.com/modelcontextprotocol/mcpb) bundle is self-contained — it includes the server and a bundled Node.js runtime. No separate Node.js installation required.
 
-### Claude Desktop
+Download the latest `.mcpb` file from [GitHub Releases](https://github.com/co-native-ab/graphdo-ts/releases/latest).
 
-Install the bundle using one of these methods:
-
-1. **Double-click** the downloaded `.mcpb` file — Claude Desktop will open and install it automatically.
-2. **Or** open Claude Desktop → **Settings** → **Extensions** → **Install Extension**, then select the `.mcpb` file.
+**Claude Desktop:** Double-click the `.mcpb` file, or open Claude Desktop → **Settings** → **Extensions** → **Install Extension** and select the file.
 
 After installation, graphdo appears in your extensions list. You can configure optional settings (debug logging, custom client ID, tenant ID) through the extension settings UI.
+
+### npm (Recommended for other MCP clients)
+
+Requires [Node.js](https://nodejs.org/) 22 or later.
+
+```bash
+npx @co-native-ab/graphdo-ts
+```
+
+Configure in your MCP client:
+
+```json
+{
+  "command": "npx",
+  "args": ["@co-native-ab/graphdo-ts"]
+}
+```
+
+### Standalone JS Bundle
+
+Download `graphdo-ts-vX.Y.Z.js` from [GitHub Releases](https://github.com/co-native-ab/graphdo-ts/releases/latest) and run directly with Node.js:
+
+```bash
+node graphdo-ts-vX.Y.Z.js
+```
 
 ---
 
