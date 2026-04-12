@@ -188,11 +188,32 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 
 ### CI (`ci.yml`)
 
-Runs on push/PR to main: `npm ci` → lint → typecheck → test → build
+Runs on push/PR to main: `npm ci` → format check → icons check → lint → typecheck → test (with coverage) → build
+
+### Dependency Review (`dependency-review.yml`)
+
+Runs on PRs to main. Uses `actions/dependency-review-action` to scan for vulnerable or problematic dependencies before merge.
 
 ### Release (`release.yml`)
 
-Triggered by `v*` tags. Stamps version (without `v` prefix) into `package.json` and `manifest.json`, runs full check + build, creates MCPB bundle, generates SHA-256 checksums, and publishes a GitHub Release with the bundle and checksums.
+Triggered by `v*` tags. Three jobs:
+
+1. **`build`** — Stamps version (without `v` prefix) into `package.json` and `manifest.json`, runs full check + build, creates MCPB bundle, copies standalone JS file, runs `npm pack`.
+2. **`github-release`** — Attests build provenance (`actions/attest-build-provenance`), generates SHA-256 checksums, publishes GitHub Release with `.mcpb`, `.js`, `.tgz`, and checksums.
+3. **`npm-publish`** — Gated by `npm-publish` GitHub Environment (manual approval). Publishes to npm via OIDC Trusted Publishing with `--provenance`. No npm tokens stored.
+
+### Release Artifacts
+
+| Artifact                            | Description                                            |
+| ----------------------------------- | ------------------------------------------------------ |
+| `graphdo-ts-vX.Y.Z.mcpb`            | MCPB bundle (self-contained, includes Node.js runtime) |
+| `graphdo-ts-vX.Y.Z.js`              | Standalone esbuild bundle (`dist/index.js`)            |
+| `co-native-ab-graphdo-ts-X.Y.Z.tgz` | npm tarball                                            |
+| `checksums-sha256.txt`              | SHA-256 checksums for all artifacts                    |
+
+### npm Package
+
+Published as `@co-native-ab/graphdo-ts` with OIDC Trusted Publishing (no tokens). Install: `npx @co-native-ab/graphdo-ts`
 
 ### Environment Variables
 

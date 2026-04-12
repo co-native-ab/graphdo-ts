@@ -1,0 +1,5 @@
+# Default owners for everything
+* @simongottschlag
+
+# Workflow files require extra scrutiny
+.github/workflows/ @simongottschlag
