@@ -221,7 +221,7 @@ export class MsalAuthenticator implements Authenticator {
     try {
       const result = await Promise.race([
         client.acquireTokenInteractive({
-          scopes: [".default"],
+          scopes: ["User.Read"],
           prompt: "select_account",
           loopbackClient: loopback,
           openBrowser: async (authUrl: string) => {
@@ -276,7 +276,7 @@ export class MsalAuthenticator implements Authenticator {
     try {
       const result = await client.acquireTokenSilent({
         account,
-        scopes: [".default"],
+        scopes: ["User.Read"],
       });
 
       this.cachedScopes = toGraphScopes(result.scopes);
