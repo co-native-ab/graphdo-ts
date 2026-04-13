@@ -145,7 +145,7 @@ function handleRequest(
 
   // Landing page
   if (pathname === "/" && req.method === "GET") {
-    serveLandingPage(res, client.getAuthUrl());
+    serveLandingPage(res, client);
     return;
   }
 
@@ -187,7 +187,8 @@ function serveHtml(res: ServerResponse, html: string): void {
   res.end(html);
 }
 
-function serveLandingPage(res: ServerResponse, authUrl: string | undefined): void {
+function serveLandingPage(res: ServerResponse, client: LoginLoopbackClient): void {
+  const authUrl = client.getAuthUrl();
   if (!authUrl) {
     serveErrorPage(
       res,

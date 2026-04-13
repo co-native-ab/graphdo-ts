@@ -15,7 +15,7 @@ export function landingPageHtml(authUrl: string): string {
       <h1>Sign in to continue</h1>
       <p class="subtitle">Connect your Microsoft account to enable email and task management through your AI assistant.</p>
       <div class="btn-group">
-        <a href="${safeAuthUrl}" class="sign-in-btn">Sign in with Microsoft</a>
+        <a href="${safeAuthUrl}" id="sign-in-btn" class="sign-in-btn">Sign in with Microsoft</a>
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
       </div>
     </div>

@@ -1,7 +1,22 @@
 // System browser opener - cross-platform utility.
 
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { platform } from "node:os";
+
+// Detect WSL once at module load by checking the kernel version string.
+let _isWsl: boolean | undefined;
+function isWsl(): boolean {
+  if (_isWsl === undefined) {
+    try {
+      const version = readFileSync("/proc/version", "utf-8");
+      _isWsl = /microsoft|wsl/i.test(version);
+    } catch {
+      _isWsl = false;
+    }
+  }
+  return _isWsl;
+}
 
 /** Open a URL in the system browser. Throws on failure. */
 export function openBrowser(url: string): Promise<void> {
@@ -31,7 +46,9 @@ export function openBrowser(url: string): Promise<void> {
   // The URL is passed as an argument array element, never interpolated into
   // a shell command string, so metacharacters like $() and `` are harmless.
   if (os !== "win32") {
-    const cmd = os === "darwin" ? "open" : "xdg-open";
+    // WSL: use wslview (from wslu) to open the host Windows browser.
+    // Native Linux: use xdg-open.
+    const cmd = os === "darwin" ? "open" : isWsl() ? "wslview" : "xdg-open";
     return new Promise((resolve, reject) => {
       execFile(cmd, [url], (err) => {
         if (err) {

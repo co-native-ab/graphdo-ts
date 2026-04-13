@@ -110,19 +110,15 @@ describe("integration: discovery & login", () => {
       expect(firstText(result)).toContain("Login failed");
     });
 
-    it("tools fail before login", async () => {
+    it("scope-gated tools are disabled before login", async () => {
       const auth = new MockAuthenticator();
-      // Ensure the auth starts without a token
       await auth.logout();
       const client = await createTestClient(env, auth);
 
-      const result = (await client.callTool({
-        name: "mail_send",
-        arguments: { subject: "Test", body: "Test body" },
-      })) as ToolResult;
-
-      expect(result.isError).toBe(true);
-      expect(firstText(result)).toContain("Not logged in");
+      // Only always-enabled tools should be visible
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name).sort();
+      expect(names).toEqual(["auth_status", "login", "logout"]);
     });
 
     it("tools work after completing login", async () => {
@@ -136,7 +132,13 @@ describe("integration: discovery & login", () => {
       })) as ToolResult;
       expect(loginResult.isError).toBeFalsy();
 
-      // Now tools should work
+      // Now tools should be visible and work
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name).sort();
+      expect(names).toContain("mail_send");
+      expect(names).toContain("todo_list");
+      expect(names).toContain("logout");
+
       const result = (await client.callTool({
         name: "mail_send",
         arguments: { subject: "Post-login test", body: "It works!" },
@@ -146,7 +148,7 @@ describe("integration: discovery & login", () => {
       expect(firstText(result)).toContain("test@example.com");
     });
 
-    it("logout clears auth and tools fail again", async () => {
+    it("logout disables scope-gated tools", async () => {
       // Start authenticated
       const authed = new MockAuthenticator({ token: "will-be-cleared" });
       const client = await createTestClient(env, authed);
@@ -166,13 +168,10 @@ describe("integration: discovery & login", () => {
       expect(logoutResult.isError).toBeFalsy();
       expect(firstText(logoutResult)).toContain("Logged out");
 
-      // Tools should fail now
-      const after = (await client.callTool({
-        name: "mail_send",
-        arguments: { subject: "After logout", body: "Fails" },
-      })) as ToolResult;
-      expect(after.isError).toBe(true);
-      expect(firstText(after)).toContain("Not logged in");
+      // Only always-enabled tools should remain visible
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name).sort();
+      expect(names).toEqual(["auth_status", "login", "logout"]);
     });
   });
 });

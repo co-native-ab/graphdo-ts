@@ -9,7 +9,7 @@ import {
   configPath,
   loadConfig,
   saveConfig,
-  validateConfig,
+  hasTodoConfig,
   loadAndValidateConfig,
   type Config,
 } from "../src/config.js";
@@ -101,13 +101,13 @@ describe("loadConfig", () => {
     await expect(loadConfig(dir)).rejects.toThrow("failed to parse config");
   });
 
-  it("returns null for valid JSON with wrong shape", async () => {
+  it("strips extra fields and returns empty config for unknown shape", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
     const result = await loadConfig(dir);
-    expect(result).toBeNull();
+    expect(result).toEqual({});
   });
 
   it("returns null for valid JSON with empty required fields", async () => {
@@ -118,17 +118,18 @@ describe("loadConfig", () => {
       JSON.stringify({ todoListId: "", todoListName: "" }),
     );
 
+    // Empty strings fail min(1) validation
     const result = await loadConfig(dir);
     expect(result).toBeNull();
   });
 
-  it("returns null for partial config missing todoListName", async () => {
+  it("returns config with only partial todo fields", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir);
-    expect(result).toBeNull();
+    expect(result).toEqual({ todoListId: "list-1" });
   });
 
   it("strips extra fields and returns valid config", async () => {
@@ -179,13 +180,17 @@ describe("saveConfig", () => {
   });
 });
 
-describe("validateConfig", () => {
+describe("hasTodoConfig", () => {
   it("returns false for null", () => {
-    expect(validateConfig(null)).toBe(false);
+    expect(hasTodoConfig(null)).toBe(false);
   });
 
-  it("returns true for valid config", () => {
-    expect(validateConfig(validConfig)).toBe(true);
+  it("returns false for config without todo fields", () => {
+    expect(hasTodoConfig({})).toBe(false);
+  });
+
+  it("returns true for config with todo fields", () => {
+    expect(hasTodoConfig(validConfig)).toBe(true);
   });
 });
 

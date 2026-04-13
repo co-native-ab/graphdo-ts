@@ -9,14 +9,14 @@ import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 
 export interface Config {
-  todoListId: string;
-  todoListName: string;
+  todoListId?: string;
+  todoListName?: string;
 }
 
 /** Zod schema for runtime validation of config.json content. */
 const ConfigSchema = z.object({
-  todoListId: z.string().min(1),
-  todoListName: z.string().min(1),
+  todoListId: z.string().min(1).optional(),
+  todoListName: z.string().min(1).optional(),
 });
 
 /**
@@ -121,17 +121,26 @@ export async function saveConfig(config: Config, dir: string): Promise<void> {
 }
 
 /**
- * Type guard that checks whether a loaded config is non-null.
- * Structural validation is handled by the Zod schema in loadConfig().
+ * Type guard that checks whether a loaded config has todo list fields set.
  */
-export function validateConfig(config: Config | null): config is Config {
-  return config !== null;
+export function hasTodoConfig(
+  config: Config | null,
+): config is Config & { todoListId: string; todoListName: string } {
+  return (
+    config !== null &&
+    typeof config.todoListId === "string" &&
+    config.todoListId.length > 0 &&
+    typeof config.todoListName === "string" &&
+    config.todoListName.length > 0
+  );
 }
 
-/** Loads config from disk and validates it. Throws a user-friendly error if missing or invalid. */
-export async function loadAndValidateConfig(dir: string): Promise<Config> {
+/** Loads config from disk and validates it has todo list fields. Throws a user-friendly error if missing or invalid. */
+export async function loadAndValidateConfig(
+  dir: string,
+): Promise<Config & { todoListId: string; todoListName: string }> {
   const config = await loadConfig(dir);
-  if (!validateConfig(config)) {
+  if (!hasTodoConfig(config)) {
     throw new Error("todo list not configured - use the todo_config tool to select one");
   }
   return config;

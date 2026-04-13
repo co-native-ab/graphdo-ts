@@ -36,17 +36,13 @@ describe("integration: todo", () => {
   // -------------------------------------------------------------------------
 
   describe("todo config", () => {
-    it("returns auth error when not logged in", async () => {
+    it("todo_config disabled when not logged in", async () => {
       const noAuth = new MockAuthenticator();
       const c = await createTestClient(env, noAuth);
 
-      const result = (await c.callTool({
-        name: "todo_config",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBe(true);
-      expect(firstText(result)).toContain("Not logged in");
+      const { tools } = await c.listTools();
+      const names = tools.map((t: { name: string }) => t.name);
+      expect(names).not.toContain("todo_config");
     });
 
     it("returns message when no todo lists exist", async () => {
@@ -93,7 +89,7 @@ describe("integration: todo", () => {
         };
 
         const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
-        const server = createMcpServer({
+        const server = await createMcpServer({
           authenticator: configAuth,
           graphBaseUrl: env.graphUrl,
           configDir: tempConfigDir,
@@ -148,7 +144,7 @@ describe("integration: todo", () => {
         };
 
         const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
-        const server = createMcpServer({
+        const server = await createMcpServer({
           authenticator: configAuth,
           graphBaseUrl: env.graphUrl,
           configDir: tempConfigDir,
