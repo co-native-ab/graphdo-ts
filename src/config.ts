@@ -7,19 +7,16 @@ import { z } from "zod/v4";
 
 import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
-import { type GraphScope, toGraphScopes, ALWAYS_REQUIRED_SCOPES } from "./scopes.js";
 
 export interface Config {
   todoListId?: string;
   todoListName?: string;
-  selectedScopes?: string[];
 }
 
 /** Zod schema for runtime validation of config.json content. */
 const ConfigSchema = z.object({
   todoListId: z.string().min(1).optional(),
   todoListName: z.string().min(1).optional(),
-  selectedScopes: z.array(z.string()).optional(),
 });
 
 /**
@@ -147,34 +144,4 @@ export async function loadAndValidateConfig(
     throw new Error("todo list not configured - use the todo_config tool to select one");
   }
   return config;
-}
-
-// ---------------------------------------------------------------------------
-// Scope config helpers
-// ---------------------------------------------------------------------------
-
-/** Load selected scopes from config.json. Returns null if not configured. */
-export async function loadSelectedScopes(dir: string): Promise<GraphScope[] | null> {
-  const config = await loadConfig(dir);
-  if (!config?.selectedScopes || config.selectedScopes.length === 0) {
-    return null;
-  }
-  const scopes = toGraphScopes(config.selectedScopes);
-  // Ensure always-required scopes are included
-  for (const required of ALWAYS_REQUIRED_SCOPES) {
-    if (!scopes.includes(required)) {
-      scopes.push(required);
-    }
-  }
-  return scopes;
-}
-
-/** Save selected scopes to config.json, merging with existing config. */
-export async function saveSelectedScopes(
-  scopes: readonly GraphScope[],
-  dir: string,
-): Promise<void> {
-  const existing = await loadConfig(dir);
-  const merged: Config = { ...existing, selectedScopes: [...scopes] };
-  await saveConfig(merged, dir);
 }

@@ -15,11 +15,3 @@ export class UserCancelledError extends Error {
     this.name = "UserCancelledError";
   }
 }
-
-/** Thrown by the loopback client when the user changes scopes mid-login flow. */
-export class ScopeChangeError extends Error {
-  constructor(message = "Scopes changed during login — restarting") {
-    super(message);
-    this.name = "ScopeChangeError";
-  }
-}

@@ -11,10 +11,8 @@ import type { AuthorizeResponse } from "@azure/msal-node";
 import type { ILoopbackClient } from "@azure/msal-node";
 
 import { logger } from "./logger.js";
-import { UserCancelledError, ScopeChangeError } from "./errors.js";
+import { UserCancelledError } from "./errors.js";
 import { landingPageHtml, successPageHtml, errorPageHtml } from "./templates/login.js";
-import { AVAILABLE_SCOPES, toGraphScopes } from "./scopes.js";
-import { loadSelectedScopes, saveSelectedScopes } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // LoginLoopbackClient
@@ -37,11 +35,6 @@ export class LoginLoopbackClient implements ILoopbackClient {
   private server: Server | undefined;
   private authUrl: string | undefined;
   private serverReady: Promise<void> | undefined;
-  readonly configDir: string;
-
-  constructor(configDir: string) {
-    this.configDir = configDir;
-  }
 
   /** Set the Microsoft auth URL (called from the openBrowser wrapper). */
   setAuthUrl(url: string): void {
@@ -171,55 +164,6 @@ function handleRequest(
     return;
   }
 
-  // Save scopes (user changed scope selection in the flyout)
-  if (pathname === "/save-scopes" && req.method === "POST") {
-    readJsonBody(req)
-      .then(async (body: unknown) => {
-        const data = body as { scopes?: unknown };
-        if (!Array.isArray(data.scopes)) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "scopes must be an array" }));
-          return;
-        }
-        const validScopes = toGraphScopes(data.scopes as string[]);
-        await saveSelectedScopes(validScopes, client.configDir);
-        logger.debug("scopes saved via login page", { scopes: validScopes.join(", ") });
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error("save-scopes failed", { error: message });
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: message }));
-      });
-    return;
-  }
-
-  // Restart login with new scopes
-  if (pathname === "/restart-login" && req.method === "POST") {
-    readJsonBody(req)
-      .then(async (body: unknown) => {
-        const data = body as { scopes?: unknown };
-        if (Array.isArray(data.scopes)) {
-          const validScopes = toGraphScopes(data.scopes as string[]);
-          await saveSelectedScopes(validScopes, client.configDir);
-          logger.debug("scopes updated, restarting login", { scopes: validScopes.join(", ") });
-        }
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, restarting: true }));
-        // Reject the auth code promise to trigger a restart
-        reject(new ScopeChangeError());
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error("restart-login failed", { error: message });
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: message }));
-      });
-    return;
-  }
-
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 }
@@ -253,21 +197,7 @@ function serveLandingPage(res: ServerResponse, client: LoginLoopbackClient): voi
     return;
   }
 
-  // Load selected scopes synchronously from the client's stored state.
-  // The landing page will show the scope flyout with checkboxes.
-  loadSelectedScopes(client.configDir)
-    .then((selected) => {
-      const html = landingPageHtml({
-        authUrl,
-        availableScopes: [...AVAILABLE_SCOPES],
-        selectedScopes: selected ? selected.map(String) : undefined,
-      });
-      serveHtml(res, html);
-    })
-    .catch(() => {
-      // Fallback: show landing page without scope flyout
-      serveHtml(res, landingPageHtml(authUrl));
-    });
+  serveHtml(res, landingPageHtml(authUrl));
 }
 
 function serveSuccessPage(res: ServerResponse): void {
@@ -276,23 +206,4 @@ function serveSuccessPage(res: ServerResponse): void {
 
 function serveErrorPage(res: ServerResponse, errorMessage: string): void {
   serveHtml(res, errorPageHtml(errorMessage));
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8")));
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
 }
