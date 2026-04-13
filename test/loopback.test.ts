@@ -10,7 +10,7 @@ async function startClient(): Promise<{
   uri: string;
   authPromise: Promise<import("@azure/msal-node").AuthorizeResponse>;
 }> {
-  const client = new LoginLoopbackClient();
+  const client = new LoginLoopbackClient("/tmp/test-graphdo");
   const authPromise = client.listenForAuthCode();
   await client.waitForReady();
   const uri = client.getRedirectUri();
@@ -173,14 +173,14 @@ describe("LoginLoopbackClient", () => {
   });
 
   it("throws when getting redirect URI before server starts", () => {
-    const c = new LoginLoopbackClient();
+    const c = new LoginLoopbackClient("/tmp/test-graphdo");
     client = c;
 
     expect(() => c.getRedirectUri()).toThrow("No loopback server exists");
   });
 
   it("closeServer is idempotent", () => {
-    const c = new LoginLoopbackClient();
+    const c = new LoginLoopbackClient("/tmp/test-graphdo");
     client = c;
     // Should not throw even when no server exists
     c.closeServer();

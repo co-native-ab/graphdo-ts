@@ -9,10 +9,13 @@ import {
   configPath,
   loadConfig,
   saveConfig,
-  validateConfig,
+  hasTodoConfig,
   loadAndValidateConfig,
+  loadSelectedScopes,
+  saveSelectedScopes,
   type Config,
 } from "../src/config.js";
+import { GraphScope } from "../src/scopes.js";
 
 function makeTempDir(): string {
   return path.join(os.tmpdir(), `graphdo-test-${crypto.randomUUID()}`);
@@ -101,13 +104,13 @@ describe("loadConfig", () => {
     await expect(loadConfig(dir)).rejects.toThrow("failed to parse config");
   });
 
-  it("returns null for valid JSON with wrong shape", async () => {
+  it("strips extra fields and returns empty config for unknown shape", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
     const result = await loadConfig(dir);
-    expect(result).toBeNull();
+    expect(result).toEqual({});
   });
 
   it("returns null for valid JSON with empty required fields", async () => {
@@ -118,17 +121,30 @@ describe("loadConfig", () => {
       JSON.stringify({ todoListId: "", todoListName: "" }),
     );
 
+    // Empty strings fail min(1) validation
     const result = await loadConfig(dir);
     expect(result).toBeNull();
   });
 
-  it("returns null for partial config missing todoListName", async () => {
+  it("returns config with only scope fields", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ selectedScopes: ["Mail.Send"] }),
+    );
+
+    const result = await loadConfig(dir);
+    expect(result).toEqual({ selectedScopes: ["Mail.Send"] });
+  });
+
+  it("returns config with only partial todo fields", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir);
-    expect(result).toBeNull();
+    expect(result).toEqual({ todoListId: "list-1" });
   });
 
   it("strips extra fields and returns valid config", async () => {
@@ -179,13 +195,17 @@ describe("saveConfig", () => {
   });
 });
 
-describe("validateConfig", () => {
+describe("hasTodoConfig", () => {
   it("returns false for null", () => {
-    expect(validateConfig(null)).toBe(false);
+    expect(hasTodoConfig(null)).toBe(false);
   });
 
-  it("returns true for valid config", () => {
-    expect(validateConfig(validConfig)).toBe(true);
+  it("returns false for config without todo fields", () => {
+    expect(hasTodoConfig({ selectedScopes: ["Mail.Send"] })).toBe(false);
+  });
+
+  it("returns true for config with todo fields", () => {
+    expect(hasTodoConfig(validConfig)).toBe(true);
   });
 });
 
@@ -227,5 +247,64 @@ describe("round-trip", () => {
     const loaded = await loadConfig(dir);
 
     expect(loaded).toEqual(config);
+  });
+});
+
+describe("selectedScopes config", () => {
+  it("loadSelectedScopes returns null when not configured", async () => {
+    const dir = getTempDir();
+    const result = await loadSelectedScopes(dir);
+    expect(result).toBeNull();
+  });
+
+  it("saveSelectedScopes and loadSelectedScopes roundtrip", async () => {
+    const dir = getTempDir();
+    await saveSelectedScopes([GraphScope.MailSend, GraphScope.UserRead], dir);
+    const result = await loadSelectedScopes(dir);
+    expect(result).toContain(GraphScope.MailSend);
+    expect(result).toContain(GraphScope.UserRead);
+    expect(result).toContain(GraphScope.OfflineAccess); // always required
+  });
+
+  it("saveSelectedScopes merges with existing config", async () => {
+    const dir = getTempDir();
+    await saveConfig({ todoListId: "list-1", todoListName: "Tasks" }, dir);
+    await saveSelectedScopes([GraphScope.MailSend], dir);
+
+    const config = await loadConfig(dir);
+    expect(config?.todoListId).toBe("list-1");
+    expect(config?.todoListName).toBe("Tasks");
+    expect(config?.selectedScopes).toContain("Mail.Send");
+  });
+
+  it("loadSelectedScopes includes always-required scopes", async () => {
+    const dir = getTempDir();
+    // Save only MailSend — User.Read and offline_access should be added on load
+    await saveConfig({ selectedScopes: ["Mail.Send"] }, dir);
+    const result = await loadSelectedScopes(dir);
+    expect(result).toContain(GraphScope.MailSend);
+    expect(result).toContain(GraphScope.UserRead);
+    expect(result).toContain(GraphScope.OfflineAccess);
+  });
+
+  it("loadSelectedScopes filters invalid scope strings", async () => {
+    const dir = getTempDir();
+    await saveConfig({ selectedScopes: ["Mail.Send", "Invalid.Scope", "Tasks.Read"] }, dir);
+    const result = await loadSelectedScopes(dir);
+    expect(result).toContain(GraphScope.MailSend);
+    expect(result).toContain(GraphScope.TasksRead);
+    expect(result).not.toContain("Invalid.Scope");
+  });
+
+  it("config with both todo and scope fields loads correctly", async () => {
+    const dir = getTempDir();
+    await saveConfig(
+      { todoListId: "list-1", todoListName: "Tasks", selectedScopes: ["Mail.Send"] },
+      dir,
+    );
+
+    const config = await loadConfig(dir);
+    expect(config?.todoListId).toBe("list-1");
+    expect(config?.selectedScopes).toEqual(["Mail.Send"]);
   });
 });

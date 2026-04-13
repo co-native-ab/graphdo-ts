@@ -49,17 +49,14 @@ describe("integration: status & errors", () => {
       expect(firstText(result)).toContain("NotFound");
     });
 
-    it("returns auth error when not logged in", async () => {
+    it("scope-gated tools disabled when not logged in", async () => {
       const noAuth = new MockAuthenticator();
       const noAuthClient = await createTestClient(env, noAuth);
 
-      const result = (await noAuthClient.callTool({
-        name: "todo_list",
-        arguments: {},
-      })) as ToolResult;
-
-      expect(result.isError).toBe(true);
-      expect(firstText(result)).toContain("Not logged in");
+      const { tools } = await noAuthClient.listTools();
+      const names = tools.map((t) => t.name).sort();
+      expect(names).not.toContain("todo_list");
+      expect(names).toEqual(["auth_status", "login"]);
     });
 
     it("returns error when todo list not configured", async () => {
@@ -68,7 +65,7 @@ describe("integration: status & errors", () => {
       try {
         const emptyAuth = new MockAuthenticator({ token: "token" });
 
-        const server = createMcpServer({
+        const server = await createMcpServer({
           authenticator: emptyAuth,
           graphBaseUrl: env.graphUrl,
           configDir: emptyConfigDir,
@@ -151,7 +148,7 @@ describe("integration: status & errors", () => {
       try {
         const authed = new MockAuthenticator({ token: "status-token" });
 
-        const server = createMcpServer({
+        const server = await createMcpServer({
           authenticator: authed,
           graphBaseUrl: env.graphUrl,
           configDir: emptyConfigDir,

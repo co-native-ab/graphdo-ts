@@ -10,11 +10,14 @@ import { openBrowser } from "./browser.js";
 import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
-import { registerLoginTools } from "./tools/login.js";
-import { registerMailTools } from "./tools/mail.js";
-import { registerTodoTools } from "./tools/todo.js";
-import { registerConfigTools } from "./tools/config.js";
-import { registerStatusTool } from "./tools/status.js";
+import type { GraphScope } from "./scopes.js";
+import { LOGIN_TOOL_DEFS, registerLoginTools } from "./tools/login.js";
+import { MAIL_TOOL_DEFS, registerMailTools } from "./tools/mail.js";
+import { TODO_TOOL_DEFS, STEP_TOOL_DEFS, registerTodoTools } from "./tools/todo.js";
+import { CONFIG_TOOL_DEFS, registerConfigTools } from "./tools/config.js";
+import { STATUS_TOOL_DEFS, registerStatusTool } from "./tools/status.js";
+import type { ToolEntry } from "./tool-registry.js";
+import { buildInstructions, syncToolState } from "./tool-registry.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -25,13 +28,6 @@ export const VERSION: string = __VERSION__;
 
 /** Azure AD (Entra ID) multi-tenant app registration client ID, published by Co-native AB. */
 export const CLIENT_ID = "b073490b-a1a2-4bb8-9d83-00bb5c15fcfd";
-
-export const SCOPES: readonly string[] = [
-  "Mail.Send",
-  "Tasks.ReadWrite",
-  "User.Read",
-  "offline_access",
-];
 
 // ---------------------------------------------------------------------------
 // Server configuration
@@ -51,6 +47,8 @@ export interface ServerConfig {
   graphClient: GraphClient;
   /** Opens a URL in the system browser. Injected for testability. */
   openBrowser: (url: string) => Promise<void>;
+  /** Set by createMcpServer() — login/logout tools call this to sync tool visibility. */
+  onScopesChanged?: (grantedScopes: GraphScope[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,39 +56,65 @@ export interface ServerConfig {
 // ---------------------------------------------------------------------------
 
 /** Create a configured McpServer instance with all tools registered. */
-export function createMcpServer(opts: Omit<ServerConfig, "graphClient">): McpServer {
+export async function createMcpServer(opts: Omit<ServerConfig, "graphClient">): Promise<McpServer> {
+  // Collect all static tool definitions for instruction generation
+  const allDefs = [
+    ...LOGIN_TOOL_DEFS,
+    ...STATUS_TOOL_DEFS,
+    ...MAIL_TOOL_DEFS,
+    ...TODO_TOOL_DEFS,
+    ...STEP_TOOL_DEFS,
+    ...CONFIG_TOOL_DEFS,
+  ];
+
   const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
     {
       capabilities: { logging: {} },
-      instructions:
-        "graphdo gives you access to Microsoft To Do and Outlook mail.\n\n" +
-        "IMPORTANT BEHAVIOR RULES:\n" +
-        "- When a tool returns an authentication error, call the login tool immediately - " +
-        "do not ask the user whether they want to log in.\n" +
-        "- When a tool returns a 'todo list not configured' error, call the todo_config " +
-        "tool immediately - do not ask the user which list to use, the tool opens a " +
-        "browser picker where the user selects the list themselves.\n" +
-        "- Use auth_status as a first step when diagnosing issues.\n\n" +
-        "WORKFLOW: On first use, call login (automatic browser sign-in), then " +
-        "todo_config (browser-based list selection), then the user's requested action.",
+      instructions: buildInstructions(allDefs),
     },
   );
 
   // Create a single GraphClient instance for the lifetime of this server.
-  // The credential calls authenticator.token() on every request, so MSAL's
-  // silent refresh keeps tokens current even in long-running server sessions.
   const graphClient = new GraphClient(opts.graphBaseUrl, {
     getToken: () => opts.authenticator.token(),
   });
 
   const config: ServerConfig = { ...opts, graphClient };
 
-  registerLoginTools(mcpServer, config);
-  registerMailTools(mcpServer, config);
-  registerTodoTools(mcpServer, config);
-  registerConfigTools(mcpServer, config);
-  registerStatusTool(mcpServer, config);
+  // Register all tools and collect entries for dynamic state management
+  const registry: ToolEntry[] = [
+    ...registerLoginTools(mcpServer, config),
+    ...registerMailTools(mcpServer, config),
+    ...registerTodoTools(mcpServer, config),
+    ...registerConfigTools(mcpServer, config),
+    ...registerStatusTool(mcpServer, config),
+  ];
+
+  // Disable all scope-gated tools initially
+  for (const entry of registry) {
+    if (entry.requiredScopes.length > 0) {
+      entry.registeredTool.disable();
+    }
+  }
+
+  // Wire up the callback that login/logout tools use to sync tool visibility
+  config.onScopesChanged = (grantedScopes: GraphScope[]) => {
+    syncToolState(registry, grantedScopes, mcpServer);
+  };
+
+  // Check startup auth state — if already authenticated, enable matching tools
+  try {
+    if (await opts.authenticator.isAuthenticated()) {
+      const scopes = await opts.authenticator.grantedScopes();
+      if (scopes.length > 0) {
+        syncToolState(registry, scopes, mcpServer);
+      }
+    }
+  } catch {
+    // Startup check failure is non-fatal — tools stay disabled
+    logger.debug("startup auth check failed, tools remain disabled");
+  }
 
   return mcpServer;
 }
@@ -113,11 +137,11 @@ async function main(): Promise<void> {
   const tenantId = process.env["GRAPHDO_TENANT_ID"] ?? DEFAULT_TENANT_ID;
   const authenticator: Authenticator = staticToken
     ? new StaticAuthenticator(staticToken)
-    : new MsalAuthenticator(clientId, tenantId, cfgDir, [...SCOPES], openBrowser);
+    : new MsalAuthenticator(clientId, tenantId, cfgDir, openBrowser);
 
   const graphBaseUrl = process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
 
-  const server = createMcpServer({
+  const server = await createMcpServer({
     authenticator,
     graphBaseUrl,
     configDir: cfgDir,

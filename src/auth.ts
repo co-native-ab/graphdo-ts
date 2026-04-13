@@ -10,10 +10,17 @@ import path from "node:path";
 import * as msal from "@azure/msal-node";
 import { z } from "zod";
 
-import { AuthenticationRequiredError, isNodeError, UserCancelledError } from "./errors.js";
+import {
+  AuthenticationRequiredError,
+  isNodeError,
+  UserCancelledError,
+  ScopeChangeError,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import { LoginLoopbackClient } from "./loopback.js";
 import { logoutPageHtml } from "./templates/logout.js";
+import { type GraphScope, toGraphScopes, defaultScopes } from "./scopes.js";
+import { loadSelectedScopes } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,11 +60,16 @@ export interface Authenticator {
 
   /** Get info about the currently logged-in account, if any. */
   accountInfo(): Promise<AccountInfo | null>;
+
+  /** Get the scopes granted in the current auth session. Empty if not authenticated. */
+  grantedScopes(): Promise<GraphScope[]>;
 }
 
 export interface LoginResult {
   /** Human-readable message about the login attempt. */
   message: string;
+  /** Scopes granted by the auth server. */
+  grantedScopes: GraphScope[];
 }
 
 /** Basic info about the logged-in account. */
@@ -171,20 +183,18 @@ export class MsalAuthenticator implements Authenticator {
   private readonly clientId: string;
   private readonly tenantId: string;
   private readonly configDir: string;
-  private readonly scopes: string[];
   private readonly openBrowser: (url: string) => Promise<void>;
+  private cachedScopes: GraphScope[] = [];
 
   constructor(
     clientId: string,
     tenantId: string,
     configDir: string,
-    scopes: string[],
     openBrowser: (url: string) => Promise<void>,
   ) {
     this.clientId = clientId;
     this.tenantId = tenantId;
     this.configDir = configDir;
-    this.scopes = scopes;
     this.openBrowser = openBrowser;
   }
 
@@ -208,49 +218,68 @@ export class MsalAuthenticator implements Authenticator {
 
   async login(): Promise<LoginResult> {
     logger.info("starting browser login");
-    const client = this.createClient();
-    const loopback = new LoginLoopbackClient();
 
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Read scopes from config (user may have changed them in the flyout)
+      const selectedScopes = (await loadSelectedScopes(this.configDir)) ?? defaultScopes();
+      const scopeStrings = selectedScopes as string[];
 
-    try {
-      const result = await Promise.race([
-        client.acquireTokenInteractive({
-          scopes: this.scopes,
-          prompt: "select_account",
-          loopbackClient: loopback,
-          openBrowser: async (authUrl: string) => {
-            loopback.setAuthUrl(authUrl);
-            await this.openBrowser(loopback.getRedirectUri());
-          },
-        }),
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(
-              new Error(
-                "Browser login timed out — sign-in was not completed within the time limit.",
-              ),
-            );
-          }, LOGIN_TIMEOUT_MS);
-        }),
-      ]);
+      const client = this.createClient();
+      const loopback = new LoginLoopbackClient(this.configDir);
 
-      if (!result.account) {
-        throw new Error("Browser authentication returned no account");
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        const result = await Promise.race([
+          client.acquireTokenInteractive({
+            scopes: scopeStrings,
+            prompt: "select_account",
+            loopbackClient: loopback,
+            openBrowser: async (authUrl: string) => {
+              loopback.setAuthUrl(authUrl);
+              await this.openBrowser(loopback.getRedirectUri());
+            },
+          }),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(
+                new Error(
+                  "Browser login timed out — sign-in was not completed within the time limit.",
+                ),
+              );
+            }, LOGIN_TIMEOUT_MS);
+          }),
+        ]);
+
+        if (!result.account) {
+          throw new Error("Browser authentication returned no account");
+        }
+
+        await saveAccount(result.account, this.configDir);
+        this.cachedScopes = toGraphScopes(result.scopes);
+        logger.info("browser login successful", {
+          username: result.account.username,
+          scopes: this.cachedScopes.join(", "),
+        });
+
+        return {
+          message: `Logged in as ${result.account.username}`,
+          grantedScopes: this.cachedScopes,
+        };
+      } catch (err: unknown) {
+        if (err instanceof ScopeChangeError && attempt < MAX_RETRIES) {
+          logger.info("scopes changed during login, restarting", { attempt });
+          continue;
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+        loopback.closeServer();
       }
-
-      await saveAccount(result.account, this.configDir);
-      logger.info("browser login successful", {
-        username: result.account.username,
-      });
-
-      return {
-        message: `Logged in as ${result.account.username}`,
-      };
-    } finally {
-      clearTimeout(timeoutId);
-      loopback.closeServer();
     }
+
+    throw new Error("Login failed: too many scope configuration restarts");
   }
 
   async token(): Promise<string> {
@@ -261,6 +290,10 @@ export class MsalAuthenticator implements Authenticator {
       throw new AuthenticationRequiredError();
     }
 
+    // Read scopes from config for silent acquisition
+    const selectedScopes = (await loadSelectedScopes(this.configDir)) ?? defaultScopes();
+    const scopeStrings = selectedScopes as string[];
+
     logger.debug("acquiring token silently", {
       username: account.username,
     });
@@ -268,9 +301,10 @@ export class MsalAuthenticator implements Authenticator {
     try {
       const result = await client.acquireTokenSilent({
         account,
-        scopes: this.scopes,
+        scopes: scopeStrings,
       });
 
+      this.cachedScopes = toGraphScopes(result.scopes);
       logger.debug("token acquired");
       return result.accessToken;
     } catch (err: unknown) {
@@ -292,6 +326,7 @@ export class MsalAuthenticator implements Authenticator {
       });
       await this.clearCacheFiles();
     }
+    this.cachedScopes = [];
   }
 
   private async clearCacheFiles(): Promise<void> {
@@ -328,6 +363,19 @@ export class MsalAuthenticator implements Authenticator {
     const account = await loadAccount(this.configDir);
     if (!account) return null;
     return { username: account.username };
+  }
+
+  async grantedScopes(): Promise<GraphScope[]> {
+    if (this.cachedScopes.length > 0) {
+      return this.cachedScopes;
+    }
+    // Try a silent token acquisition to discover scopes
+    try {
+      await this.token();
+      return this.cachedScopes;
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -444,6 +492,7 @@ export class StaticAuthenticator implements Authenticator {
   login(): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
+      grantedScopes: defaultScopes(),
     });
   }
 
@@ -461,5 +510,9 @@ export class StaticAuthenticator implements Authenticator {
 
   accountInfo(): Promise<AccountInfo | null> {
     return Promise.resolve({ username: "static-token" });
+  }
+
+  grantedScopes(): Promise<GraphScope[]> {
+    return Promise.resolve(defaultScopes());
   }
 }

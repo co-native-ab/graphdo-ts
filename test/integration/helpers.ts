@@ -92,7 +92,7 @@ export async function createTestClient(
   authenticator: MockAuthenticator,
   opts?: { openBrowser?: (url: string) => Promise<void> },
 ): Promise<Client> {
-  const server = createMcpServer({
+  const server = await createMcpServer({
     authenticator,
     graphBaseUrl: env.graphUrl,
     configDir: env.configDir,
