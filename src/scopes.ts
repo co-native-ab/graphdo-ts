@@ -6,7 +6,6 @@
 /** Typed enum for all Microsoft Graph scopes used by graphdo. */
 export enum GraphScope {
   MailSend = "Mail.Send",
-  TasksRead = "Tasks.Read",
   TasksReadWrite = "Tasks.ReadWrite",
   UserRead = "User.Read",
   OfflineAccess = "offline_access",
@@ -39,12 +38,6 @@ export const AVAILABLE_SCOPES: readonly ScopeDefinition[] = [
     scope: GraphScope.MailSend,
     label: "Send Email",
     description: "Send emails from your account",
-    required: false,
-  },
-  {
-    scope: GraphScope.TasksRead,
-    label: "Read Tasks",
-    description: "View your Microsoft To Do tasks",
     required: false,
   },
   {

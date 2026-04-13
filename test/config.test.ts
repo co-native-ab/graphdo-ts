@@ -289,10 +289,10 @@ describe("selectedScopes config", () => {
 
   it("loadSelectedScopes filters invalid scope strings", async () => {
     const dir = getTempDir();
-    await saveConfig({ selectedScopes: ["Mail.Send", "Invalid.Scope", "Tasks.Read"] }, dir);
+    await saveConfig({ selectedScopes: ["Mail.Send", "Invalid.Scope", "Tasks.ReadWrite"] }, dir);
     const result = await loadSelectedScopes(dir);
     expect(result).toContain(GraphScope.MailSend);
-    expect(result).toContain(GraphScope.TasksRead);
+    expect(result).toContain(GraphScope.TasksReadWrite);
     expect(result).not.toContain("Invalid.Scope");
   });
 

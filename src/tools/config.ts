@@ -27,7 +27,7 @@ const CONFIG_DEF: ToolDef = {
     "they want, this tool opens a browser picker where the user makes the " +
     "selection themselves. This is a human-only action - the AI agent cannot " +
     "choose the list programmatically.",
-  requiredScopes: [GraphScope.TasksRead, GraphScope.TasksReadWrite],
+  requiredScopes: [GraphScope.TasksReadWrite],
 };
 
 export const CONFIG_TOOL_DEFS: readonly ToolDef[] = [CONFIG_DEF];

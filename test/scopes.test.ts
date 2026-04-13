@@ -13,7 +13,6 @@ import {
 describe("GraphScope enum", () => {
   it("has expected values matching Microsoft identifiers", () => {
     expect(GraphScope.MailSend).toBe("Mail.Send");
-    expect(GraphScope.TasksRead).toBe("Tasks.Read");
     expect(GraphScope.TasksReadWrite).toBe("Tasks.ReadWrite");
     expect(GraphScope.UserRead).toBe("User.Read");
     expect(GraphScope.OfflineAccess).toBe("offline_access");
@@ -44,7 +43,6 @@ describe("AVAILABLE_SCOPES", () => {
   it("marks optional scopes as not required", () => {
     const optional = AVAILABLE_SCOPES.filter((s) => !s.required).map((s) => s.scope);
     expect(optional).toContain(GraphScope.MailSend);
-    expect(optional).toContain(GraphScope.TasksRead);
     expect(optional).toContain(GraphScope.TasksReadWrite);
   });
 });
@@ -57,7 +55,6 @@ describe("ALWAYS_REQUIRED_SCOPES", () => {
 
   it("does not contain optional scopes", () => {
     expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.MailSend);
-    expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.TasksRead);
     expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.TasksReadWrite);
   });
 });
@@ -81,7 +78,6 @@ describe("defaultScopes", () => {
 describe("isGraphScope", () => {
   it("returns true for valid scope strings", () => {
     expect(isGraphScope("Mail.Send")).toBe(true);
-    expect(isGraphScope("Tasks.Read")).toBe(true);
     expect(isGraphScope("Tasks.ReadWrite")).toBe(true);
     expect(isGraphScope("User.Read")).toBe(true);
     expect(isGraphScope("offline_access")).toBe(true);
@@ -89,6 +85,7 @@ describe("isGraphScope", () => {
 
   it("returns false for invalid strings", () => {
     expect(isGraphScope("Mail.Read")).toBe(false);
+    expect(isGraphScope("Tasks.Read")).toBe(false);
     expect(isGraphScope("")).toBe(false);
     expect(isGraphScope("user.read")).toBe(false);
     expect(isGraphScope("MAIL.SEND")).toBe(false);
@@ -98,8 +95,8 @@ describe("isGraphScope", () => {
 
 describe("toGraphScopes", () => {
   it("filters valid scopes from a mixed array", () => {
-    const result = toGraphScopes(["Mail.Send", "invalid", "Tasks.Read", "", "User.Read"]);
-    expect(result).toEqual([GraphScope.MailSend, GraphScope.TasksRead, GraphScope.UserRead]);
+    const result = toGraphScopes(["Mail.Send", "invalid", "Tasks.ReadWrite", "", "User.Read"]);
+    expect(result).toEqual([GraphScope.MailSend, GraphScope.TasksReadWrite, GraphScope.UserRead]);
   });
 
   it("returns empty array for all invalid values", () => {

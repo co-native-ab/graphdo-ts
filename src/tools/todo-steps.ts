@@ -22,7 +22,7 @@ const STEPS_DEF: ToolDef = {
   description:
     "List all checklist steps (sub-items) within a todo. Each step can be " +
     "checked or unchecked independently.",
-  requiredScopes: [GraphScope.TasksRead, GraphScope.TasksReadWrite],
+  requiredScopes: [GraphScope.TasksReadWrite],
 };
 
 const ADD_STEP_DEF: ToolDef = {

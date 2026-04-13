@@ -80,35 +80,7 @@ describe("integration: dynamic tool state", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Tasks.Read only
-  // -------------------------------------------------------------------------
-
-  it("TasksRead + UserRead: only read todo tools, no write tools or mail", async () => {
-    const auth = new MockAuthenticator({
-      token: "tasks-read-only",
-      grantedScopes: [GraphScope.TasksRead, GraphScope.UserRead, GraphScope.OfflineAccess],
-    });
-    const names = await toolNames(auth);
-    expect(names).toContain("login");
-    expect(names).toContain("auth_status");
-    expect(names).toContain("logout");
-    expect(names).toContain("todo_list");
-    expect(names).toContain("todo_show");
-    expect(names).toContain("todo_steps");
-    expect(names).toContain("todo_config");
-    // Should NOT include write tools or mail
-    expect(names).not.toContain("todo_create");
-    expect(names).not.toContain("todo_update");
-    expect(names).not.toContain("todo_complete");
-    expect(names).not.toContain("todo_delete");
-    expect(names).not.toContain("todo_add_step");
-    expect(names).not.toContain("todo_update_step");
-    expect(names).not.toContain("todo_delete_step");
-    expect(names).not.toContain("mail_send");
-  });
-
-  // -------------------------------------------------------------------------
-  // Tasks.ReadWrite only (no Tasks.Read)
+  // Tasks.ReadWrite only
   // -------------------------------------------------------------------------
 
   it("TasksReadWrite + UserRead: all todo tools but no mail", async () => {

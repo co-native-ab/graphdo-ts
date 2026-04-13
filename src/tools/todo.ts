@@ -41,7 +41,7 @@ const LIST_DEF: ToolDef = {
     "Returns task titles, status, importance, and due dates. " +
     "Supports pagination via top (page size) and skip (offset). " +
     "Supports optional OData $filter and $orderby query parameters.",
-  requiredScopes: [GraphScope.TasksRead, GraphScope.TasksReadWrite],
+  requiredScopes: [GraphScope.TasksReadWrite],
 };
 
 const SHOW_DEF: ToolDef = {
@@ -50,7 +50,7 @@ const SHOW_DEF: ToolDef = {
   description:
     "Show full details for a single todo - title, body, status, importance, " +
     "due date, reminder, recurrence, and checklist steps.",
-  requiredScopes: [GraphScope.TasksRead, GraphScope.TasksReadWrite],
+  requiredScopes: [GraphScope.TasksReadWrite],
 };
 
 const CREATE_DEF: ToolDef = {

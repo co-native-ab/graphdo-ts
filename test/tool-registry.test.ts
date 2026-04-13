@@ -51,7 +51,7 @@ describe("syncToolState", () => {
       fakeEntry("auth_status", [], true), // always enabled
       fakeEntry("logout", [GraphScope.UserRead], false),
       fakeEntry("mail_send", [GraphScope.MailSend], false),
-      fakeEntry("todo_list", [GraphScope.TasksRead, GraphScope.TasksReadWrite], false),
+      fakeEntry("todo_list", [GraphScope.TasksReadWrite], false),
       fakeEntry("todo_create", [GraphScope.TasksReadWrite], false),
     ];
     server = fakeServer();
@@ -85,13 +85,6 @@ describe("syncToolState", () => {
     expect(entries[3]!.registeredTool.enabled).toBe(true); // mail_send
     expect(entries[4]!.registeredTool.enabled).toBe(false); // todo_list
     expect(entries[5]!.registeredTool.enabled).toBe(false); // todo_create
-  });
-
-  it("Tasks.Read enables read tools but not write tools", () => {
-    syncToolState(entries, [GraphScope.TasksRead], server);
-
-    expect(entries[4]!.registeredTool.enabled).toBe(true); // todo_list (TasksRead OR TasksReadWrite)
-    expect(entries[5]!.registeredTool.enabled).toBe(false); // todo_create (TasksReadWrite only)
   });
 
   it("Tasks.ReadWrite enables both read and write tools", () => {
@@ -152,7 +145,7 @@ describe("buildInstructions", () => {
       name: "todo_list",
       title: "List Tasks",
       description: "List todo items",
-      requiredScopes: [GraphScope.TasksRead, GraphScope.TasksReadWrite],
+      requiredScopes: [GraphScope.TasksReadWrite],
     },
     {
       name: "todo_create",

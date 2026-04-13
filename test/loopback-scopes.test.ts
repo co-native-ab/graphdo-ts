@@ -119,12 +119,11 @@ describe("login page scope flyout", () => {
       const res = await fetch(uri);
       const html = await res.text();
 
-      // Mail.Send should be checked, but Tasks scopes should not be
+      // Mail.Send should be checked, but Tasks.ReadWrite should not be
       expect(html).toContain(`value="Mail.Send" checked`);
-      // Tasks.Read should NOT be checked (no "checked" attribute immediately after value)
-      // We check that the checkbox for Tasks.Read doesn't have "checked"
-      const tasksReadMatch = /value="Tasks\.Read"\s*(checked)?/.exec(html);
-      expect(tasksReadMatch?.[1]).toBeUndefined();
+      // Tasks.ReadWrite should NOT be checked
+      const tasksRwMatch = /value="Tasks\.ReadWrite"\s*(checked)?/.exec(html);
+      expect(tasksRwMatch?.[1]).toBeUndefined();
     });
   });
 
