@@ -118,7 +118,7 @@ describe("integration: discovery & login", () => {
       // Only always-enabled tools should be visible
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(["auth_status", "login"]);
+      expect(names).toEqual(["auth_status", "login", "logout"]);
     });
 
     it("tools work after completing login", async () => {
@@ -171,7 +171,7 @@ describe("integration: discovery & login", () => {
       // Only always-enabled tools should remain visible
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(["auth_status", "login"]);
+      expect(names).toEqual(["auth_status", "login", "logout"]);
     });
   });
 });

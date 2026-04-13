@@ -10,7 +10,6 @@ import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { formatError } from "./shared.js";
-import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
 
@@ -31,7 +30,7 @@ const LOGOUT_DEF: ToolDef = {
   description:
     "Sign out of Microsoft Graph and clear all cached tokens. " +
     "After logging out, the login tool must be used to re-authenticate.",
-  requiredScopes: [GraphScope.UserRead],
+  requiredScopes: [],
 };
 
 export const LOGIN_TOOL_DEFS: readonly ToolDef[] = [LOGIN_DEF, LOGOUT_DEF];
@@ -105,6 +104,16 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
       },
       async () => {
         try {
+          if (!(await config.authenticator.isAuthenticated())) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Not logged in — nothing to sign out of. Use the login tool to authenticate.",
+                },
+              ],
+            };
+          }
           await config.authenticator.logout();
           config.onScopesChanged?.([]);
           return {

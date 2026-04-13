@@ -56,7 +56,7 @@ describe("integration: status & errors", () => {
       const { tools } = await noAuthClient.listTools();
       const names = tools.map((t) => t.name).sort();
       expect(names).not.toContain("todo_list");
-      expect(names).toEqual(["auth_status", "login"]);
+      expect(names).toEqual(["auth_status", "login", "logout"]);
     });
 
     it("returns error when todo list not configured", async () => {

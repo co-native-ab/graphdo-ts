@@ -38,7 +38,7 @@ describe("integration: dynamic tool state", () => {
     const auth = new MockAuthenticator();
     await auth.logout(); // ensure unauthenticated
     const names = await toolNames(auth);
-    expect(names).toEqual(["auth_status", "login"]);
+    expect(names).toEqual(["auth_status", "login", "logout"]);
   });
 
   // -------------------------------------------------------------------------
@@ -129,7 +129,7 @@ describe("integration: dynamic tool state", () => {
 
     // Before login: minimal tools
     const before = await client.listTools();
-    expect(before.tools.map((t) => t.name).sort()).toEqual(["auth_status", "login"]);
+    expect(before.tools.map((t) => t.name).sort()).toEqual(["auth_status", "login", "logout"]);
 
     // Login
     await client.callTool({ name: "login", arguments: {} });
@@ -145,6 +145,6 @@ describe("integration: dynamic tool state", () => {
 
     // After logout: back to minimal
     const final = await client.listTools();
-    expect(final.tools.map((t) => t.name).sort()).toEqual(["auth_status", "login"]);
+    expect(final.tools.map((t) => t.name).sort()).toEqual(["auth_status", "login", "logout"]);
   });
 });
