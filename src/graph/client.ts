@@ -120,7 +120,12 @@ export class GraphClient {
   }
 
   /** Send an HTTP request to the Graph API and return the raw Response. */
-  async request(method: string, path: string, body?: unknown): Promise<Response> {
+  async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
 
     // Acquire a fresh (or silently-refreshed) token for this request.
@@ -141,10 +146,14 @@ export class GraphClient {
 
     let lastError: GraphRequestError | undefined;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      if (signal?.aborted) throw signal.reason;
+
       // Create a fresh AbortSignal per attempt so each retry gets the full timeout.
+      // Combine per-request timeout with the caller's cancellation signal.
+      const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
       const init: RequestInit = {
         ...baseInit,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
       };
 
       let response: Response;

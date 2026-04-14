@@ -35,7 +35,7 @@ export class MockAuthenticator implements Authenticator {
     ];
   }
 
-  login(): Promise<LoginResult> {
+  login(_signal?: AbortSignal): Promise<LoginResult> {
     if (this._token) {
       return Promise.resolve({
         message: "Already authenticated.",
@@ -55,29 +55,29 @@ export class MockAuthenticator implements Authenticator {
     return Promise.reject(new Error("Could not open browser"));
   }
 
-  token(): Promise<string> {
+  token(_signal?: AbortSignal): Promise<string> {
     if (!this._token) {
       return Promise.reject(new AuthenticationRequiredError());
     }
     return Promise.resolve(this._token);
   }
 
-  logout(): Promise<void> {
+  logout(_signal?: AbortSignal): Promise<void> {
     this._token = null;
     this._logoutCalled = true;
     return Promise.resolve();
   }
 
-  isAuthenticated(): Promise<boolean> {
+  isAuthenticated(_signal?: AbortSignal): Promise<boolean> {
     return Promise.resolve(this._token !== null);
   }
 
-  accountInfo(): Promise<AccountInfo | null> {
+  accountInfo(_signal?: AbortSignal): Promise<AccountInfo | null> {
     if (!this._token) return Promise.resolve(null);
     return Promise.resolve({ username: this._username });
   }
 
-  grantedScopes(): Promise<GraphScope[]> {
+  grantedScopes(_signal?: AbortSignal): Promise<GraphScope[]> {
     if (!this._token) return Promise.resolve([]);
     return Promise.resolve(this._grantedScopes);
   }

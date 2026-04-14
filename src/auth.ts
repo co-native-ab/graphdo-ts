@@ -41,22 +41,22 @@ const LOGOUT_TIMEOUT_MS = 120_000; // 2 minutes
 /** Abstraction for login + token acquisition. */
 export interface Authenticator {
   /** Perform an interactive browser login. */
-  login(): Promise<LoginResult>;
+  login(signal?: AbortSignal): Promise<LoginResult>;
 
   /** Acquire a cached access token, refreshing silently if needed. */
-  token(): Promise<string>;
+  token(signal?: AbortSignal): Promise<string>;
 
   /** Clear cached tokens and account data. */
-  logout(): Promise<void>;
+  logout(signal?: AbortSignal): Promise<void>;
 
   /** Check whether a valid cached token exists (without prompting). */
-  isAuthenticated(): Promise<boolean>;
+  isAuthenticated(signal?: AbortSignal): Promise<boolean>;
 
   /** Get info about the currently logged-in account, if any. */
-  accountInfo(): Promise<AccountInfo | null>;
+  accountInfo(signal?: AbortSignal): Promise<AccountInfo | null>;
 
   /** Get the scopes granted in the current auth session. Empty if not authenticated. */
-  grantedScopes(): Promise<GraphScope[]>;
+  grantedScopes(signal?: AbortSignal): Promise<GraphScope[]>;
 }
 
 export interface LoginResult {
@@ -210,7 +210,8 @@ export class MsalAuthenticator implements Authenticator {
     });
   }
 
-  async login(): Promise<LoginResult> {
+  async login(signal?: AbortSignal): Promise<LoginResult> {
+    if (signal?.aborted) throw signal.reason;
     logger.info("starting browser login");
 
     const client = this.createClient();
@@ -219,7 +220,7 @@ export class MsalAuthenticator implements Authenticator {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
-      const result = await Promise.race([
+      const racePromises: Promise<msal.AuthenticationResult>[] = [
         client.acquireTokenInteractive({
           // Requesting only User.Read is intentional: Azure AD's admin consent
           // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
@@ -243,7 +244,31 @@ export class MsalAuthenticator implements Authenticator {
             );
           }, LOGIN_TIMEOUT_MS);
         }),
-      ]);
+      ];
+
+      if (signal) {
+        racePromises.push(
+          new Promise<never>((_, reject) => {
+            const reason =
+              signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+            if (signal.aborted) {
+              reject(reason);
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => {
+                const abortReason =
+                  signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+                reject(abortReason);
+              },
+              { once: true },
+            );
+          }),
+        );
+      }
+
+      const result = await Promise.race(racePromises);
 
       if (!result.account) {
         throw new Error("Browser authentication returned no account");
@@ -266,7 +291,8 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async token(): Promise<string> {
+  async token(signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) throw signal.reason;
     const client = this.createClient();
     const account = await loadAccount(this.configDir);
 
@@ -298,9 +324,9 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async logout(): Promise<void> {
+  async logout(signal?: AbortSignal): Promise<void> {
     try {
-      await showLogoutPage(this.openBrowser, () => this.clearCacheFiles());
+      await showLogoutPage(this.openBrowser, () => this.clearCacheFiles(), signal);
     } catch (err: unknown) {
       if (err instanceof UserCancelledError) throw err;
       // Browser unavailable or timed out — clear tokens silently
@@ -333,28 +359,28 @@ export class MsalAuthenticator implements Authenticator {
     logger.info("logged out, token cache cleared");
   }
 
-  async isAuthenticated(): Promise<boolean> {
+  async isAuthenticated(signal?: AbortSignal): Promise<boolean> {
     try {
-      await this.token();
+      await this.token(signal);
       return true;
     } catch {
       return false;
     }
   }
 
-  async accountInfo(): Promise<AccountInfo | null> {
+  async accountInfo(_signal?: AbortSignal): Promise<AccountInfo | null> {
     const account = await loadAccount(this.configDir);
     if (!account) return null;
     return { username: account.username };
   }
 
-  async grantedScopes(): Promise<GraphScope[]> {
+  async grantedScopes(signal?: AbortSignal): Promise<GraphScope[]> {
     if (this.cachedScopes.length > 0) {
       return this.cachedScopes;
     }
     // Try a silent token acquisition to discover scopes
     try {
-      await this.token();
+      await this.token(signal);
       return this.cachedScopes;
     } catch {
       return [];
@@ -375,7 +401,9 @@ export class MsalAuthenticator implements Authenticator {
 async function showLogoutPage(
   openBrowser: (url: string) => Promise<void>,
   onConfirm: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw signal.reason;
   const html = logoutPageHtml();
 
   return new Promise<void>((resolve, reject) => {
@@ -443,7 +471,17 @@ async function showLogoutPage(
 
     server.on("close", () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
     });
+
+    // Abort signal handling — shut down server on cancellation
+    const onAbort = (): void => {
+      server.close();
+      settle(() =>
+        reject(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled")),
+      );
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -476,30 +514,30 @@ async function showLogoutPage(
 export class StaticAuthenticator implements Authenticator {
   constructor(private readonly accessToken: string) {}
 
-  login(): Promise<LoginResult> {
+  login(_signal?: AbortSignal): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
       grantedScopes: defaultScopes(),
     });
   }
 
-  token(): Promise<string> {
+  token(_signal?: AbortSignal): Promise<string> {
     return Promise.resolve(this.accessToken);
   }
 
-  async logout(): Promise<void> {
+  async logout(_signal?: AbortSignal): Promise<void> {
     // No-op for static authenticator
   }
 
-  isAuthenticated(): Promise<boolean> {
+  isAuthenticated(_signal?: AbortSignal): Promise<boolean> {
     return Promise.resolve(true);
   }
 
-  accountInfo(): Promise<AccountInfo | null> {
+  accountInfo(_signal?: AbortSignal): Promise<AccountInfo | null> {
     return Promise.resolve({ username: "static-token" });
   }
 
-  grantedScopes(): Promise<GraphScope[]> {
+  grantedScopes(_signal?: AbortSignal): Promise<GraphScope[]> {
     return Promise.resolve(defaultScopes());
   }
 }

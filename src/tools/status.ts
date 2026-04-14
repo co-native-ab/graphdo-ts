@@ -36,23 +36,23 @@ export function registerStatusTool(server: McpServer, config: ServerConfig): Too
           openWorldHint: false,
         },
       },
-      async () => {
+      async (_args, { signal }) => {
         try {
           const lines: string[] = [];
           lines.push(`graphdo v${VERSION}`);
           lines.push("");
 
           // Authentication status
-          const authenticated = await config.authenticator.isAuthenticated();
+          const authenticated = await config.authenticator.isAuthenticated(signal);
           if (authenticated) {
-            const info = await config.authenticator.accountInfo();
+            const info = await config.authenticator.accountInfo(signal);
             lines.push(`Status: Logged in`);
             if (info) {
               lines.push(`User: ${info.username}`);
             }
 
             // Granted scopes
-            const scopes = await config.authenticator.grantedScopes();
+            const scopes = await config.authenticator.grantedScopes(signal);
             if (scopes.length > 0) {
               lines.push(`Scopes: ${scopes.join(", ")}`);
             }

@@ -59,7 +59,7 @@ All dependencies are injected via `ServerConfig { authenticator, graphBaseUrl, c
 
 ### No Graph SDK
 
-We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?)`.
+We use native `fetch` instead of the Microsoft Graph SDK. The `GraphClient` class wraps fetch with Bearer token injection, JSON encoding, and structured error handling via `GraphRequestError`. All Graph API interaction goes through `client.request(method, path, body?, signal?)`. The optional `signal` parameter is combined with a per-request timeout via `AbortSignal.any()`.
 
 ### MSAL Authentication (Browser-Only)
 
@@ -77,7 +77,7 @@ Logout clears cached tokens and opens a branded confirmation page in the browser
 
 ### Authenticator Interface
 
-The `Authenticator` interface abstracts token acquisition: `login()`, `token()`, `logout()`, `isAuthenticated()`, `accountInfo()`. Three implementations:
+The `Authenticator` interface abstracts token acquisition: `login(signal?)`, `token(signal?)`, `logout(signal?)`, `isAuthenticated(signal?)`, `accountInfo(signal?)`, `grantedScopes(signal?)`. All methods accept an optional `AbortSignal` for cancellation. Three implementations:
 
 - `MsalAuthenticator` - production MSAL flow with custom loopback client (branded login page), file-based token cache. Constructor takes `(clientId, configDir, scopes, openBrowser)`.
 - `StaticAuthenticator` - for testing with a fixed token (via `GRAPHDO_ACCESS_TOKEN` env var)
@@ -176,9 +176,9 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 
 ## Adding New Tools
 
-1. **Add Graph operations** in `src/graph/` - follow the pattern: validate inputs → call `client.request()` → parse response
+1. **Add Graph operations** in `src/graph/` - follow the pattern: validate inputs → call `client.request(method, path, body?, signal?)` → parse response. Accept `signal?: AbortSignal` as the last parameter and forward it to `client.request()`.
 2. **Register tool** in `src/tools/` - use `server.registerTool(name, { description, inputSchema, annotations }, handler)`
-3. **Handler pattern**: use `config.graphClient` (shared instance injected via `ServerConfig`) → call Graph operation → format response → catch `AuthenticationRequiredError` and `GraphRequestError` and return `isError: true`
+3. **Handler pattern**: destructure `(args, { signal })` from the callback → use `config.graphClient` (shared instance injected via `ServerConfig`) → call Graph operation with `signal` → format response → catch `AuthenticationRequiredError` and `GraphRequestError` and return `isError: true`
 4. **Register in `src/index.ts`** - add `registerXxxTools(server, config)` call in `createMcpServer()`
 5. **Add tests** - both Graph layer tests and integration tests
 6. **Input validation** - use `zod` schemas in `inputSchema` (the MCP SDK validates automatically)
@@ -248,3 +248,16 @@ The `GRAPHDO_CONFIG_DIR` env var overrides the directory (used in tests with tem
 - `ChecklistItem`: `{ id, displayName, isChecked, createdDateTime?, checkedDateTime? }`
 - Recurrence uses `PatternedRecurrence { pattern: RecurrencePattern, range: RecurrenceRange }` - tools accept simplified `repeat` string ("daily"/"weekly"/"weekdays"/"monthly"/"yearly")
 - Graph API v1.0 does NOT support `assignees`/`assignedTo` on todoTask or "My Day" field
+
+## AbortSignal Convention
+
+All async functions in this codebase accept `AbortSignal` as their last parameter (or as part of an options object). When writing or modifying async code:
+
+- Always accept `signal: AbortSignal` (or `signal?: AbortSignal` for backward compatibility) and forward it to downstream calls.
+- Pass `{ signal }` to all `fetch()` calls. `GraphClient.request()` already combines the caller's signal with a per-request timeout via `AbortSignal.any()`.
+- Check `signal.aborted` in loops and before expensive operations.
+- MCP tool handlers receive `signal` from the SDK via the `extra` parameter: `async (args, { signal }) => { ... }`. Forward this signal to all Graph operations and other async calls.
+- At boundaries (tool handlers, server startup), the MCP SDK or an `AbortController` provides the signal. Inner functions receive and forward it — do not create new controllers inside every function.
+- Combine signals with `AbortSignal.any()` when multiple cancellation sources apply (e.g. per-request timeout AND caller cancellation).
+- The local HTTP servers (loopback in `src/loopback.ts`, picker in `src/picker.ts`, logout page in `src/auth.ts`) accept a signal and shut down cleanly when aborted.
+- Never silently ignore abort errors. Handle them at the boundary or let them propagate.

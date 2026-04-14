@@ -58,8 +58,17 @@ const MAX_BODY_SIZE = 1_048_576;
  * Start a local picker server. Returns the URL immediately and a promise
  * that resolves when the user picks an option.
  */
-export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> {
+export function startBrowserPicker(
+  config: PickerConfig,
+  signal?: AbortSignal,
+): Promise<PickerHandle> {
   const timeoutMs = config.timeoutMs ?? 120_000;
+
+  if (signal?.aborted) {
+    return Promise.reject(
+      signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
+    );
+  }
 
   return new Promise<PickerHandle>((resolveHandle, rejectHandle) => {
     let onSelected: (result: PickerResult) => void;
@@ -73,6 +82,13 @@ export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> 
     const server = createServer((req, res) => {
       handleRequest(req, res, config, server, onSelected, onError);
     });
+
+    // Shut down the server when the signal is aborted
+    const onAbort = (): void => {
+      server.close();
+      onError(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -101,6 +117,7 @@ export function startBrowserPicker(config: PickerConfig): Promise<PickerHandle> 
 
     server.on("close", () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
     });
   });
 }
