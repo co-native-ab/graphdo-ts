@@ -190,6 +190,10 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 
 Runs on push/PR to main: `npm ci` → format check → icons check → lint → typecheck → test (with coverage) → build
 
+### CodeQL
+
+CodeQL security scanning is enabled at the repository level via GitHub Advanced Security settings — **do not add a `codeql.yml` workflow file**. The repository-level configuration already runs CodeQL on push/PR/schedule with the `security-extended` query suite.
+
 ### Dependency Review (`dependency-review.yml`)
 
 Runs on PRs to main. Uses `actions/dependency-review-action` to scan for vulnerable or problematic dependencies before merge.
