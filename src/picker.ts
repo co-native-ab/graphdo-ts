@@ -7,6 +7,7 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
+import { z } from "zod";
 import { logger } from "./logger.js";
 import { UserCancelledError } from "./errors.js";
 import { pickerPageHtml } from "./templates/picker.js";
@@ -120,6 +121,10 @@ function handleRequest(
 
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'",
+  );
 
   if (req.method === "GET" && url === "/") {
     servePickerPage(res, config);
@@ -152,6 +157,8 @@ function servePickerPage(res: ServerResponse, config: PickerConfig): void {
   res.end(pickerPageHtml(config));
 }
 
+const SelectionSchema = z.object({ id: z.string(), label: z.string() });
+
 function handleSelection(
   req: IncomingMessage,
   res: ServerResponse,
@@ -174,7 +181,13 @@ function handleSelection(
   req.on("end", () => {
     void (async () => {
       try {
-        const { id } = JSON.parse(body) as { id: string; label: string };
+        const parseResult = SelectionSchema.safeParse(JSON.parse(body));
+        if (!parseResult.success) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Invalid request body");
+          return;
+        }
+        const { id } = parseResult.data;
 
         // Validate the selection against offered options
         const match = config.options.find((opt) => opt.id === id);

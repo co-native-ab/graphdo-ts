@@ -38,7 +38,7 @@ export class GraphResponseParseError extends Error {
     public readonly rawBody: string,
   ) {
     super(
-      `Failed to parse Graph API response for ${method} ${path} (HTTP ${statusCode}): ${zodError.message}\nRaw body: ${rawBody}`,
+      `Failed to parse Graph API response for ${method} ${path} (HTTP ${statusCode}): ${zodError.message}`,
     );
     this.name = "GraphResponseParseError";
   }

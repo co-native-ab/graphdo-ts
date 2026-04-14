@@ -119,6 +119,10 @@ function handleRequest(
 
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'",
+  );
 
   // Auth code redirect from Microsoft: /?code=...&state=...
   if (pathname === "/" && parsedUrl.searchParams.has("code")) {

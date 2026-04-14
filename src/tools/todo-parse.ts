@@ -1,11 +1,6 @@
 // Parsing helpers for To Do tool input (recurrence, dates).
 
-import type {
-  DateTimeTimeZone,
-  PatternedRecurrence,
-  RecurrenceRange,
-  RecurrenceRangeType,
-} from "../graph/types.js";
+import type { DateTimeTimeZone, PatternedRecurrence, RecurrenceRange } from "../graph/types.js";
 
 /**
  * Parse a simplified repeat string into a full PatternedRecurrence.
@@ -13,9 +8,10 @@ import type {
  * with an optional interval (default 1).
  */
 export function parseRecurrence(repeat: string, interval: number): PatternedRecurrence {
-  const todayParts = new Date().toISOString().split("T");
-  const today = todayParts[0] ?? new Date().toISOString().slice(0, 10);
-  const range: RecurrenceRange = { type: "noEnd" as RecurrenceRangeType, startDate: today };
+  const now = new Date();
+  const todayParts = now.toISOString().split("T");
+  const today = todayParts[0] ?? now.toISOString().slice(0, 10);
+  const range: RecurrenceRange = { type: "noEnd", startDate: today };
 
   switch (repeat) {
     case "daily":
@@ -34,7 +30,7 @@ export function parseRecurrence(repeat: string, interval: number): PatternedRecu
       return {
         pattern: {
           type: "weekly",
-          interval: 1,
+          interval,
           daysOfWeek: ["monday", "tuesday", "wednesday", "thursday", "friday"],
           firstDayOfWeek: "monday",
         },
@@ -45,7 +41,7 @@ export function parseRecurrence(repeat: string, interval: number): PatternedRecu
         pattern: {
           type: "absoluteMonthly",
           interval,
-          dayOfMonth: new Date().getDate(),
+          dayOfMonth: now.getDate(),
         },
         range,
       };
@@ -54,8 +50,8 @@ export function parseRecurrence(repeat: string, interval: number): PatternedRecu
         pattern: {
           type: "absoluteYearly",
           interval,
-          dayOfMonth: new Date().getDate(),
-          month: new Date().getMonth() + 1,
+          dayOfMonth: now.getDate(),
+          month: now.getMonth() + 1,
         },
         range,
       };

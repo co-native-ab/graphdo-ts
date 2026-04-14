@@ -13,7 +13,7 @@ import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
-import { createAuthenticatedClient, formatError } from "./shared.js";
+import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
@@ -48,7 +48,7 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
       },
       async () => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const lists = await listTodoLists(client);
 
           if (lists.length === 0) {

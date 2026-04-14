@@ -289,7 +289,7 @@ function makeBrowserSpy(path: string): ReturnType<typeof vi.fn<(url: string) => 
       void fetch(`${url}${path}`, { method: "POST" }).catch(() => {
         /* fire and forget */
       });
-    }, 30);
+    }, 150);
     return Promise.resolve();
   });
 }

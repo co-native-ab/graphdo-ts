@@ -8,11 +8,33 @@ import type {
 } from "../graph/types.js";
 
 export function statusEmoji(status: TodoStatus): string {
-  return status === "completed" ? "✅" : "⬜";
+  switch (status) {
+    case "completed":
+      return "✅";
+    case "inProgress":
+      return "🔵";
+    case "waitingOnOthers":
+      return "⏳";
+    case "deferred":
+      return "⏸️";
+    case "notStarted":
+      return "⬜";
+  }
 }
 
 export function statusLabel(status: TodoStatus): string {
-  return status === "completed" ? "Completed" : "Not Started";
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "inProgress":
+      return "In Progress";
+    case "waitingOnOthers":
+      return "Waiting on Others";
+    case "deferred":
+      return "Deferred";
+    case "notStarted":
+      return "Not Started";
+  }
 }
 
 export function importanceLabel(importance?: Importance): string {

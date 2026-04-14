@@ -29,7 +29,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Stamping version: $VERSION"
           npm version "$VERSION" --no-git-tag-version
-          jq --arg v "$VERSION" '.version = $v' manifest.json > tmp.json && mv tmp.json manifest.json
+          jq --arg v "$VERSION" '.version = $v' manifest.json > tmp.json
+          test -s tmp.json
+          mv tmp.json manifest.json
           npm run format:manifest
       - name: Check
         run: npm run check
@@ -87,7 +89,7 @@ jobs:
             checksums-sha256.txt
 
   npm-publish:
-    needs: build
+    needs: [build, github-release]
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -101,5 +103,11 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-artifacts
+      # Authentication uses OIDC Trusted Publishing (configured on npmjs.com).
+      # No NPM_TOKEN secret is needed — the id-token: write permission enables this.
       - name: Publish to npm
-        run: npm publish co-native-ab-graphdo-ts-*.tgz --provenance
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          npm publish "co-native-ab-graphdo-ts-${VERSION}.tgz" --provenance

@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
@@ -24,9 +24,8 @@ const ConfigSchema = z.object({
  * Uses an override if provided, otherwise falls back to OS-appropriate defaults.
  */
 export function configDir(overrideDir?: string): string {
-  const override = overrideDir ?? process.env["GRAPHDO_CONFIG_DIR"];
-  if (override !== undefined) {
-    const resolved = path.resolve(override);
+  if (overrideDir !== undefined) {
+    const resolved = path.resolve(overrideDir);
     logger.debug("config directory (override)", { path: resolved });
     return resolved;
   }
