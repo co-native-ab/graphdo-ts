@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
