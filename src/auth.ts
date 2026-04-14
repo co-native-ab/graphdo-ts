@@ -249,21 +249,13 @@ export class MsalAuthenticator implements Authenticator {
       if (signal) {
         racePromises.push(
           new Promise<never>((_, reject) => {
-            const reason =
+            const toError = (): Error =>
               signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
             if (signal.aborted) {
-              reject(reason);
+              reject(toError());
               return;
             }
-            signal.addEventListener(
-              "abort",
-              () => {
-                const abortReason =
-                  signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-                reject(abortReason);
-              },
-              { once: true },
-            );
+            signal.addEventListener("abort", () => reject(toError()), { once: true });
           }),
         );
       }
