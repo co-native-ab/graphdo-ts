@@ -45,6 +45,10 @@ jobs:
           retention-days: 14
       - name: Build
         run: npm run build
+      - name: Bundle check
+        run: |
+          node scripts/bundle-mcpb.mjs --no-build graphdo-ci-check.mcpb
+          test -s graphdo-ci-check.mcpb
 
   coverage-comment:
     needs: check
