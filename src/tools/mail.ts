@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getMe, sendMail } from "../graph/mail.js";
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
-import { createAuthenticatedClient, formatError } from "./shared.js";
+import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
@@ -43,7 +43,7 @@ export function registerMailTools(server: McpServer, config: ServerConfig): Tool
       },
       async ({ subject, body, html }) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const user = await getMe(client);
           await sendMail(client, user.mail, subject, body, html);
           logger.info("mail sent", { to: user.mail, subject });

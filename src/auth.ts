@@ -221,6 +221,11 @@ export class MsalAuthenticator implements Authenticator {
     try {
       const result = await Promise.race([
         client.acquireTokenInteractive({
+          // Requesting only User.Read is intentional: Azure AD's admin consent
+          // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
+          // regardless of which scopes are included in the interactive request.
+          // The granted scopes are read from the token response and stored in
+          // cachedScopes to drive dynamic tool visibility.
           scopes: ["User.Read"],
           prompt: "select_account",
           loopbackClient: loopback,
@@ -276,6 +281,9 @@ export class MsalAuthenticator implements Authenticator {
     try {
       const result = await client.acquireTokenSilent({
         account,
+        // Same reasoning as acquireTokenInteractive: request only User.Read —
+        // all app scopes are already pre-consented via admin grant. MSAL returns
+        // the full set of granted scopes in the token response.
         scopes: ["User.Read"],
       });
 
@@ -383,6 +391,10 @@ async function showLogoutPage(
 
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       res.setHeader("Pragma", "no-cache");
+      res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'",
+      );
 
       if (req.method === "GET" && url === "/") {
         res.writeHead(200, {

@@ -154,7 +154,7 @@ npm run test -- -t "todo_config"      # Filter by test name
 ```bash
 npm run lint                          # ESLint (strict + stylistic)
 npm run typecheck                     # tsc --noEmit
-npm run check                         # lint + typecheck + test (all three)
+npm run check                         # format:check + icons:check + lint + typecheck + test (all five)
 ```
 
 ### Building
@@ -178,11 +178,11 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 
 1. **Add Graph operations** in `src/graph/` - follow the pattern: validate inputs → call `client.request()` → parse response
 2. **Register tool** in `src/tools/` - use `server.registerTool(name, { description, inputSchema, annotations }, handler)`
-3. **Handler pattern**: get token via `config.authenticator.token()` → create `GraphClient(config.graphBaseUrl, token)` → call Graph operation → format response → catch `AuthenticationRequiredError` and `GraphRequestError` and return `isError: true`
+3. **Handler pattern**: use `config.graphClient` (shared instance injected via `ServerConfig`) → call Graph operation → format response → catch `AuthenticationRequiredError` and `GraphRequestError` and return `isError: true`
 4. **Register in `src/index.ts`** - add `registerXxxTools(server, config)` call in `createMcpServer()`
 5. **Add tests** - both Graph layer tests and integration tests
 6. **Input validation** - use `zod` schemas in `inputSchema` (the MCP SDK validates automatically)
-7. Run `npm run check` (lint + typecheck + test)
+7. Run `npm run check` (format:check + icons:check + lint + typecheck + test)
 
 ## CI/CD
 

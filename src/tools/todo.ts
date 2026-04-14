@@ -15,7 +15,7 @@ import {
 } from "../graph/todo.js";
 import { loadAndValidateConfig } from "../config.js";
 import type { ServerConfig } from "../index.js";
-import { createAuthenticatedClient, formatError } from "./shared.js";
+import { formatError } from "./shared.js";
 import {
   statusEmoji,
   statusLabel,
@@ -123,11 +123,16 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
         inputSchema: {
           top: z
             .number()
+            .int()
+            .min(1)
+            .max(999)
             .optional()
             .default(25)
-            .describe("Maximum number of todos to return (default: 25)"),
+            .describe("Maximum number of todos to return (1-999, default: 25)"),
           skip: z
             .number()
+            .int()
+            .min(0)
             .optional()
             .default(0)
             .describe("Number of todos to skip for pagination (default: 0)"),
@@ -152,7 +157,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           const items = await listTodos(
             client,
@@ -203,7 +208,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           const item = await getTodo(client, todoConfig.todoListId, args.taskId);
 
@@ -285,7 +290,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
 
           const item = await createTodo(client, todoConfig.todoListId, {
@@ -371,7 +376,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
         }
 
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
 
           const item = await updateTodo(client, todoConfig.todoListId, args.taskId, {
@@ -422,7 +427,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           await completeTodo(client, todoConfig.todoListId, args.taskId);
 
@@ -459,7 +464,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           await deleteTodo(client, todoConfig.todoListId, args.taskId);
 

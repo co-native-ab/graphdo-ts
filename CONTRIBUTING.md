@@ -45,7 +45,7 @@ Always run `npm run check` before submitting a PR.
 
 ## Code Style
 
-- TypeScript strict mode with `noUncheckedIndexedAccess` and `noImplicitOverride`
+- TypeScript strict mode with `noUncheckedIndexedAccess`, `noImplicitOverride`, and `noPropertyAccessFromIndexSignature`
 - ES modules — all imports use `.js` extensions
 - No `any` types — enforced by ESLint
 - Early returns over nested conditionals

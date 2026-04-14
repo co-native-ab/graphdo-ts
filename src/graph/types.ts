@@ -49,7 +49,7 @@ export interface ItemBody {
   content: string;
   contentType: BodyContentType;
 }
-export const ItemBodySchema = z
+const ItemBodySchema = z
   .object({
     content: z.string(),
     contentType: z.enum(["text", "html", "Text", "HTML"]),
@@ -61,7 +61,7 @@ export interface DateTimeTimeZone {
   dateTime: string;
   timeZone: string;
 }
-export const DateTimeTimeZoneSchema = z
+const DateTimeTimeZoneSchema = z
   .object({
     dateTime: z.string(),
     timeZone: z.string(),
@@ -78,7 +78,7 @@ export interface RecurrencePattern {
   firstDayOfWeek?: string;
   index?: string;
 }
-export const RecurrencePatternSchema = z
+const RecurrencePatternSchema = z
   .object({
     type: z.enum([
       "daily",
@@ -104,7 +104,7 @@ export interface RecurrenceRange {
   endDate?: string;
   numberOfOccurrences?: number;
 }
-export const RecurrenceRangeSchema = z
+const RecurrenceRangeSchema = z
   .object({
     type: z.enum(["noEnd", "endDate", "numbered"]),
     startDate: z.string(),
@@ -118,7 +118,7 @@ export interface PatternedRecurrence {
   pattern: RecurrencePattern;
   range: RecurrenceRange;
 }
-export const PatternedRecurrenceSchema = z
+const PatternedRecurrenceSchema = z
   .object({
     pattern: RecurrencePatternSchema,
     range: RecurrenceRangeSchema,
@@ -186,66 +186,28 @@ export interface GraphErrorEnvelope {
     message: string;
   };
 }
-export const GraphErrorEnvelopeSchema = z
-  .object({
-    error: z
-      .object({
-        code: z.string(),
-        message: z.string(),
-      })
-      .loose(),
-  })
-  .loose();
 
 // --- SendMail request types ---
 
 export interface SendMailAddress {
   address: string;
 }
-export const SendMailAddressSchema = z
-  .object({
-    address: z.string(),
-  })
-  .loose();
 
 export interface SendMailRecipient {
   emailAddress: SendMailAddress;
 }
-export const SendMailRecipientSchema = z
-  .object({
-    emailAddress: SendMailAddressSchema,
-  })
-  .loose();
 
 export interface SendMailBody {
   contentType: BodyContentType;
   content: string;
 }
-export const SendMailBodySchema = z
-  .object({
-    contentType: z.enum(["text", "html", "Text", "HTML"]),
-    content: z.string(),
-  })
-  .loose();
 
 export interface SendMailMessage {
   subject: string;
   body: SendMailBody;
   toRecipients: SendMailRecipient[];
 }
-export const SendMailMessageSchema = z
-  .object({
-    subject: z.string(),
-    body: SendMailBodySchema,
-    toRecipients: z.array(SendMailRecipientSchema),
-  })
-  .loose();
 
 export interface SendMailRequest {
   message: SendMailMessage;
 }
-export const SendMailRequestSchema = z
-  .object({
-    message: SendMailMessageSchema,
-  })
-  .loose();

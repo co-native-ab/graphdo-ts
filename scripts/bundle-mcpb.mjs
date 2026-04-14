@@ -52,7 +52,7 @@ console.log(`Staged ${include.length} files in .mcpb-stage/`);
 // ---------------------------------------------------------------------------
 
 try {
-  execSync(`npx @anthropic-ai/mcpb@latest pack "${stageDir}" "${join(root, output)}"`, {
+  execSync(`node_modules/.bin/mcpb pack "${stageDir}" "${join(root, output)}"`, {
     cwd: root,
     stdio: "inherit",
   });

@@ -24,9 +24,8 @@ const ConfigSchema = z.object({
  * Uses an override if provided, otherwise falls back to OS-appropriate defaults.
  */
 export function configDir(overrideDir?: string): string {
-  const override = overrideDir ?? process.env["GRAPHDO_CONFIG_DIR"];
-  if (override !== undefined) {
-    const resolved = path.resolve(override);
+  if (overrideDir !== undefined) {
+    const resolved = path.resolve(overrideDir);
     logger.debug("config directory (override)", { path: resolved });
     return resolved;
   }

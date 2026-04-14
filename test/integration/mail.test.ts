@@ -1,6 +1,6 @@
 // Integration tests for mail operations.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   setupIntegrationEnv,
   teardownIntegrationEnv,
@@ -22,10 +22,13 @@ describe("integration: mail", () => {
     await teardownIntegrationEnv(env);
   });
 
+  beforeEach(() => {
+    env.graphState.sentMails = [];
+  });
+
   it("sends mail to self", async () => {
     const auth = new MockAuthenticator({ token: "mail-token" });
     const client = await createTestClient(env, auth);
-    env.graphState.sentMails = [];
 
     const result = (await client.callTool({
       name: "mail_send",
@@ -47,7 +50,6 @@ describe("integration: mail", () => {
   it("sends HTML mail", async () => {
     const auth = new MockAuthenticator({ token: "mail-token" });
     const client = await createTestClient(env, auth);
-    env.graphState.sentMails = [];
 
     const result = (await client.callTool({
       name: "mail_send",

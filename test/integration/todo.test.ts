@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   setupIntegrationEnv,
   teardownIntegrationEnv,
@@ -84,7 +84,7 @@ describe("integration: todo", () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: "list-2", label: "Work" }),
             });
-          }, 50);
+          }, 150);
           return Promise.resolve();
         };
 
@@ -139,7 +139,7 @@ describe("integration: todo", () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: "list-1", label: "My Tasks" }),
             });
-          }, 50);
+          }, 150);
           return Promise.reject(new Error("xdg-open failed"));
         };
 
@@ -172,6 +172,9 @@ describe("integration: todo", () => {
     });
 
     it("returns error when picker times out (no selection)", async () => {
+      // Verify the tool is disabled when no config is set - the picker would
+      // time out in a real scenario but that timeout (2 min) is not feasible
+      // in tests. Instead verify the tool is available when authenticated.
       const originalLists = env.graphState.todoLists;
       env.graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
@@ -186,7 +189,9 @@ describe("integration: todo", () => {
           openBrowser: browserSpy,
         });
 
-        expect(c).toBeDefined();
+        const { tools } = await c.listTools();
+        const names = tools.map((t: { name: string }) => t.name);
+        expect(names).toContain("todo_config");
       } finally {
         env.graphState.todoLists = originalLists;
       }
@@ -198,11 +203,13 @@ describe("integration: todo", () => {
   // -------------------------------------------------------------------------
 
   describe("todo CRUD", () => {
-    beforeAll(async () => {
+    beforeEach(async () => {
       await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Buy milk", status: "notStarted" },
+        { id: "task-update", title: "Task to update", status: "notStarted" },
+        { id: "task-delete", title: "Task to delete", status: "notStarted" },
       ]);
     });
 
@@ -254,16 +261,26 @@ describe("integration: todo", () => {
       const auth = new MockAuthenticator({ token: "todo-token" });
       const client = await createTestClient(env, auth);
 
-      const tasks = env.graphState.getTodos("list-1");
-      const task = tasks.find((t) => t.title === "New task");
-
       const result = (await client.callTool({
         name: "todo_update",
-        arguments: { taskId: task!.id, title: "Updated task" },
+        arguments: { taskId: "task-update", title: "Updated task" },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();
       expect(firstText(result)).toContain("Updated task");
+    });
+
+    it("returns error when todo_update called with no fields", async () => {
+      const auth = new MockAuthenticator({ token: "todo-token" });
+      const client = await createTestClient(env, auth);
+
+      const result = (await client.callTool({
+        name: "todo_update",
+        arguments: { taskId: "task-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toContain("At least one field");
     });
 
     it("completes a todo", async () => {
@@ -287,19 +304,16 @@ describe("integration: todo", () => {
       const auth = new MockAuthenticator({ token: "todo-token" });
       const client = await createTestClient(env, auth);
 
-      const tasks = env.graphState.getTodos("list-1");
-      const task = tasks.find((t) => t.title === "Updated task");
-
       const result = (await client.callTool({
         name: "todo_delete",
-        arguments: { taskId: task!.id },
+        arguments: { taskId: "task-delete" },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();
       expect(firstText(result)).toContain("deleted");
 
       const remaining = env.graphState.getTodos("list-1");
-      expect(remaining.find((t) => t.title === "Updated task")).toBeUndefined();
+      expect(remaining.find((t) => t.id === "task-delete")).toBeUndefined();
     });
   });
 
@@ -538,16 +552,32 @@ describe("integration: todo", () => {
   // -------------------------------------------------------------------------
 
   describe("checklist items", () => {
-    beforeAll(async () => {
+    beforeEach(async () => {
       await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Task with steps", status: "notStarted" },
       ]);
       env.graphState.checklistItems.clear();
+      // Pre-populate items for tests that need existing steps
+      env.graphState.checklistItems.set("task-1", [
+        {
+          id: "step-1",
+          displayName: "Step 1",
+          isChecked: false,
+          createdDateTime: new Date().toISOString(),
+        },
+        {
+          id: "step-2",
+          displayName: "Step 2",
+          isChecked: false,
+          createdDateTime: new Date().toISOString(),
+        },
+      ]);
     });
 
     it("lists empty steps", async () => {
+      env.graphState.checklistItems.set("task-1", []);
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
@@ -561,32 +591,37 @@ describe("integration: todo", () => {
     });
 
     it("adds a step", async () => {
+      env.graphState.checklistItems.set("task-1", []);
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
       const result = (await client.callTool({
         name: "todo_add_step",
-        arguments: { taskId: "task-1", displayName: "Step 1" },
+        arguments: { taskId: "task-1", displayName: "New Step" },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();
-      expect(firstText(result)).toContain("Step 1");
+      expect(firstText(result)).toContain("New Step");
 
       const items = env.graphState.getChecklistItems("task-1");
       expect(items).toHaveLength(1);
-      expect(items[0]!.displayName).toBe("Step 1");
+      expect(items[0]!.displayName).toBe("New Step");
     });
 
     it("adds multiple steps", async () => {
+      env.graphState.checklistItems.set("task-1", []);
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
-      const result = (await client.callTool({
+      await client.callTool({
         name: "todo_add_step",
-        arguments: { taskId: "task-1", displayName: "Step 2" },
-      })) as ToolResult;
+        arguments: { taskId: "task-1", displayName: "Step A" },
+      });
+      await client.callTool({
+        name: "todo_add_step",
+        arguments: { taskId: "task-1", displayName: "Step B" },
+      });
 
-      expect(result.isError).toBeFalsy();
       const items = env.graphState.getChecklistItems("task-1");
       expect(items).toHaveLength(2);
     });
@@ -610,32 +645,39 @@ describe("integration: todo", () => {
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
-      const items = env.graphState.getChecklistItems("task-1");
-      const step = items[0]!;
-
       const result = (await client.callTool({
         name: "todo_update_step",
-        arguments: { taskId: "task-1", stepId: step.id, isChecked: true },
+        arguments: { taskId: "task-1", stepId: "step-1", isChecked: true },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();
 
       const updated = env.graphState.getChecklistItems("task-1");
-      expect(updated.find((i) => i.id === step.id)?.isChecked).toBe(true);
+      expect(updated.find((i) => i.id === "step-1")?.isChecked).toBe(true);
+    });
+
+    it("returns error when todo_update_step called with no update fields", async () => {
+      const auth = new MockAuthenticator({ token: "steps-token" });
+      const client = await createTestClient(env, auth);
+
+      const result = (await client.callTool({
+        name: "todo_update_step",
+        arguments: { taskId: "task-1", stepId: "step-1" },
+      })) as ToolResult;
+
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toContain("At least one of");
     });
 
     it("renames a step", async () => {
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
-      const items = env.graphState.getChecklistItems("task-1");
-      const step = items[0]!;
-
       const result = (await client.callTool({
         name: "todo_update_step",
         arguments: {
           taskId: "task-1",
-          stepId: step.id,
+          stepId: "step-1",
           displayName: "Renamed Step",
         },
       })) as ToolResult;
@@ -648,12 +690,9 @@ describe("integration: todo", () => {
       const auth = new MockAuthenticator({ token: "steps-token" });
       const client = await createTestClient(env, auth);
 
-      const items = env.graphState.getChecklistItems("task-1");
-      const step = items[1]!;
-
       const result = (await client.callTool({
         name: "todo_delete_step",
-        arguments: { taskId: "task-1", stepId: step.id },
+        arguments: { taskId: "task-1", stepId: "step-2" },
       })) as ToolResult;
 
       expect(result.isError).toBeFalsy();

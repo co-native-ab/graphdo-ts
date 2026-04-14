@@ -1,6 +1,8 @@
 # Technical Debt Remediation Plan
 
-> Generated from analysis of graphdo-ts codebase (6,336 LoC, 144 tests passing)
+> **Historical record** — All 22 original items in this document have been resolved.
+> This file is retained for historical context. Current metrics: ~11,600 LoC, 392+ tests passing.
+> New debt items are tracked as GitHub Issues.
 
 ---
 

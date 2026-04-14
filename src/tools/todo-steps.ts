@@ -11,7 +11,7 @@ import {
 } from "../graph/todo.js";
 import { loadAndValidateConfig } from "../config.js";
 import type { ServerConfig } from "../index.js";
-import { createAuthenticatedClient, formatError } from "./shared.js";
+import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
@@ -74,7 +74,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           const items = await listChecklistItems(client, todoConfig.todoListId, args.taskId);
 
@@ -117,7 +117,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           const item = await createChecklistItem(
             client,
@@ -173,7 +173,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
         }
 
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           const item = await updateChecklistItem(
             client,
@@ -221,7 +221,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args) => {
         try {
-          const client = await createAuthenticatedClient(config);
+          const client = config.graphClient;
           const todoConfig = await loadAndValidateConfig(config.configDir);
           await deleteChecklistItem(client, todoConfig.todoListId, args.taskId, args.stepId);
 

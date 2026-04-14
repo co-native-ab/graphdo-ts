@@ -441,7 +441,7 @@ async function handleCreateChecklistItem(
   const newItem: ChecklistItem = {
     id: state.genId(),
     displayName: payload.displayName ?? "",
-    isChecked: false,
+    isChecked: payload.isChecked ?? false,
     createdDateTime: new Date().toISOString(),
   };
 

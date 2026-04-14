@@ -1,8 +1,6 @@
 // Shared helpers for MCP tool handlers.
 
 import { AuthenticationRequiredError } from "../errors.js";
-import type { GraphClient } from "../graph/client.js";
-import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 /**
@@ -29,17 +27,4 @@ export function formatError(
   logger.error(`${toolName} failed`, { error: message });
   const text = `${options?.prefix ?? ""}${message}${options?.suffix ?? ""}`;
   return { content: [{ type: "text", text }], isError: true };
-}
-
-/**
- * Return the shared GraphClient from ServerConfig.
- *
- * The client holds a TokenCredential (the Authenticator) and fetches a fresh
- * (or silently-refreshed) token on every request — correct for long-running
- * MCP server instances.  If the token cannot be refreshed, GraphClient will
- * throw AuthenticationRequiredError, which formatError maps to the standard
- * "please use the login tool" message.
- */
-export function createAuthenticatedClient(config: ServerConfig): Promise<GraphClient> {
-  return Promise.resolve(config.graphClient);
 }
