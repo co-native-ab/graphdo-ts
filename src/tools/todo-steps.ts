@@ -75,7 +75,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const items = await listChecklistItems(
             client,
             todoConfig.todoListId,
@@ -123,7 +123,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const item = await createChecklistItem(
             client,
             todoConfig.todoListId,
@@ -180,7 +180,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
 
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const item = await updateChecklistItem(
             client,
             todoConfig.todoListId,
@@ -229,7 +229,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           await deleteChecklistItem(
             client,
             todoConfig.todoListId,

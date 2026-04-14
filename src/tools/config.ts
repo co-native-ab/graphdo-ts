@@ -67,10 +67,11 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
               title: "Configure Todo List",
               subtitle: "Select which Microsoft To Do list graphdo should use:",
               options: lists.map((l) => ({ id: l.id, label: l.displayName })),
-              onSelect: async (option) => {
+              onSelect: async (option, signal) => {
                 await saveConfig(
                   { todoListId: option.id, todoListName: option.label },
                   config.configDir,
+                  signal,
                 );
               },
             },

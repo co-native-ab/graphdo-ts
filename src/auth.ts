@@ -41,22 +41,22 @@ const LOGOUT_TIMEOUT_MS = 120_000; // 2 minutes
 /** Abstraction for login + token acquisition. */
 export interface Authenticator {
   /** Perform an interactive browser login. */
-  login(signal?: AbortSignal): Promise<LoginResult>;
+  login(signal: AbortSignal): Promise<LoginResult>;
 
   /** Acquire a cached access token, refreshing silently if needed. */
-  token(signal?: AbortSignal): Promise<string>;
+  token(signal: AbortSignal): Promise<string>;
 
   /** Clear cached tokens and account data. */
-  logout(signal?: AbortSignal): Promise<void>;
+  logout(signal: AbortSignal): Promise<void>;
 
   /** Check whether a valid cached token exists (without prompting). */
-  isAuthenticated(signal?: AbortSignal): Promise<boolean>;
+  isAuthenticated(signal: AbortSignal): Promise<boolean>;
 
   /** Get info about the currently logged-in account, if any. */
-  accountInfo(signal?: AbortSignal): Promise<AccountInfo | null>;
+  accountInfo(signal: AbortSignal): Promise<AccountInfo | null>;
 
   /** Get the scopes granted in the current auth session. Empty if not authenticated. */
-  grantedScopes(signal?: AbortSignal): Promise<GraphScope[]>;
+  grantedScopes(signal: AbortSignal): Promise<GraphScope[]>;
 }
 
 export interface LoginResult {
@@ -210,8 +210,8 @@ export class MsalAuthenticator implements Authenticator {
     });
   }
 
-  async login(signal?: AbortSignal): Promise<LoginResult> {
-    if (signal?.aborted) throw signal.reason;
+  async login(signal: AbortSignal): Promise<LoginResult> {
+    if (signal.aborted) throw signal.reason;
     logger.info("starting browser login");
 
     const client = this.createClient();
@@ -246,19 +246,17 @@ export class MsalAuthenticator implements Authenticator {
         }),
       ];
 
-      if (signal) {
-        racePromises.push(
-          new Promise<never>((_, reject) => {
-            const toError = (): Error =>
-              signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-            if (signal.aborted) {
-              reject(toError());
-              return;
-            }
-            signal.addEventListener("abort", () => reject(toError()), { once: true });
-          }),
-        );
-      }
+      racePromises.push(
+        new Promise<never>((_, reject) => {
+          const toError = (): Error =>
+            signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+          if (signal.aborted) {
+            reject(toError());
+            return;
+          }
+          signal.addEventListener("abort", () => reject(toError()), { once: true });
+        }),
+      );
 
       const result = await Promise.race(racePromises);
 
@@ -283,8 +281,8 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async token(signal?: AbortSignal): Promise<string> {
-    if (signal?.aborted) throw signal.reason;
+  async token(signal: AbortSignal): Promise<string> {
+    if (signal.aborted) throw signal.reason;
     const client = this.createClient();
     const account = await loadAccount(this.configDir);
 
@@ -316,27 +314,28 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async logout(signal?: AbortSignal): Promise<void> {
+  async logout(signal: AbortSignal): Promise<void> {
     try {
-      await showLogoutPage(this.openBrowser, () => this.clearCacheFiles(), signal);
+      await showLogoutPage(this.openBrowser, (s) => this.clearCacheFiles(s), signal);
     } catch (err: unknown) {
       if (err instanceof UserCancelledError) throw err;
       // Browser unavailable or timed out — clear tokens silently
       logger.warn("could not show logout confirmation page, clearing tokens silently", {
         error: err instanceof Error ? err.message : String(err),
       });
-      await this.clearCacheFiles();
+      await this.clearCacheFiles(signal);
     }
     this.cachedScopes = [];
   }
 
-  private async clearCacheFiles(): Promise<void> {
+  private async clearCacheFiles(signal: AbortSignal): Promise<void> {
     const files = [
       path.join(this.configDir, CACHE_FILE_NAME),
       path.join(this.configDir, ACCOUNT_FILE_NAME),
     ];
 
     for (const f of files) {
+      if (signal.aborted) throw signal.reason;
       try {
         await fs.unlink(f);
         logger.debug("removed cache file", { path: f });
@@ -351,7 +350,7 @@ export class MsalAuthenticator implements Authenticator {
     logger.info("logged out, token cache cleared");
   }
 
-  async isAuthenticated(signal?: AbortSignal): Promise<boolean> {
+  async isAuthenticated(signal: AbortSignal): Promise<boolean> {
     try {
       await this.token(signal);
       return true;
@@ -360,13 +359,13 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async accountInfo(_signal?: AbortSignal): Promise<AccountInfo | null> {
+  async accountInfo(_signal: AbortSignal): Promise<AccountInfo | null> {
     const account = await loadAccount(this.configDir);
     if (!account) return null;
     return { username: account.username };
   }
 
-  async grantedScopes(signal?: AbortSignal): Promise<GraphScope[]> {
+  async grantedScopes(signal: AbortSignal): Promise<GraphScope[]> {
     if (this.cachedScopes.length > 0) {
       return this.cachedScopes;
     }
@@ -392,10 +391,10 @@ export class MsalAuthenticator implements Authenticator {
  */
 async function showLogoutPage(
   openBrowser: (url: string) => Promise<void>,
-  onConfirm: () => Promise<void>,
-  signal?: AbortSignal,
+  onConfirm: (signal: AbortSignal) => Promise<void>,
+  signal: AbortSignal,
 ): Promise<void> {
-  if (signal?.aborted) throw signal.reason;
+  if (signal.aborted) throw signal.reason;
   const html = logoutPageHtml();
 
   return new Promise<void>((resolve, reject) => {
@@ -425,7 +424,7 @@ async function showLogoutPage(
       }
 
       if (req.method === "POST" && url === "/confirm") {
-        onConfirm()
+        onConfirm(signal)
           .then(() => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
@@ -463,17 +462,17 @@ async function showLogoutPage(
 
     server.on("close", () => {
       clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
     });
 
     // Abort signal handling — shut down server on cancellation
     const onAbort = (): void => {
       server.close();
       settle(() =>
-        reject(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled")),
+        reject(signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled")),
       );
     };
-    signal?.addEventListener("abort", onAbort, { once: true });
+    signal.addEventListener("abort", onAbort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -506,30 +505,30 @@ async function showLogoutPage(
 export class StaticAuthenticator implements Authenticator {
   constructor(private readonly accessToken: string) {}
 
-  login(_signal?: AbortSignal): Promise<LoginResult> {
+  login(_signal: AbortSignal): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
       grantedScopes: defaultScopes(),
     });
   }
 
-  token(_signal?: AbortSignal): Promise<string> {
+  token(_signal: AbortSignal): Promise<string> {
     return Promise.resolve(this.accessToken);
   }
 
-  async logout(_signal?: AbortSignal): Promise<void> {
+  async logout(_signal: AbortSignal): Promise<void> {
     // No-op for static authenticator
   }
 
-  isAuthenticated(_signal?: AbortSignal): Promise<boolean> {
+  isAuthenticated(_signal: AbortSignal): Promise<boolean> {
     return Promise.resolve(true);
   }
 
-  accountInfo(_signal?: AbortSignal): Promise<AccountInfo | null> {
+  accountInfo(_signal: AbortSignal): Promise<AccountInfo | null> {
     return Promise.resolve({ username: "static-token" });
   }
 
-  grantedScopes(_signal?: AbortSignal): Promise<GraphScope[]> {
+  grantedScopes(_signal: AbortSignal): Promise<GraphScope[]> {
     return Promise.resolve(defaultScopes());
   }
 }

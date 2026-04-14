@@ -158,7 +158,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const items = await listTodos(
             client,
             todoConfig.todoListId,
@@ -210,7 +210,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const item = await getTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           const lines = [
@@ -293,7 +293,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
 
           const item = await createTodo(
             client,
@@ -386,7 +386,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
 
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
 
           const item = await updateTodo(
             client,
@@ -443,7 +443,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           await completeTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           return {
@@ -480,7 +480,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           await deleteTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           return {

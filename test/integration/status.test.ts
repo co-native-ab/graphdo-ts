@@ -15,6 +15,7 @@ import {
   createMcpServer,
   InMemoryTransport,
   Client,
+  testSignal,
   type IntegrationEnv,
   type ToolResult,
 } from "./helpers.js";
@@ -24,7 +25,11 @@ let env: IntegrationEnv;
 describe("integration: status & errors", () => {
   beforeAll(async () => {
     env = await setupIntegrationEnv();
-    await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
+    await saveConfig(
+      { todoListId: "list-1", todoListName: "My Tasks" },
+      env.configDir,
+      testSignal(),
+    );
   });
 
   afterAll(async () => {
@@ -65,12 +70,15 @@ describe("integration: status & errors", () => {
       try {
         const emptyAuth = new MockAuthenticator({ token: "token" });
 
-        const server = await createMcpServer({
-          authenticator: emptyAuth,
-          graphBaseUrl: env.graphUrl,
-          configDir: emptyConfigDir,
-          openBrowser: () => Promise.reject(new Error("no browser in tests")),
-        });
+        const server = await createMcpServer(
+          {
+            authenticator: emptyAuth,
+            graphBaseUrl: env.graphUrl,
+            configDir: emptyConfigDir,
+            openBrowser: () => Promise.reject(new Error("no browser in tests")),
+          },
+          testSignal(),
+        );
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
 
@@ -148,12 +156,15 @@ describe("integration: status & errors", () => {
       try {
         const authed = new MockAuthenticator({ token: "status-token" });
 
-        const server = await createMcpServer({
-          authenticator: authed,
-          graphBaseUrl: env.graphUrl,
-          configDir: emptyConfigDir,
-          openBrowser: () => Promise.reject(new Error("no browser in tests")),
-        });
+        const server = await createMcpServer(
+          {
+            authenticator: authed,
+            graphBaseUrl: env.graphUrl,
+            configDir: emptyConfigDir,
+            openBrowser: () => Promise.reject(new Error("no browser in tests")),
+          },
+          testSignal(),
+        );
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
 

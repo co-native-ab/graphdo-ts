@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import { startBrowserPicker } from "../src/picker.js";
 import type { PickerOption } from "../src/picker.js";
+import { testSignal } from "./helpers.js";
 
 const sampleOptions: PickerOption[] = [
   { id: "opt-1", label: "Option A" },
@@ -14,15 +15,20 @@ const sampleOptions: PickerOption[] = [
 
 describe("browser picker", () => {
   it("serves HTML page with options", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Pick Something",
-      subtitle: "Choose wisely:",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick Something",
+        subtitle: "Choose wisely:",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     try {
       const response = await fetch(handle.url);
@@ -47,15 +53,20 @@ describe("browser picker", () => {
   });
 
   it("calls onSelect and resolves with the selected option", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const response = await fetch(`${handle.url}/select`, {
       method: "POST",
@@ -66,19 +77,27 @@ describe("browser picker", () => {
 
     const result = await handle.waitForSelection;
     expect(result.selected).toEqual({ id: "opt-2", label: "Option B" });
-    expect(onSelect).toHaveBeenCalledWith({ id: "opt-2", label: "Option B" });
+    expect(onSelect).toHaveBeenCalledWith(
+      { id: "opt-2", label: "Option B" },
+      expect.any(AbortSignal),
+    );
   });
 
   it("rejects invalid selection", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const response = await fetch(`${handle.url}/select`, {
       method: "POST",
@@ -98,15 +117,20 @@ describe("browser picker", () => {
   });
 
   it("returns 404 for unknown paths", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const response = await fetch(`${handle.url}/unknown`);
     expect(response.status).toBe(404);
@@ -121,15 +145,20 @@ describe("browser picker", () => {
   });
 
   it("times out when no selection is made", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 100,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 100,
+      },
+      testSignal(),
+    );
 
     await expect(handle.waitForSelection).rejects.toThrow("timed out");
     expect(onSelect).not.toHaveBeenCalled();
@@ -137,15 +166,20 @@ describe("browser picker", () => {
 
   it("escapes HTML in option labels", async () => {
     const xssOptions: PickerOption[] = [{ id: "xss", label: '<script>alert("xss")</script>' }];
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: xssOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: xssOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const response = await fetch(handle.url);
     const html = await response.text();
@@ -165,15 +199,20 @@ describe("browser picker", () => {
   });
 
   it("returns 413 when POST body exceeds size limit", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     // Send a body larger than MAX_BODY_SIZE (1 MB)
     const oversizedBody = "x".repeat(1_048_577);
@@ -196,16 +235,19 @@ describe("browser picker", () => {
 
   it("returns 500 when onSelect throws", async () => {
     const onSelect = vi
-      .fn<(opt: PickerOption) => Promise<void>>()
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockRejectedValue(new Error("save failed"));
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const response = await fetch(`${handle.url}/select`, {
       method: "POST",
@@ -227,15 +269,20 @@ describe("browser picker", () => {
   });
 
   it("rejects waitForSelection with UserCancelledError when /cancel is posted", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Test",
-      subtitle: "Test",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     const [response] = await Promise.all([
       fetch(`${handle.url}/cancel`, { method: "POST" }),
@@ -246,15 +293,20 @@ describe("browser picker", () => {
   });
 
   it("picker page includes a Cancel button", async () => {
-    const onSelect = vi.fn<(opt: PickerOption) => Promise<void>>().mockResolvedValue(undefined);
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker({
-      title: "Choose a list",
-      subtitle: "Select one:",
-      options: sampleOptions,
-      onSelect,
-      timeoutMs: 5000,
-    });
+    const handle = await startBrowserPicker(
+      {
+        title: "Choose a list",
+        subtitle: "Select one:",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
 
     // Attach cleanup handler before any requests to avoid unhandled rejection
     const cleanup = handle.waitForSelection.catch(() => {

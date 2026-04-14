@@ -64,7 +64,7 @@ export function registerStatusTool(server: McpServer, config: ServerConfig): Too
           lines.push("");
 
           // Todo list config
-          const cfg = await loadConfig(config.configDir);
+          const cfg = await loadConfig(config.configDir, signal);
           if (cfg?.todoListId && cfg.todoListName) {
             lines.push(`Todo list: ${cfg.todoListName} (${cfg.todoListId})`);
           } else {

@@ -4,6 +4,15 @@ import type { GraphErrorEnvelope } from "./types.js";
 import { logger } from "../logger.js";
 import { ZodType, ZodError } from "zod";
 
+/** HTTP methods used by Graph API requests. */
+export enum HttpMethod {
+  GET = "GET",
+  POST = "POST",
+  PUT = "PUT",
+  PATCH = "PATCH",
+  DELETE = "DELETE",
+}
+
 /**
  * Analogous to Azure.Identity's TokenCredential (Go: azidentity, .NET: Azure.Core).
  * Implemented by Authenticator — handles caching, silent refresh, and throws
@@ -11,7 +20,7 @@ import { ZodType, ZodError } from "zod";
  */
 export interface TokenCredential {
   /** Acquire a (possibly cached / silently-refreshed) access token. */
-  getToken(): Promise<string>;
+  getToken(signal: AbortSignal): Promise<string>;
 }
 
 /** Error thrown when a Graph API request fails. */
@@ -119,18 +128,31 @@ export class GraphClient {
     this._delayFn = delayFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
-  /** Send an HTTP request to the Graph API and return the raw Response. */
+  /** Send an HTTP request with no body. */
+  request(method: HttpMethod, path: string, signal: AbortSignal): Promise<Response>;
+  /** Send an HTTP request with a JSON body. */
+  request(method: HttpMethod, path: string, body: unknown, signal: AbortSignal): Promise<Response>;
   async request(
-    method: string,
+    method: HttpMethod,
     path: string,
-    body?: unknown,
-    signal?: AbortSignal,
+    bodyOrSignal: unknown,
+    signalArg?: AbortSignal,
   ): Promise<Response> {
+    let body: unknown;
+    let signal: AbortSignal;
+    if (bodyOrSignal instanceof AbortSignal) {
+      body = undefined;
+      signal = bodyOrSignal;
+    } else {
+      body = bodyOrSignal;
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      signal = signalArg!;
+    }
     const url = `${this.baseUrl}${path}`;
 
     // Acquire a fresh (or silently-refreshed) token for this request.
     // Throws AuthenticationRequiredError if the user needs to re-authenticate.
-    const token = await this.credential.getToken();
+    const token = await this.credential.getToken(signal);
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
@@ -146,14 +168,14 @@ export class GraphClient {
 
     let lastError: GraphRequestError | undefined;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      if (signal?.aborted) throw signal.reason;
+      if (signal.aborted) throw signal.reason;
 
       // Create a fresh AbortSignal per attempt so each retry gets the full timeout.
       // Combine per-request timeout with the caller's cancellation signal.
       const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
       const init: RequestInit = {
         ...baseInit,
-        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
+        signal: AbortSignal.any([signal, timeoutSignal]),
       };
 
       let response: Response;

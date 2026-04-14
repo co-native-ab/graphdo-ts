@@ -56,13 +56,13 @@ export function configPath(dir: string): string {
 }
 
 /** Reads and parses config.json from the given directory. Returns null if the file does not exist. */
-export async function loadConfig(dir: string): Promise<Config | null> {
+export async function loadConfig(dir: string, signal: AbortSignal): Promise<Config | null> {
   const filePath = configPath(dir);
   logger.debug("loading config", { path: filePath });
 
   let content: string;
   try {
-    content = await fs.readFile(filePath, "utf-8");
+    content = await fs.readFile(filePath, { encoding: "utf-8", signal });
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === "ENOENT") {
       logger.debug("config file not found", { path: filePath });
@@ -88,7 +88,8 @@ export async function loadConfig(dir: string): Promise<Config | null> {
 }
 
 /** Writes config atomically: writes to a temp file then renames into place. */
-export async function saveConfig(config: Config, dir: string): Promise<void> {
+export async function saveConfig(config: Config, dir: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw signal.reason;
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
 
@@ -103,8 +104,8 @@ export async function saveConfig(config: Config, dir: string): Promise<void> {
 
   try {
     const writeOptions: Parameters<typeof fs.writeFile>[2] = isWindows
-      ? { encoding: "utf-8" }
-      : { encoding: "utf-8", mode: 0o600 };
+      ? { encoding: "utf-8" as const, signal }
+      : { encoding: "utf-8" as const, mode: 0o600, signal };
     await fs.writeFile(tmpFile, data, writeOptions);
     await fs.rename(tmpFile, filePath);
     logger.debug("config saved", { path: filePath });
@@ -137,8 +138,9 @@ export function hasTodoConfig(
 /** Loads config from disk and validates it has todo list fields. Throws a user-friendly error if missing or invalid. */
 export async function loadAndValidateConfig(
   dir: string,
+  signal: AbortSignal,
 ): Promise<Config & { todoListId: string; todoListName: string }> {
-  const config = await loadConfig(dir);
+  const config = await loadConfig(dir, signal);
   if (!hasTodoConfig(config)) {
     throw new Error("todo list not configured - use the todo_config tool to select one");
   }

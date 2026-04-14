@@ -15,6 +15,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../../src/index.js";
 import { createMockGraphServer, MockState } from "../mock-graph.js";
 import { MockAuthenticator } from "../mock-auth.js";
+import { testSignal } from "../helpers.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,12 +93,15 @@ export async function createTestClient(
   authenticator: MockAuthenticator,
   opts?: { openBrowser?: (url: string) => Promise<void> },
 ): Promise<Client> {
-  const server = await createMcpServer({
-    authenticator,
-    graphBaseUrl: env.graphUrl,
-    configDir: env.configDir,
-    openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
-  });
+  const server = await createMcpServer(
+    {
+      authenticator,
+      graphBaseUrl: env.graphUrl,
+      configDir: env.configDir,
+      openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
+    },
+    testSignal(),
+  );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   const c = new Client({ name: "test-client", version: "1.0.0" });
@@ -115,3 +119,4 @@ export { saveConfig, loadConfig } from "../../src/config.js";
 export { createMcpServer } from "../../src/index.js";
 export { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 export { Client } from "@modelcontextprotocol/sdk/client/index.js";
+export { testSignal } from "../helpers.js";

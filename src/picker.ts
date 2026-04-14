@@ -26,7 +26,7 @@ export interface PickerConfig {
   subtitle: string;
   options: PickerOption[];
   /** Called when the user selects an option. Errors are surfaced to the browser. */
-  onSelect: (option: PickerOption) => Promise<void>;
+  onSelect: (option: PickerOption, signal: AbortSignal) => Promise<void>;
   /** Timeout in milliseconds (default: 120 000 - 2 minutes). */
   timeoutMs?: number;
 }
@@ -60,11 +60,11 @@ const MAX_BODY_SIZE = 1_048_576;
  */
 export function startBrowserPicker(
   config: PickerConfig,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<PickerHandle> {
   const timeoutMs = config.timeoutMs ?? 120_000;
 
-  if (signal?.aborted) {
+  if (signal.aborted) {
     return Promise.reject(
       signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
     );
@@ -80,15 +80,15 @@ export function startBrowserPicker(
     });
 
     const server = createServer((req, res) => {
-      handleRequest(req, res, config, server, onSelected, onError);
+      handleRequest(req, res, config, server, onSelected, onError, signal);
     });
 
     // Shut down the server when the signal is aborted
     const onAbort = (): void => {
       server.close();
-      onError(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
+      onError(signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
     };
-    signal?.addEventListener("abort", onAbort, { once: true });
+    signal.addEventListener("abort", onAbort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -117,7 +117,7 @@ export function startBrowserPicker(
 
     server.on("close", () => {
       clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
     });
   });
 }
@@ -133,6 +133,7 @@ function handleRequest(
   server: Server,
   onSelected: (result: PickerResult) => void,
   onError: (err: Error) => void,
+  signal: AbortSignal,
 ): void {
   const url = req.url ?? "/";
 
@@ -149,7 +150,7 @@ function handleRequest(
   }
 
   if (req.method === "POST" && url === "/select") {
-    handleSelection(req, res, config, server, onSelected);
+    handleSelection(req, res, config, server, onSelected, signal);
     return;
   }
 
@@ -182,6 +183,7 @@ function handleSelection(
   config: PickerConfig,
   server: Server,
   onSelected: (result: PickerResult) => void,
+  signal: AbortSignal,
 ): void {
   let body = "";
   let size = 0;
@@ -214,7 +216,7 @@ function handleSelection(
           return;
         }
 
-        await config.onSelect(match);
+        await config.onSelect(match, signal);
 
         logger.info("picker selection made", {
           id: match.id,

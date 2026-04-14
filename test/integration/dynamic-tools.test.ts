@@ -10,6 +10,7 @@ import {
   teardownIntegrationEnv,
   createTestClient,
   MockAuthenticator,
+  testSignal,
   type IntegrationEnv,
 } from "./helpers.js";
 
@@ -36,7 +37,7 @@ describe("integration: dynamic tool state", () => {
 
   it("unauthenticated: only login and auth_status visible", async () => {
     const auth = new MockAuthenticator();
-    await auth.logout(); // ensure unauthenticated
+    await auth.logout(testSignal()); // ensure unauthenticated
     const names = await toolNames(auth);
     expect(names).toEqual(["auth_status", "login", "logout"]);
   });

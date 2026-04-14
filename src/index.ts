@@ -56,7 +56,10 @@ export interface ServerConfig {
 // ---------------------------------------------------------------------------
 
 /** Create a configured McpServer instance with all tools registered. */
-export async function createMcpServer(opts: Omit<ServerConfig, "graphClient">): Promise<McpServer> {
+export async function createMcpServer(
+  opts: Omit<ServerConfig, "graphClient">,
+  signal: AbortSignal,
+): Promise<McpServer> {
   // Collect all static tool definitions for instruction generation
   const allDefs = [
     ...LOGIN_TOOL_DEFS,
@@ -77,7 +80,7 @@ export async function createMcpServer(opts: Omit<ServerConfig, "graphClient">): 
 
   // Create a single GraphClient instance for the lifetime of this server.
   const graphClient = new GraphClient(opts.graphBaseUrl, {
-    getToken: () => opts.authenticator.token(),
+    getToken: (s: AbortSignal) => opts.authenticator.token(s),
   });
 
   const config: ServerConfig = { ...opts, graphClient };
@@ -105,8 +108,8 @@ export async function createMcpServer(opts: Omit<ServerConfig, "graphClient">): 
 
   // Check startup auth state — if already authenticated, enable matching tools
   try {
-    if (await opts.authenticator.isAuthenticated()) {
-      const scopes = await opts.authenticator.grantedScopes();
+    if (await opts.authenticator.isAuthenticated(signal)) {
+      const scopes = await opts.authenticator.grantedScopes(signal);
       if (scopes.length > 0) {
         syncToolState(registry, scopes, mcpServer);
       }
@@ -128,6 +131,15 @@ async function main(): Promise<void> {
     setLogLevel("debug");
   }
 
+  // Create a top-level AbortController that's cancelled on SIGINT/SIGTERM.
+  const shutdown = new AbortController();
+  const onProcessSignal = (name: string): void => {
+    logger.info("shutdown signal received", { signal: name });
+    shutdown.abort(new Error(name));
+  };
+  process.once("SIGINT", () => onProcessSignal("SIGINT"));
+  process.once("SIGTERM", () => onProcessSignal("SIGTERM"));
+
   const cfgDir = configDir(process.env["GRAPHDO_CONFIG_DIR"]);
   logger.debug("config directory", { path: cfgDir });
 
@@ -141,23 +153,34 @@ async function main(): Promise<void> {
 
   const graphBaseUrl = process.env["GRAPHDO_GRAPH_URL"] ?? "https://graph.microsoft.com/v1.0";
 
-  const server = await createMcpServer({
-    authenticator,
-    graphBaseUrl,
-    configDir: cfgDir,
-    openBrowser,
-  });
+  const server = await createMcpServer(
+    {
+      authenticator,
+      graphBaseUrl,
+      configDir: cfgDir,
+      openBrowser,
+    },
+    shutdown.signal,
+  );
   const transport = new StdioServerTransport();
 
   await server.connect(transport);
   logger.info("server started on stdio");
 
-  // Keep the process alive until the transport closes.
+  // Keep the process alive until the transport closes or shutdown is signalled.
   await new Promise<void>((resolve) => {
     transport.onclose = () => {
       logger.info("transport closed");
       resolve();
     };
+    shutdown.signal.addEventListener(
+      "abort",
+      () => {
+        logger.info("shutting down");
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
