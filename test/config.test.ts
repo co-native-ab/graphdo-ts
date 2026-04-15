@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
 
+import { testSignal } from "./helpers.js";
 import {
   configDir,
   configPath,
@@ -80,7 +81,7 @@ describe("configPath", () => {
 describe("loadConfig", () => {
   it("returns null when file doesn't exist", async () => {
     const dir = getTempDir();
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toBeNull();
   });
 
@@ -89,7 +90,7 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfig));
 
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toEqual(validConfig);
   });
 
@@ -98,7 +99,7 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), "{not valid json!!!");
 
-    await expect(loadConfig(dir)).rejects.toThrow("failed to parse config");
+    await expect(loadConfig(dir, testSignal())).rejects.toThrow("failed to parse config");
   });
 
   it("strips extra fields and returns empty config for unknown shape", async () => {
@@ -106,7 +107,7 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toEqual({});
   });
 
@@ -119,7 +120,7 @@ describe("loadConfig", () => {
     );
 
     // Empty strings fail min(1) validation
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toBeNull();
   });
 
@@ -128,7 +129,7 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toEqual({ todoListId: "list-1" });
   });
 
@@ -140,7 +141,7 @@ describe("loadConfig", () => {
       JSON.stringify({ ...validConfig, extraField: "ignored" }),
     );
 
-    const result = await loadConfig(dir);
+    const result = await loadConfig(dir, testSignal());
     expect(result).toEqual(validConfig);
   });
 });
@@ -150,7 +151,7 @@ describe("saveConfig", () => {
     const dir = getTempDir();
     const nested = path.join(dir, "nested", "deep");
 
-    await saveConfig(validConfig, nested);
+    await saveConfig(validConfig, nested, testSignal());
 
     const stat = await fs.stat(nested);
     expect(stat.isDirectory()).toBe(true);
@@ -158,7 +159,7 @@ describe("saveConfig", () => {
 
   it("writes valid JSON that can be read back", async () => {
     const dir = getTempDir();
-    await saveConfig(validConfig, dir);
+    await saveConfig(validConfig, dir, testSignal());
 
     const content = await fs.readFile(path.join(dir, "config.json"), "utf-8");
     const parsed = JSON.parse(content) as Config;
@@ -167,7 +168,7 @@ describe("saveConfig", () => {
 
   it("file exists after save (atomic write)", async () => {
     const dir = getTempDir();
-    await saveConfig(validConfig, dir);
+    await saveConfig(validConfig, dir, testSignal());
 
     const filePath = path.join(dir, "config.json");
     const stat = await fs.stat(filePath);
@@ -197,7 +198,7 @@ describe("hasTodoConfig", () => {
 describe("loadAndValidateConfig", () => {
   it("throws helpful error when config file missing", async () => {
     const dir = getTempDir();
-    await expect(loadAndValidateConfig(dir)).rejects.toThrow(/not configured/);
+    await expect(loadAndValidateConfig(dir, testSignal())).rejects.toThrow(/not configured/);
   });
 
   it("throws helpful error when config invalid", async () => {
@@ -208,14 +209,14 @@ describe("loadAndValidateConfig", () => {
       JSON.stringify({ todoListId: "", todoListName: "" }),
     );
 
-    await expect(loadAndValidateConfig(dir)).rejects.toThrow(/not configured/);
+    await expect(loadAndValidateConfig(dir, testSignal())).rejects.toThrow(/not configured/);
   });
 
   it("returns config when valid", async () => {
     const dir = getTempDir();
-    await saveConfig(validConfig, dir);
+    await saveConfig(validConfig, dir, testSignal());
 
-    const result = await loadAndValidateConfig(dir);
+    const result = await loadAndValidateConfig(dir, testSignal());
     expect(result).toEqual(validConfig);
   });
 });
@@ -228,8 +229,8 @@ describe("round-trip", () => {
       todoListName: "Work Items",
     };
 
-    await saveConfig(config, dir);
-    const loaded = await loadConfig(dir);
+    await saveConfig(config, dir, testSignal());
+    const loaded = await loadConfig(dir, testSignal());
 
     expect(loaded).toEqual(config);
   });

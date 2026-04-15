@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import http from "node:http";
-import { createTestEnv, type TestEnv } from "../helpers.js";
+import { createTestEnv, testSignal, type TestEnv } from "../helpers.js";
 import {
   GraphClient,
   GraphRequestError,
   GraphResponseParseError,
+  HttpMethod,
   parseResponse,
 } from "../../src/graph/client.js";
 import { UserSchema, TodoItemSchema, GraphListResponseSchema } from "../../src/graph/types.js";
@@ -53,35 +54,42 @@ describe("GraphClient", () => {
   });
 
   it("sends Authorization Bearer header", async () => {
-    const response = await client.request("GET", "/me");
+    const response = await client.request(HttpMethod.GET, "/me", testSignal());
     expect(response.status).toBe(200);
   });
 
   it("sends Content-Type: application/json", async () => {
-    const response = await client.request("POST", "/me/sendMail", {
-      message: {
-        subject: "test",
-        body: { contentType: "Text", content: "hi" },
-        toRecipients: [{ emailAddress: { address: "a@b.com" } }],
+    const response = await client.request(
+      HttpMethod.POST,
+      "/me/sendMail",
+      {
+        message: {
+          subject: "test",
+          body: { contentType: "Text", content: "hi" },
+          toRecipients: [{ emailAddress: { address: "a@b.com" } }],
+        },
       },
-    });
+      testSignal(),
+    );
     expect(response.status).toBe(202);
   });
 
   it("throws GraphRequestError on 4xx responses", async () => {
-    await expect(client.request("GET", "/me/todo/lists/nonexistent/tasks")).rejects.toThrow(
-      GraphRequestError,
-    );
+    await expect(
+      client.request(HttpMethod.GET, "/me/todo/lists/nonexistent/tasks", testSignal()),
+    ).rejects.toThrow(GraphRequestError);
   });
 
   it("throws GraphRequestError on 401 when token is missing", async () => {
     const badClient = new GraphClient(env.graphUrl, "");
-    await expect(badClient.request("GET", "/me")).rejects.toThrow(GraphRequestError);
+    await expect(badClient.request(HttpMethod.GET, "/me", testSignal())).rejects.toThrow(
+      GraphRequestError,
+    );
   });
 
   it("GraphRequestError has correct code, message, and statusCode", async () => {
     try {
-      await client.request("GET", "/me/todo/lists/bad-list/tasks/bad-task");
+      await client.request(HttpMethod.GET, "/me/todo/lists/bad-list/tasks/bad-task", testSignal());
       expect.fail("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(GraphRequestError);
@@ -103,15 +111,17 @@ describe("GraphClient", () => {
     ]);
     try {
       const badClient = new GraphClient(url, "tok");
-      await expect(badClient.request("GET", "/anything")).rejects.toSatisfy((err: unknown) => {
-        const gre = err as GraphRequestError;
-        return (
-          gre instanceof GraphRequestError &&
-          gre.code === "UnknownError" &&
-          gre.graphMessage === "something went wrong" &&
-          gre.statusCode === 500
-        );
-      });
+      await expect(badClient.request(HttpMethod.GET, "/anything", testSignal())).rejects.toSatisfy(
+        (err: unknown) => {
+          const gre = err as GraphRequestError;
+          return (
+            gre instanceof GraphRequestError &&
+            gre.code === "UnknownError" &&
+            gre.graphMessage === "something went wrong" &&
+            gre.statusCode === 500
+          );
+        },
+      );
     } finally {
       await closeServer(server);
     }
@@ -127,14 +137,16 @@ describe("GraphClient timeouts", () => {
     ]);
     try {
       const timeoutClient = new GraphClient(url, "tok", 100);
-      await expect(timeoutClient.request("GET", "/hang")).rejects.toSatisfy((err: unknown) => {
-        const gre = err as GraphRequestError;
-        return (
-          gre instanceof GraphRequestError &&
-          gre.code === "TimeoutError" &&
-          gre.graphMessage.includes("timed out")
-        );
-      });
+      await expect(timeoutClient.request(HttpMethod.GET, "/hang", testSignal())).rejects.toSatisfy(
+        (err: unknown) => {
+          const gre = err as GraphRequestError;
+          return (
+            gre instanceof GraphRequestError &&
+            gre.code === "TimeoutError" &&
+            gre.graphMessage.includes("timed out")
+          );
+        },
+      );
     } finally {
       await closeServer(server);
     }
@@ -155,7 +167,7 @@ describe("GraphClient retry logic", () => {
     ]);
     try {
       const client = new GraphClient(url, "tok", 30000, 3, noDelay);
-      const resp = await client.request("GET", "/foo");
+      const resp = await client.request(HttpMethod.GET, "/foo", testSignal());
       expect(resp.status).toBe(200);
     } finally {
       await closeServer(server);
@@ -180,7 +192,7 @@ describe("GraphClient retry logic", () => {
     ]);
     try {
       const client = new GraphClient(url, "tok", 30000, 3, capturingDelay);
-      await client.request("GET", "/foo");
+      await client.request(HttpMethod.GET, "/foo", testSignal());
       expect(capturedDelayMs).toBe(1000);
     } finally {
       await closeServer(server);
@@ -198,7 +210,9 @@ describe("GraphClient retry logic", () => {
     ]);
     try {
       const client = new GraphClient(url, "tok", 30000, 3, noDelay);
-      await expect(client.request("GET", "/foo")).rejects.toThrow(GraphRequestError);
+      await expect(client.request(HttpMethod.GET, "/foo", testSignal())).rejects.toThrow(
+        GraphRequestError,
+      );
       expect(callCount).toBe(1);
     } finally {
       await closeServer(server);
@@ -216,7 +230,9 @@ describe("GraphClient retry logic", () => {
     ]);
     try {
       const client = new GraphClient(url, "tok", 30000, 2, noDelay);
-      await expect(client.request("GET", "/foo")).rejects.toThrow(GraphRequestError);
+      await expect(client.request(HttpMethod.GET, "/foo", testSignal())).rejects.toThrow(
+        GraphRequestError,
+      );
       expect(callCount).toBe(3); // 1 initial + 2 retries
     } finally {
       await closeServer(server);

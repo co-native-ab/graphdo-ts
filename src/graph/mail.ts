@@ -3,14 +3,15 @@
 import type { User, SendMailRequest } from "./types.js";
 import { UserSchema } from "./types.js";
 import type { GraphClient } from "./client.js";
+import { HttpMethod } from "./client.js";
 import { logger } from "../logger.js";
 import { parseResponse } from "./client.js";
 
 /** Fetch the authenticated user's profile. */
-export async function getMe(client: GraphClient): Promise<User> {
+export async function getMe(client: GraphClient, signal: AbortSignal): Promise<User> {
   logger.debug("fetching current user profile");
-  const response = await client.request("GET", "/me");
-  return await parseResponse(response, UserSchema, "GET", "/me");
+  const response = await client.request(HttpMethod.GET, "/me", signal);
+  return await parseResponse(response, UserSchema, HttpMethod.GET, "/me");
 }
 
 /** Send an email on behalf of the authenticated user. */
@@ -20,6 +21,7 @@ export async function sendMail(
   subject: string,
   body: string,
   html: boolean,
+  signal: AbortSignal,
 ): Promise<void> {
   logger.debug("sending mail", { to, subject });
 
@@ -34,5 +36,5 @@ export async function sendMail(
     },
   };
 
-  await client.request("POST", "/me/sendMail", payload);
+  await client.request(HttpMethod.POST, "/me/sendMail", payload, signal);
 }

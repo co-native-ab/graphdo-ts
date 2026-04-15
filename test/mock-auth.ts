@@ -35,7 +35,9 @@ export class MockAuthenticator implements Authenticator {
     ];
   }
 
-  login(): Promise<LoginResult> {
+  login(signal: AbortSignal): Promise<LoginResult> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     if (this._token) {
       return Promise.resolve({
         message: "Already authenticated.",
@@ -55,29 +57,39 @@ export class MockAuthenticator implements Authenticator {
     return Promise.reject(new Error("Could not open browser"));
   }
 
-  token(): Promise<string> {
+  token(signal: AbortSignal): Promise<string> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     if (!this._token) {
       return Promise.reject(new AuthenticationRequiredError());
     }
     return Promise.resolve(this._token);
   }
 
-  logout(): Promise<void> {
+  logout(signal: AbortSignal): Promise<void> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     this._token = null;
     this._logoutCalled = true;
     return Promise.resolve();
   }
 
-  isAuthenticated(): Promise<boolean> {
+  isAuthenticated(signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     return Promise.resolve(this._token !== null);
   }
 
-  accountInfo(): Promise<AccountInfo | null> {
+  accountInfo(signal: AbortSignal): Promise<AccountInfo | null> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     if (!this._token) return Promise.resolve(null);
     return Promise.resolve({ username: this._username });
   }
 
-  grantedScopes(): Promise<GraphScope[]> {
+  grantedScopes(signal: AbortSignal): Promise<GraphScope[]> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     if (!this._token) return Promise.resolve([]);
     return Promise.resolve(this._grantedScopes);
   }

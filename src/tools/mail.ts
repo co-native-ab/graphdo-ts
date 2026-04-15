@@ -41,11 +41,11 @@ export function registerMailTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: true,
         },
       },
-      async ({ subject, body, html }) => {
+      async ({ subject, body, html }, { signal }) => {
         try {
           const client = config.graphClient;
-          const user = await getMe(client);
-          await sendMail(client, user.mail, subject, body, html);
+          const user = await getMe(client, signal);
+          await sendMail(client, user.mail, subject, body, html, signal);
           logger.info("mail sent", { to: user.mail, subject });
           return {
             content: [{ type: "text", text: `Email sent to ${user.mail}` }],

@@ -7,6 +7,7 @@ import {
   createTestClient,
   firstText,
   MockAuthenticator,
+  testSignal,
   type IntegrationEnv,
   type ToolResult,
 } from "./helpers.js";
@@ -112,7 +113,7 @@ describe("integration: discovery & login", () => {
 
     it("scope-gated tools are disabled before login", async () => {
       const auth = new MockAuthenticator();
-      await auth.logout();
+      await auth.logout(testSignal());
       const client = await createTestClient(env, auth);
 
       // Only always-enabled tools should be visible

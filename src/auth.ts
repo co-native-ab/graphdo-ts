@@ -41,22 +41,22 @@ const LOGOUT_TIMEOUT_MS = 120_000; // 2 minutes
 /** Abstraction for login + token acquisition. */
 export interface Authenticator {
   /** Perform an interactive browser login. */
-  login(): Promise<LoginResult>;
+  login(signal: AbortSignal): Promise<LoginResult>;
 
   /** Acquire a cached access token, refreshing silently if needed. */
-  token(): Promise<string>;
+  token(signal: AbortSignal): Promise<string>;
 
   /** Clear cached tokens and account data. */
-  logout(): Promise<void>;
+  logout(signal: AbortSignal): Promise<void>;
 
   /** Check whether a valid cached token exists (without prompting). */
-  isAuthenticated(): Promise<boolean>;
+  isAuthenticated(signal: AbortSignal): Promise<boolean>;
 
   /** Get info about the currently logged-in account, if any. */
-  accountInfo(): Promise<AccountInfo | null>;
+  accountInfo(signal: AbortSignal): Promise<AccountInfo | null>;
 
   /** Get the scopes granted in the current auth session. Empty if not authenticated. */
-  grantedScopes(): Promise<GraphScope[]>;
+  grantedScopes(signal: AbortSignal): Promise<GraphScope[]>;
 }
 
 export interface LoginResult {
@@ -72,17 +72,55 @@ export interface AccountInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Internal utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Races a promise against an AbortSignal so long-running MSAL operations
+ * (e.g. silent token refresh) are cancelled when the caller aborts.
+ */
+function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted)
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void =>
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
 // File-based MSAL cache (mirrors Go's tokencache.go)
 // ---------------------------------------------------------------------------
 
-/** MSAL cache plugin that persists token data to a JSON file. */
+/**
+ * MSAL cache plugin that persists token data to a JSON file.
+ *
+ * Note: the `ICachePlugin` interface (`beforeCacheAccess` / `afterCacheAccess`)
+ * is defined by the MSAL library and does not include an AbortSignal parameter.
+ * Signal-forwarding is intentionally omitted here — it is not possible without
+ * changing the MSAL interface.
+ */
 function createFileCachePlugin(configDir: string): msal.ICachePlugin {
   const cachePath = path.join(configDir, CACHE_FILE_NAME);
 
   return {
     async beforeCacheAccess(context: msal.TokenCacheContext): Promise<void> {
       try {
-        const data = await fs.readFile(cachePath, "utf-8");
+        const data = await fs.readFile(cachePath, {
+          encoding: "utf-8",
+          signal: AbortSignal.timeout(5_000),
+        });
         context.tokenCache.deserialize(data);
         logger.debug("loaded token cache", { path: cachePath });
       } catch (err: unknown) {
@@ -104,6 +142,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
         });
         await fs.writeFile(cachePath, context.tokenCache.serialize(), {
           mode: 0o600,
+          signal: AbortSignal.timeout(5_000),
         });
         logger.debug("exported token cache", { path: cachePath });
       }
@@ -115,13 +154,20 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
 // Account persistence (mirrors Go's saveAccount/loadAccount)
 // ---------------------------------------------------------------------------
 
-async function saveAccount(account: msal.AccountInfo, configDir: string): Promise<void> {
+async function saveAccount(
+  account: msal.AccountInfo,
+  configDir: string,
+  signal: AbortSignal,
+): Promise<void> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   await fs.mkdir(path.dirname(accountPath), {
     recursive: true,
     mode: 0o700,
   });
-  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", { mode: 0o600 });
+  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", {
+    mode: 0o600,
+    signal,
+  });
   logger.debug("saved account", { path: accountPath });
 }
 
@@ -132,10 +178,13 @@ const AccountInfoSchema = z
   })
   .loose();
 
-async function loadAccount(configDir: string): Promise<msal.AccountInfo | undefined> {
+async function loadAccount(
+  configDir: string,
+  signal: AbortSignal,
+): Promise<msal.AccountInfo | undefined> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   try {
-    const data = await fs.readFile(accountPath, "utf-8");
+    const data = await fs.readFile(accountPath, { encoding: "utf-8", signal });
     let account: unknown;
     try {
       account = JSON.parse(data);
@@ -210,7 +259,8 @@ export class MsalAuthenticator implements Authenticator {
     });
   }
 
-  async login(): Promise<LoginResult> {
+  async login(signal: AbortSignal): Promise<LoginResult> {
+    if (signal.aborted) throw signal.reason;
     logger.info("starting browser login");
 
     const client = this.createClient();
@@ -219,21 +269,24 @@ export class MsalAuthenticator implements Authenticator {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
-      const result = await Promise.race([
-        client.acquireTokenInteractive({
-          // Requesting only User.Read is intentional: Azure AD's admin consent
-          // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
-          // regardless of which scopes are included in the interactive request.
-          // The granted scopes are read from the token response and stored in
-          // cachedScopes to drive dynamic tool visibility.
-          scopes: ["User.Read"],
-          prompt: "select_account",
-          loopbackClient: loopback,
-          openBrowser: async (authUrl: string) => {
-            loopback.setAuthUrl(authUrl);
-            await this.openBrowser(loopback.getRedirectUri());
-          },
-        }),
+      const racePromises: Promise<msal.AuthenticationResult>[] = [
+        withSignal(
+          client.acquireTokenInteractive({
+            // Requesting only User.Read is intentional: Azure AD's admin consent
+            // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
+            // regardless of which scopes are included in the interactive request.
+            // The granted scopes are read from the token response and stored in
+            // cachedScopes to drive dynamic tool visibility.
+            scopes: ["User.Read"],
+            prompt: "select_account",
+            loopbackClient: loopback,
+            openBrowser: async (authUrl: string) => {
+              loopback.setAuthUrl(authUrl);
+              await this.openBrowser(loopback.getRedirectUri());
+            },
+          }),
+          signal,
+        ),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
             reject(
@@ -243,13 +296,15 @@ export class MsalAuthenticator implements Authenticator {
             );
           }, LOGIN_TIMEOUT_MS);
         }),
-      ]);
+      ];
+
+      const result = await Promise.race(racePromises);
 
       if (!result.account) {
         throw new Error("Browser authentication returned no account");
       }
 
-      await saveAccount(result.account, this.configDir);
+      await saveAccount(result.account, this.configDir, signal);
       this.cachedScopes = toGraphScopes(result.scopes);
       logger.info("browser login successful", {
         username: result.account.username,
@@ -266,9 +321,10 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async token(): Promise<string> {
+  async token(signal: AbortSignal): Promise<string> {
+    if (signal.aborted) throw signal.reason;
     const client = this.createClient();
-    const account = await loadAccount(this.configDir);
+    const account = await loadAccount(this.configDir, signal);
 
     if (!account) {
       throw new AuthenticationRequiredError();
@@ -279,13 +335,16 @@ export class MsalAuthenticator implements Authenticator {
     });
 
     try {
-      const result = await client.acquireTokenSilent({
-        account,
-        // Same reasoning as acquireTokenInteractive: request only User.Read —
-        // all app scopes are already pre-consented via admin grant. MSAL returns
-        // the full set of granted scopes in the token response.
-        scopes: ["User.Read"],
-      });
+      const result = await withSignal(
+        client.acquireTokenSilent({
+          account,
+          // Same reasoning as acquireTokenInteractive: request only User.Read —
+          // all app scopes are already pre-consented via admin grant. MSAL returns
+          // the full set of granted scopes in the token response.
+          scopes: ["User.Read"],
+        }),
+        signal,
+      );
 
       this.cachedScopes = toGraphScopes(result.scopes);
       logger.debug("token acquired");
@@ -298,27 +357,28 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async logout(): Promise<void> {
+  async logout(signal: AbortSignal): Promise<void> {
     try {
-      await showLogoutPage(this.openBrowser, () => this.clearCacheFiles());
+      await showLogoutPage(this.openBrowser, (s) => this.clearCacheFiles(s), signal);
     } catch (err: unknown) {
       if (err instanceof UserCancelledError) throw err;
       // Browser unavailable or timed out — clear tokens silently
       logger.warn("could not show logout confirmation page, clearing tokens silently", {
         error: err instanceof Error ? err.message : String(err),
       });
-      await this.clearCacheFiles();
+      await this.clearCacheFiles(signal);
     }
     this.cachedScopes = [];
   }
 
-  private async clearCacheFiles(): Promise<void> {
+  private async clearCacheFiles(signal: AbortSignal): Promise<void> {
     const files = [
       path.join(this.configDir, CACHE_FILE_NAME),
       path.join(this.configDir, ACCOUNT_FILE_NAME),
     ];
 
     for (const f of files) {
+      if (signal.aborted) throw signal.reason;
       try {
         await fs.unlink(f);
         logger.debug("removed cache file", { path: f });
@@ -333,28 +393,28 @@ export class MsalAuthenticator implements Authenticator {
     logger.info("logged out, token cache cleared");
   }
 
-  async isAuthenticated(): Promise<boolean> {
+  async isAuthenticated(signal: AbortSignal): Promise<boolean> {
     try {
-      await this.token();
+      await this.token(signal);
       return true;
     } catch {
       return false;
     }
   }
 
-  async accountInfo(): Promise<AccountInfo | null> {
-    const account = await loadAccount(this.configDir);
+  async accountInfo(signal: AbortSignal): Promise<AccountInfo | null> {
+    const account = await loadAccount(this.configDir, signal);
     if (!account) return null;
     return { username: account.username };
   }
 
-  async grantedScopes(): Promise<GraphScope[]> {
+  async grantedScopes(signal: AbortSignal): Promise<GraphScope[]> {
     if (this.cachedScopes.length > 0) {
       return this.cachedScopes;
     }
     // Try a silent token acquisition to discover scopes
     try {
-      await this.token();
+      await this.token(signal);
       return this.cachedScopes;
     } catch {
       return [];
@@ -374,8 +434,10 @@ export class MsalAuthenticator implements Authenticator {
  */
 async function showLogoutPage(
   openBrowser: (url: string) => Promise<void>,
-  onConfirm: () => Promise<void>,
+  onConfirm: (signal: AbortSignal) => Promise<void>,
+  signal: AbortSignal,
 ): Promise<void> {
+  if (signal.aborted) throw signal.reason;
   const html = logoutPageHtml();
 
   return new Promise<void>((resolve, reject) => {
@@ -405,7 +467,7 @@ async function showLogoutPage(
       }
 
       if (req.method === "POST" && url === "/confirm") {
-        onConfirm()
+        onConfirm(signal)
           .then(() => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
@@ -443,7 +505,17 @@ async function showLogoutPage(
 
     server.on("close", () => {
       clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
     });
+
+    // Abort signal handling — shut down server on cancellation
+    const onAbort = (): void => {
+      server.close();
+      settle(() =>
+        reject(signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled")),
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -476,30 +548,30 @@ async function showLogoutPage(
 export class StaticAuthenticator implements Authenticator {
   constructor(private readonly accessToken: string) {}
 
-  login(): Promise<LoginResult> {
+  login(_signal: AbortSignal): Promise<LoginResult> {
     return Promise.resolve({
       message: "Already authenticated with static token.",
       grantedScopes: defaultScopes(),
     });
   }
 
-  token(): Promise<string> {
+  token(_signal: AbortSignal): Promise<string> {
     return Promise.resolve(this.accessToken);
   }
 
-  async logout(): Promise<void> {
+  async logout(_signal: AbortSignal): Promise<void> {
     // No-op for static authenticator
   }
 
-  isAuthenticated(): Promise<boolean> {
+  isAuthenticated(_signal: AbortSignal): Promise<boolean> {
     return Promise.resolve(true);
   }
 
-  accountInfo(): Promise<AccountInfo | null> {
+  accountInfo(_signal: AbortSignal): Promise<AccountInfo | null> {
     return Promise.resolve({ username: "static-token" });
   }
 
-  grantedScopes(): Promise<GraphScope[]> {
+  grantedScopes(_signal: AbortSignal): Promise<GraphScope[]> {
     return Promise.resolve(defaultScopes());
   }
 }

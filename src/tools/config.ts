@@ -46,10 +46,10 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
           openWorldHint: true,
         },
       },
-      async () => {
+      async (_args, { signal }) => {
         try {
           const client = config.graphClient;
-          const lists = await listTodoLists(client);
+          const lists = await listTodoLists(client, signal);
 
           if (lists.length === 0) {
             return {
@@ -62,17 +62,21 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
             };
           }
 
-          const handle = await startBrowserPicker({
-            title: "Configure Todo List",
-            subtitle: "Select which Microsoft To Do list graphdo should use:",
-            options: lists.map((l) => ({ id: l.id, label: l.displayName })),
-            onSelect: async (option) => {
-              await saveConfig(
-                { todoListId: option.id, todoListName: option.label },
-                config.configDir,
-              );
+          const handle = await startBrowserPicker(
+            {
+              title: "Configure Todo List",
+              subtitle: "Select which Microsoft To Do list graphdo should use:",
+              options: lists.map((l) => ({ id: l.id, label: l.displayName })),
+              onSelect: async (option, signal) => {
+                await saveConfig(
+                  { todoListId: option.id, todoListName: option.label },
+                  config.configDir,
+                  signal,
+                );
+              },
             },
-          });
+            signal,
+          );
 
           let browserOpened = false;
           try {

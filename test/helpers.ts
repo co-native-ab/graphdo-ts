@@ -7,6 +7,15 @@ export interface TestEnv {
   cleanup: () => Promise<void>;
 }
 
+/**
+ * Returns a per-test AbortSignal that times out after 10 seconds.
+ * Analogous to a CancellationToken in xUnit's test context — provides a
+ * deadline for async operations in tests.
+ */
+export function testSignal(): AbortSignal {
+  return AbortSignal.timeout(10_000);
+}
+
 export async function createTestEnv(): Promise<TestEnv> {
   const state = new MockStateClass();
 

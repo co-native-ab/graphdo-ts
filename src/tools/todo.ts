@@ -155,10 +155,10 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const items = await listTodos(
             client,
             todoConfig.todoListId,
@@ -166,6 +166,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
             args.skip,
             args.filter,
             args.orderBy,
+            signal,
           );
 
           const lines = items.map((item, i) => {
@@ -206,11 +207,11 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
-          const item = await getTodo(client, todoConfig.todoListId, args.taskId);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const item = await getTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           const lines = [
             `Title: ${item.title}`,
@@ -241,6 +242,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
             client,
             todoConfig.todoListId,
             args.taskId,
+            signal,
           );
           if (checklistItems.length > 0) {
             lines.push("", "Steps:");
@@ -288,24 +290,31 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
 
-          const item = await createTodo(client, todoConfig.todoListId, {
-            title: args.title,
-            body: args.body || undefined,
-            importance: args.importance,
-            dueDateTime: args.dueDate
-              ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
-              : undefined,
-            isReminderOn: args.reminderDateTime ? true : undefined,
-            reminderDateTime: args.reminderDateTime
-              ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
-              : undefined,
-            recurrence: args.repeat ? parseRecurrence(args.repeat, args.repeatInterval) : undefined,
-          });
+          const item = await createTodo(
+            client,
+            todoConfig.todoListId,
+            {
+              title: args.title,
+              body: args.body || undefined,
+              importance: args.importance,
+              dueDateTime: args.dueDate
+                ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
+                : undefined,
+              isReminderOn: args.reminderDateTime ? true : undefined,
+              reminderDateTime: args.reminderDateTime
+                ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
+                : undefined,
+              recurrence: args.repeat
+                ? parseRecurrence(args.repeat, args.repeatInterval)
+                : undefined,
+            },
+            signal,
+          );
 
           const parts = [`Created todo: "${item.title}" (${item.id})`];
           parts.push(`Status: ${statusLabel(item.status)}`);
@@ -351,7 +360,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         const hasChange =
           args.title !== "" ||
           args.body !== "" ||
@@ -377,29 +386,35 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
 
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
 
-          const item = await updateTodo(client, todoConfig.todoListId, args.taskId, {
-            title: args.title || undefined,
-            body: args.body || undefined,
-            importance: args.importance,
-            dueDateTime: args.clearDueDate
-              ? null
-              : args.dueDate
-                ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
-                : undefined,
-            isReminderOn: args.clearReminder ? false : args.reminderDateTime ? true : undefined,
-            reminderDateTime: args.clearReminder
-              ? null
-              : args.reminderDateTime
-                ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
-                : undefined,
-            recurrence: args.clearRecurrence
-              ? null
-              : args.repeat
-                ? parseRecurrence(args.repeat, args.repeatInterval)
-                : undefined,
-          });
+          const item = await updateTodo(
+            client,
+            todoConfig.todoListId,
+            args.taskId,
+            {
+              title: args.title || undefined,
+              body: args.body || undefined,
+              importance: args.importance,
+              dueDateTime: args.clearDueDate
+                ? null
+                : args.dueDate
+                  ? parseDateTimeTimeZone(args.dueDate, args.dueDateTimeZone)
+                  : undefined,
+              isReminderOn: args.clearReminder ? false : args.reminderDateTime ? true : undefined,
+              reminderDateTime: args.clearReminder
+                ? null
+                : args.reminderDateTime
+                  ? parseDateTimeTimeZone(args.reminderDateTime, args.reminderTimeZone)
+                  : undefined,
+              recurrence: args.clearRecurrence
+                ? null
+                : args.repeat
+                  ? parseRecurrence(args.repeat, args.repeatInterval)
+                  : undefined,
+            },
+            signal,
+          );
 
           const text = `Updated todo: "${item.title}" (${item.id})\nStatus: ${statusLabel(item.status)}`;
           return { content: [{ type: "text", text }] };
@@ -425,11 +440,11 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
-          await completeTodo(client, todoConfig.todoListId, args.taskId);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          await completeTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           return {
             content: [
@@ -462,11 +477,11 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
-          await deleteTodo(client, todoConfig.todoListId, args.taskId);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          await deleteTodo(client, todoConfig.todoListId, args.taskId, signal);
 
           return {
             content: [{ type: "text", text: `Todo "${args.taskId}" deleted.` }],

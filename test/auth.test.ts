@@ -8,6 +8,7 @@ import type * as MsalTypes from "@azure/msal-node";
 
 import { StaticAuthenticator, MsalAuthenticator } from "../src/auth.js";
 import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
+import { testSignal } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // vi.mock must be at the top level (hoisted by vitest)
@@ -108,29 +109,29 @@ function authResult(
 describe("StaticAuthenticator", () => {
   it("login resolves with a static message", async () => {
     const auth = new StaticAuthenticator("my-token");
-    const result = await auth.login();
+    const result = await auth.login(testSignal());
     expect(result.message).toMatch(/static token/i);
   });
 
   it("token returns the fixed access token", async () => {
     const auth = new StaticAuthenticator("fixed-token");
-    const token = await auth.token();
+    const token = await auth.token(testSignal());
     expect(token).toBe("fixed-token");
   });
 
   it("logout is a no-op (does not throw)", async () => {
     const auth = new StaticAuthenticator("t");
-    await expect(auth.logout()).resolves.toBeUndefined();
+    await expect(auth.logout(testSignal())).resolves.toBeUndefined();
   });
 
   it("isAuthenticated always returns true", async () => {
     const auth = new StaticAuthenticator("t");
-    expect(await auth.isAuthenticated()).toBe(true);
+    expect(await auth.isAuthenticated(testSignal())).toBe(true);
   });
 
   it("accountInfo returns username 'static-token'", async () => {
     const auth = new StaticAuthenticator("t");
-    const info = await auth.accountInfo();
+    const info = await auth.accountInfo(testSignal());
     expect(info).toEqual({ username: "static-token" });
   });
 });
@@ -148,7 +149,7 @@ describe("MsalAuthenticator.login", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenInteractive.mockResolvedValue(authResult());
 
-    const result = await auth.login();
+    const result = await auth.login(testSignal());
 
     expect(result.message).toContain("user@example.com");
     // Account file should be saved
@@ -167,7 +168,7 @@ describe("MsalAuthenticator.login", () => {
     // Browser login fails
     fakePCA.acquireTokenInteractive.mockRejectedValue(new Error("cannot open browser"));
 
-    await expect(auth.login()).rejects.toThrow("cannot open browser");
+    await expect(auth.login(testSignal())).rejects.toThrow("cannot open browser");
   });
 
   it("saves the account file with mode 0o600", async () => {
@@ -178,7 +179,7 @@ describe("MsalAuthenticator.login", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenInteractive.mockResolvedValue(authResult());
 
-    await auth.login();
+    await auth.login(testSignal());
 
     const accountPath = path.join(dir, "account.json");
     const stat = await fs.stat(accountPath);
@@ -213,7 +214,7 @@ describe("MsalAuthenticator.token", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenSilent.mockResolvedValue(authResult({ accessToken: "silent-token-xyz" }));
 
-    const token = await auth.token();
+    const token = await auth.token(testSignal());
     expect(token).toBe("silent-token-xyz");
   });
 
@@ -226,7 +227,7 @@ describe("MsalAuthenticator.token", () => {
 
     installFakePCA();
 
-    await expect(auth.token()).rejects.toThrow(AuthenticationRequiredError);
+    await expect(auth.token(testSignal())).rejects.toThrow(AuthenticationRequiredError);
   });
 
   it("throws AuthenticationRequiredError on InteractionRequiredAuthError", async () => {
@@ -251,7 +252,7 @@ describe("MsalAuthenticator.token", () => {
       new msal.InteractionRequiredAuthError("interaction_required"),
     );
 
-    await expect(auth.token()).rejects.toThrow(AuthenticationRequiredError);
+    await expect(auth.token(testSignal())).rejects.toThrow(AuthenticationRequiredError);
   });
 
   it("re-throws non-InteractionRequired errors from silent acquisition", async () => {
@@ -274,7 +275,7 @@ describe("MsalAuthenticator.token", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenSilent.mockRejectedValue(new Error("network failure"));
 
-    await expect(auth.token()).rejects.toThrow("network failure");
+    await expect(auth.token(testSignal())).rejects.toThrow("network failure");
   });
 });
 
@@ -304,7 +305,7 @@ describe("MsalAuthenticator.logout", () => {
     const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    await auth.logout();
+    await auth.logout(testSignal());
 
     await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
     await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
@@ -319,7 +320,7 @@ describe("MsalAuthenticator.logout", () => {
     const openBrowser = makeBrowserSpy("/cancel");
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    await expect(auth.logout()).rejects.toThrow(UserCancelledError);
+    await expect(auth.logout(testSignal())).rejects.toThrow(UserCancelledError);
 
     // Files should NOT be deleted when cancelled
     await expect(fs.access(path.join(dir, "msal_cache.json"))).resolves.toBeUndefined();
@@ -337,7 +338,7 @@ describe("MsalAuthenticator.logout", () => {
       .mockRejectedValue(new Error("no browser available"));
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    await auth.logout();
+    await auth.logout(testSignal());
 
     await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
     await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
@@ -351,7 +352,7 @@ describe("MsalAuthenticator.logout", () => {
     const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    await expect(auth.logout()).resolves.toBeUndefined();
+    await expect(auth.logout(testSignal())).resolves.toBeUndefined();
   });
 
   it("still clears the remaining file when only one cache file exists", async () => {
@@ -363,7 +364,7 @@ describe("MsalAuthenticator.logout", () => {
     const openBrowser = makeBrowserSpy("/confirm");
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    await auth.logout();
+    await auth.logout(testSignal());
 
     await expect(fs.access(path.join(dir, "account.json"))).rejects.toThrow();
   });
@@ -394,7 +395,7 @@ describe("MsalAuthenticator.isAuthenticated", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenSilent.mockResolvedValue(authResult());
 
-    expect(await auth.isAuthenticated()).toBe(true);
+    expect(await auth.isAuthenticated(testSignal())).toBe(true);
   });
 
   it("returns false when no account file exists", async () => {
@@ -406,7 +407,7 @@ describe("MsalAuthenticator.isAuthenticated", () => {
 
     installFakePCA();
 
-    expect(await auth.isAuthenticated()).toBe(false);
+    expect(await auth.isAuthenticated(testSignal())).toBe(false);
   });
 
   it("returns false when silent acquisition fails", async () => {
@@ -429,7 +430,7 @@ describe("MsalAuthenticator.isAuthenticated", () => {
     const fakePCA = installFakePCA();
     fakePCA.acquireTokenSilent.mockRejectedValue(new Error("expired"));
 
-    expect(await auth.isAuthenticated()).toBe(false);
+    expect(await auth.isAuthenticated(testSignal())).toBe(false);
   });
 });
 
@@ -455,7 +456,7 @@ describe("MsalAuthenticator.accountInfo", () => {
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    const info = await auth.accountInfo();
+    const info = await auth.accountInfo(testSignal());
     expect(info).toEqual({ username: "alice@example.com" });
   });
 
@@ -466,7 +467,7 @@ describe("MsalAuthenticator.accountInfo", () => {
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    const info = await auth.accountInfo();
+    const info = await auth.accountInfo(testSignal());
     expect(info).toBeNull();
   });
 
@@ -478,7 +479,7 @@ describe("MsalAuthenticator.accountInfo", () => {
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    const info = await auth.accountInfo();
+    const info = await auth.accountInfo(testSignal());
     expect(info).toBeNull();
   });
 
@@ -491,7 +492,7 @@ describe("MsalAuthenticator.accountInfo", () => {
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
-    const info = await auth.accountInfo();
+    const info = await auth.accountInfo(testSignal());
     expect(info).toBeNull();
   });
 });

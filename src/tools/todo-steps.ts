@@ -72,11 +72,16 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
-          const items = await listChecklistItems(client, todoConfig.todoListId, args.taskId);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const items = await listChecklistItems(
+            client,
+            todoConfig.todoListId,
+            args.taskId,
+            signal,
+          );
 
           if (items.length === 0) {
             return {
@@ -115,15 +120,16 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const item = await createChecklistItem(
             client,
             todoConfig.todoListId,
             args.taskId,
             args.displayName,
+            signal,
           );
 
           return {
@@ -159,7 +165,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         if (args.displayName === undefined && args.isChecked === undefined) {
           return {
             content: [
@@ -174,7 +180,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
 
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
           const item = await updateChecklistItem(
             client,
             todoConfig.todoListId,
@@ -184,6 +190,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
               displayName: args.displayName,
               isChecked: args.isChecked,
             },
+            signal,
           );
 
           const check = item.isChecked ? "☑" : "☐";
@@ -219,11 +226,17 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir);
-          await deleteChecklistItem(client, todoConfig.todoListId, args.taskId, args.stepId);
+          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          await deleteChecklistItem(
+            client,
+            todoConfig.todoListId,
+            args.taskId,
+            args.stepId,
+            signal,
+          );
 
           return {
             content: [

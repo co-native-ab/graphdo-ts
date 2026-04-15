@@ -16,6 +16,7 @@ import {
   createMcpServer,
   InMemoryTransport,
   Client,
+  testSignal,
   type IntegrationEnv,
   type ToolResult,
 } from "./helpers.js";
@@ -89,12 +90,15 @@ describe("integration: todo", () => {
         };
 
         const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
-        const server = await createMcpServer({
-          authenticator: configAuth,
-          graphBaseUrl: env.graphUrl,
-          configDir: tempConfigDir,
-          openBrowser: browserSpy,
-        });
+        const server = await createMcpServer(
+          {
+            authenticator: configAuth,
+            graphBaseUrl: env.graphUrl,
+            configDir: tempConfigDir,
+            openBrowser: browserSpy,
+          },
+          testSignal(),
+        );
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
         await server.connect(st);
@@ -113,7 +117,7 @@ describe("integration: todo", () => {
 
         expect(capturedUrl).toContain("http://127.0.0.1:");
 
-        const config = await loadConfig(tempConfigDir);
+        const config = await loadConfig(tempConfigDir, testSignal());
         expect(config).not.toBeNull();
         expect(config!.todoListId).toBe("list-2");
         expect(config!.todoListName).toBe("Work");
@@ -144,12 +148,15 @@ describe("integration: todo", () => {
         };
 
         const configAuth = new MockAuthenticator({ token: "config-e2e-token" });
-        const server = await createMcpServer({
-          authenticator: configAuth,
-          graphBaseUrl: env.graphUrl,
-          configDir: tempConfigDir,
-          openBrowser: failingBrowser,
-        });
+        const server = await createMcpServer(
+          {
+            authenticator: configAuth,
+            graphBaseUrl: env.graphUrl,
+            configDir: tempConfigDir,
+            openBrowser: failingBrowser,
+          },
+          testSignal(),
+        );
         const [ct, st] = InMemoryTransport.createLinkedPair();
         const c = new Client({ name: "test", version: "1.0" });
         await server.connect(st);
@@ -204,7 +211,11 @@ describe("integration: todo", () => {
 
   describe("todo CRUD", () => {
     beforeEach(async () => {
-      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        env.configDir,
+        testSignal(),
+      );
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Buy milk", status: "notStarted" },
@@ -323,7 +334,11 @@ describe("integration: todo", () => {
 
   describe("enhanced todo features", () => {
     beforeAll(async () => {
-      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        env.configDir,
+        testSignal(),
+      );
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Base task", status: "notStarted" },
@@ -553,7 +568,11 @@ describe("integration: todo", () => {
 
   describe("checklist items", () => {
     beforeEach(async () => {
-      await saveConfig({ todoListId: "list-1", todoListName: "My Tasks" }, env.configDir);
+      await saveConfig(
+        { todoListId: "list-1", todoListName: "My Tasks" },
+        env.configDir,
+        testSignal(),
+      );
 
       env.graphState.todos.set("list-1", [
         { id: "task-1", title: "Task with steps", status: "notStarted" },

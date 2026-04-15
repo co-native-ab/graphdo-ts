@@ -53,9 +53,9 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
           idempotentHint: true,
         },
       },
-      async () => {
+      async (_args, { signal }) => {
         try {
-          if (await config.authenticator.isAuthenticated()) {
+          if (await config.authenticator.isAuthenticated(signal)) {
             return {
               content: [
                 {
@@ -66,7 +66,7 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
             };
           }
 
-          const loginResult = await config.authenticator.login();
+          const loginResult = await config.authenticator.login(signal);
           config.onScopesChanged?.(loginResult.grantedScopes);
 
           logger.info("browser login completed");
@@ -102,9 +102,9 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
           idempotentHint: true,
         },
       },
-      async () => {
+      async (_args, { signal }) => {
         try {
-          if (!(await config.authenticator.isAuthenticated())) {
+          if (!(await config.authenticator.isAuthenticated(signal))) {
             return {
               content: [
                 {
@@ -114,7 +114,7 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
               ],
             };
           }
-          await config.authenticator.logout();
+          await config.authenticator.logout(signal);
           config.onScopesChanged?.([]);
           return {
             content: [
