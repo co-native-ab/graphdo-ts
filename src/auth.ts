@@ -117,7 +117,10 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
   return {
     async beforeCacheAccess(context: msal.TokenCacheContext): Promise<void> {
       try {
-        const data = await fs.readFile(cachePath, "utf-8");
+        const data = await fs.readFile(cachePath, {
+          encoding: "utf-8",
+          signal: AbortSignal.timeout(5_000),
+        });
         context.tokenCache.deserialize(data);
         logger.debug("loaded token cache", { path: cachePath });
       } catch (err: unknown) {
@@ -139,6 +142,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
         });
         await fs.writeFile(cachePath, context.tokenCache.serialize(), {
           mode: 0o600,
+          signal: AbortSignal.timeout(5_000),
         });
         logger.debug("exported token cache", { path: cachePath });
       }
@@ -266,20 +270,23 @@ export class MsalAuthenticator implements Authenticator {
 
     try {
       const racePromises: Promise<msal.AuthenticationResult>[] = [
-        client.acquireTokenInteractive({
-          // Requesting only User.Read is intentional: Azure AD's admin consent
-          // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
-          // regardless of which scopes are included in the interactive request.
-          // The granted scopes are read from the token response and stored in
-          // cachedScopes to drive dynamic tool visibility.
-          scopes: ["User.Read"],
-          prompt: "select_account",
-          loopbackClient: loopback,
-          openBrowser: async (authUrl: string) => {
-            loopback.setAuthUrl(authUrl);
-            await this.openBrowser(loopback.getRedirectUri());
-          },
-        }),
+        withSignal(
+          client.acquireTokenInteractive({
+            // Requesting only User.Read is intentional: Azure AD's admin consent
+            // grants all required scopes (Tasks.ReadWrite, Mail.Send, offline_access)
+            // regardless of which scopes are included in the interactive request.
+            // The granted scopes are read from the token response and stored in
+            // cachedScopes to drive dynamic tool visibility.
+            scopes: ["User.Read"],
+            prompt: "select_account",
+            loopbackClient: loopback,
+            openBrowser: async (authUrl: string) => {
+              loopback.setAuthUrl(authUrl);
+              await this.openBrowser(loopback.getRedirectUri());
+            },
+          }),
+          signal,
+        ),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
             reject(
@@ -290,18 +297,6 @@ export class MsalAuthenticator implements Authenticator {
           }, LOGIN_TIMEOUT_MS);
         }),
       ];
-
-      racePromises.push(
-        new Promise<never>((_, reject) => {
-          const toError = (): Error =>
-            signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-          if (signal.aborted) {
-            reject(toError());
-            return;
-          }
-          signal.addEventListener("abort", () => reject(toError()), { once: true });
-        }),
-      );
 
       const result = await Promise.race(racePromises);
 
