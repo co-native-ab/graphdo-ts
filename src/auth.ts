@@ -72,10 +72,45 @@ export interface AccountInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Internal utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Races a promise against an AbortSignal so long-running MSAL operations
+ * (e.g. silent token refresh) are cancelled when the caller aborts.
+ */
+function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted)
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void =>
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
 // File-based MSAL cache (mirrors Go's tokencache.go)
 // ---------------------------------------------------------------------------
 
-/** MSAL cache plugin that persists token data to a JSON file. */
+/**
+ * MSAL cache plugin that persists token data to a JSON file.
+ *
+ * Note: the `ICachePlugin` interface (`beforeCacheAccess` / `afterCacheAccess`)
+ * is defined by the MSAL library and does not include an AbortSignal parameter.
+ * Signal-forwarding is intentionally omitted here — it is not possible without
+ * changing the MSAL interface.
+ */
 function createFileCachePlugin(configDir: string): msal.ICachePlugin {
   const cachePath = path.join(configDir, CACHE_FILE_NAME);
 
@@ -115,13 +150,20 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
 // Account persistence (mirrors Go's saveAccount/loadAccount)
 // ---------------------------------------------------------------------------
 
-async function saveAccount(account: msal.AccountInfo, configDir: string): Promise<void> {
+async function saveAccount(
+  account: msal.AccountInfo,
+  configDir: string,
+  signal: AbortSignal,
+): Promise<void> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   await fs.mkdir(path.dirname(accountPath), {
     recursive: true,
     mode: 0o700,
   });
-  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", { mode: 0o600 });
+  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", {
+    mode: 0o600,
+    signal,
+  });
   logger.debug("saved account", { path: accountPath });
 }
 
@@ -132,10 +174,13 @@ const AccountInfoSchema = z
   })
   .loose();
 
-async function loadAccount(configDir: string): Promise<msal.AccountInfo | undefined> {
+async function loadAccount(
+  configDir: string,
+  signal: AbortSignal,
+): Promise<msal.AccountInfo | undefined> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   try {
-    const data = await fs.readFile(accountPath, "utf-8");
+    const data = await fs.readFile(accountPath, { encoding: "utf-8", signal });
     let account: unknown;
     try {
       account = JSON.parse(data);
@@ -264,7 +309,7 @@ export class MsalAuthenticator implements Authenticator {
         throw new Error("Browser authentication returned no account");
       }
 
-      await saveAccount(result.account, this.configDir);
+      await saveAccount(result.account, this.configDir, signal);
       this.cachedScopes = toGraphScopes(result.scopes);
       logger.info("browser login successful", {
         username: result.account.username,
@@ -284,7 +329,7 @@ export class MsalAuthenticator implements Authenticator {
   async token(signal: AbortSignal): Promise<string> {
     if (signal.aborted) throw signal.reason;
     const client = this.createClient();
-    const account = await loadAccount(this.configDir);
+    const account = await loadAccount(this.configDir, signal);
 
     if (!account) {
       throw new AuthenticationRequiredError();
@@ -295,13 +340,16 @@ export class MsalAuthenticator implements Authenticator {
     });
 
     try {
-      const result = await client.acquireTokenSilent({
-        account,
-        // Same reasoning as acquireTokenInteractive: request only User.Read —
-        // all app scopes are already pre-consented via admin grant. MSAL returns
-        // the full set of granted scopes in the token response.
-        scopes: ["User.Read"],
-      });
+      const result = await withSignal(
+        client.acquireTokenSilent({
+          account,
+          // Same reasoning as acquireTokenInteractive: request only User.Read —
+          // all app scopes are already pre-consented via admin grant. MSAL returns
+          // the full set of granted scopes in the token response.
+          scopes: ["User.Read"],
+        }),
+        signal,
+      );
 
       this.cachedScopes = toGraphScopes(result.scopes);
       logger.debug("token acquired");
@@ -359,8 +407,8 @@ export class MsalAuthenticator implements Authenticator {
     }
   }
 
-  async accountInfo(_signal: AbortSignal): Promise<AccountInfo | null> {
-    const account = await loadAccount(this.configDir);
+  async accountInfo(signal: AbortSignal): Promise<AccountInfo | null> {
+    const account = await loadAccount(this.configDir, signal);
     if (!account) return null;
     return { username: account.username };
   }
