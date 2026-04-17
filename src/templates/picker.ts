@@ -64,6 +64,11 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         ${optionButtons}
       </div>
       <p id="no-match" class="no-match" style="display:none">No matches.</p>
+      <div id="pagination" class="pagination" style="display:none">
+        <button id="prev-btn" class="page-btn" type="button" aria-label="Previous page">&laquo; Prev</button>
+        <span id="page-status" class="page-status" aria-live="polite"></span>
+        <button id="next-btn" class="page-btn" type="button" aria-label="Next page">Next &raquo;</button>
+      </div>
       ${createLinkHtml}
       <div class="btn-group" style="margin-top: 16px">
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
@@ -83,9 +88,15 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     </picture>
   </div>`,
     script: `    const refreshEnabled = ${String(config.refreshEnabled === true)};
+    const PAGE_SIZE = 10;
     const list = document.getElementById('options-list');
     const noMatch = document.getElementById('no-match');
     const filterInput = document.getElementById('filter-input');
+    const pagination = document.getElementById('pagination');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const pageStatus = document.getElementById('page-status');
+    let currentPage = 0;
 
     function escapeHtml(s) {
       return String(s)
@@ -96,16 +107,45 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         .replace(/'/g, '&#39;');
     }
 
-    function applyFilter() {
+    // Applies the filter across ALL options, then paginates the filtered
+    // subset so at most PAGE_SIZE buttons are visible at a time. Filter
+    // text is always evaluated over the full option list (never just the
+    // current page) so the user can find any item by typing, regardless
+    // of which page it lives on.
+    function applyFilterAndPaginate() {
       const q = filterInput.value.toLowerCase().trim();
-      let visible = 0;
-      for (const btn of list.querySelectorAll('.option-btn')) {
+      const allBtns = list.querySelectorAll('.option-btn');
+      const matched = [];
+      for (const btn of allBtns) {
         const label = (btn.dataset.label || '').toLowerCase();
-        const match = q.length === 0 || label.indexOf(q) !== -1;
-        btn.style.display = match ? '' : 'none';
-        if (match) visible++;
+        const isMatch = q.length === 0 || label.indexOf(q) !== -1;
+        if (isMatch) {
+          matched.push(btn);
+        } else {
+          btn.style.display = 'none';
+        }
       }
-      noMatch.style.display = visible === 0 ? 'block' : 'none';
+
+      const totalPages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE));
+      if (currentPage >= totalPages) currentPage = totalPages - 1;
+      if (currentPage < 0) currentPage = 0;
+
+      const start = currentPage * PAGE_SIZE;
+      const end = start + PAGE_SIZE;
+      for (let i = 0; i < matched.length; i++) {
+        matched[i].style.display = (i >= start && i < end) ? '' : 'none';
+      }
+
+      noMatch.style.display = matched.length === 0 ? 'block' : 'none';
+
+      if (matched.length > PAGE_SIZE) {
+        pagination.style.display = '';
+        pageStatus.textContent = 'Page ' + (currentPage + 1) + ' of ' + totalPages + ' (' + matched.length + ' total)';
+        prevBtn.disabled = currentPage === 0;
+        nextBtn.disabled = currentPage >= totalPages - 1;
+      } else {
+        pagination.style.display = 'none';
+      }
     }
 
     function wireOptionButtons() {
@@ -152,8 +192,23 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     }
 
     wireOptionButtons();
-    applyFilter();
-    filterInput.addEventListener('input', applyFilter);
+    applyFilterAndPaginate();
+    filterInput.addEventListener('input', () => {
+      // Reset to the first page whenever the filter changes so matches
+      // aren't hidden on a later page.
+      currentPage = 0;
+      applyFilterAndPaginate();
+    });
+    prevBtn.addEventListener('click', () => {
+      if (currentPage > 0) {
+        currentPage--;
+        applyFilterAndPaginate();
+      }
+    });
+    nextBtn.addEventListener('click', () => {
+      currentPage++;
+      applyFilterAndPaginate();
+    });
 
     if (refreshEnabled) {
       const refreshBtn = document.getElementById('refresh-btn');
@@ -170,7 +225,8 @@ export function pickerPageHtml(config: PickerPageConfig): string {
             '<button class="option-btn" data-id="' + escapeHtml(o.id) + '" data-label="' + escapeHtml(o.label) + '">' + escapeHtml(o.label) + '</button>'
           ).join('\\n');
           wireOptionButtons();
-          applyFilter();
+          currentPage = 0;
+          applyFilterAndPaginate();
         } catch (err) {
           document.getElementById('error').style.display = 'block';
           document.getElementById('error').textContent = 'Refresh failed: ' + err.message;

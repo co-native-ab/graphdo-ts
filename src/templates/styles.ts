@@ -343,6 +343,34 @@ export const PICKER_STYLE = `
       padding: 12px 0;
       font-size: ${fontSize.base};
     }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: ${spacing.sm};
+      margin-top: ${spacing.sm};
+      padding-top: ${spacing.sm};
+      border-top: 1px solid ${grey.grey2};
+    }
+    .page-btn {
+      padding: 6px 12px;
+      background: ${purple.minus3};
+      border: 1px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      color: ${purple.brand};
+      font-size: ${fontSize.sm};
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${purple.minus3}; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .page-status {
+      color: ${grey.grey4};
+      font-size: ${fontSize.sm};
+      min-width: 140px;
+      text-align: center;
+    }
     .create-link-box {
       margin-top: ${spacing.md};
       padding: ${spacing.sm} 12px;
@@ -368,6 +396,10 @@ export const PICKER_STYLE = `
       .refresh-btn:hover { background: ${dark.surfaceHover}; }
       .no-match, .create-link-desc { color: ${dark.text}; }
       .create-link-box { border-color: ${dark.border}; color: ${dark.text}; }
+      .pagination { border-top-color: ${dark.border}; }
+      .page-btn { background: ${dark.surface}; border-color: ${dark.border}; color: ${dark.text}; }
+      .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
+      .page-status { color: ${dark.text}; }
     }`;
 
 // ---------------------------------------------------------------------------
