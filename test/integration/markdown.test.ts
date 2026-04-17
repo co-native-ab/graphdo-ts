@@ -251,6 +251,105 @@ describe("integration: markdown", () => {
     }
   });
 
+  it("markdown_select_root_folder embeds the drive's webUrl from /me/drive into the picker page", async () => {
+    // Set a recognisable webUrl on the mock and assert the picker HTML
+    // references that URL (not the hardcoded onedrive.live.com fallback).
+    env.graphState.drive = {
+      id: "drive-xyz",
+      driveType: "business",
+      webUrl: "https://contoso-my.sharepoint.com/personal/test_contoso_com/Documents",
+    };
+    const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-weburl-"));
+
+    try {
+      let capturedUrl = "";
+      let capturedHtml = "";
+      const browserSpy = async (url: string): Promise<void> => {
+        capturedUrl = url;
+        // Fetch the picker page while the server is still running.
+        const res = await fetch(url);
+        capturedHtml = await res.text();
+        setTimeout(() => {
+          void fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
+          });
+        }, 50);
+      };
+
+      const auth = new MockAuthenticator({ token: "md-weburl-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const c = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await c.connect(ct);
+
+      const result = (await c.callTool({
+        name: "markdown_select_root_folder",
+        arguments: {},
+      })) as ToolResult;
+      expect(result.isError).toBeFalsy();
+      expect(capturedUrl).toContain("http://127.0.0.1:");
+      expect(capturedHtml).toContain(
+        "https://contoso-my.sharepoint.com/personal/test_contoso_com/Documents",
+      );
+      expect(capturedHtml).not.toContain("https://onedrive.live.com/");
+    } finally {
+      await rm(tempConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it("markdown_select_root_folder falls back to onedrive.live.com when /me/drive has no webUrl", async () => {
+    env.graphState.drive = { id: "drive-abc", driveType: "personal", webUrl: "" };
+    const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-fallback-"));
+    try {
+      let capturedHtml = "";
+      const browserSpy = async (url: string): Promise<void> => {
+        const res = await fetch(url);
+        capturedHtml = await res.text();
+        setTimeout(() => {
+          void fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
+          });
+        }, 50);
+      };
+      const auth = new MockAuthenticator({ token: "md-fallback-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const c = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await c.connect(ct);
+
+      const result = (await c.callTool({
+        name: "markdown_select_root_folder",
+        arguments: {},
+      })) as ToolResult;
+      expect(result.isError).toBeFalsy();
+      expect(capturedHtml).toContain("https://onedrive.live.com/");
+    } finally {
+      await rm(tempConfigDir, { recursive: true, force: true });
+    }
+  });
+
   it("markdown_select_root_folder preserves existing todo_config fields", async () => {
     const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-merge-"));
     try {

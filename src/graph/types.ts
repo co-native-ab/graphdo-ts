@@ -210,6 +210,27 @@ export const DriveItemSchema = z
   })
   .loose();
 
+/**
+ * A OneDrive `drive` resource as returned by `GET /me/drive`.
+ *
+ * Only the fields graphdo consumes are modelled. `webUrl` is the user-facing
+ * URL of the drive in OneDrive (e.g. the root folder in the OneDrive web UI).
+ * See https://learn.microsoft.com/en-us/graph/api/drive-get.
+ */
+export interface Drive {
+  id: string;
+  driveType?: string;
+  webUrl?: string;
+}
+
+export const DriveSchema = z
+  .object({
+    id: z.string(),
+    driveType: z.string().optional(),
+    webUrl: z.string().optional(),
+  })
+  .loose();
+
 /** Graph API error response envelope. */
 export interface GraphErrorEnvelope {
   error: {

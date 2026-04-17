@@ -215,7 +215,7 @@ As new Graph surfaces are added, the same principle applies: minimize blast radi
 Your organization's IT administrator needs to approve graphdo-ts. See [Organization Setup](#organization-setup) for what to tell them.
 
 **"No todo lists found"**
-Create a list in Microsoft To Do first. Open [to-do.office.com](https://to-do.office.com), create a list, then call `todo_config` again.
+Create a list in Microsoft To Do first. Open [to-do.office.com/tasks/](https://to-do.office.com/tasks/), create a list, then call `todo_config` again.
 
 **"The browser didn't open"**
 The `login` tool will return the login URL in its error message. Copy and paste the URL into your browser to complete authentication.

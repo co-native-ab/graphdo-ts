@@ -11,6 +11,7 @@ import {
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
+  getMyDrive,
   listMarkdownFiles,
   listMarkdownFolderEntries,
   listRootFolders,
@@ -311,5 +312,44 @@ describe("markdown graph operations: classification & validation", () => {
     await expect(
       uploadMarkdownContent(client, "folder-1", "weird@name.md", "x", testSignal()),
     ).rejects.toThrow(/not portable/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getMyDrive — GET /me/drive
+// ---------------------------------------------------------------------------
+
+describe("getMyDrive", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    client = new GraphClient(env.graphUrl, { getToken: () => Promise.resolve("test-token") });
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("returns drive id, driveType, and webUrl from the mock", async () => {
+    env.state.drive = {
+      id: "drive-123",
+      driveType: "business",
+      webUrl: "https://contoso-my.sharepoint.com/personal/user/Documents",
+    };
+    const drive = await getMyDrive(client, testSignal());
+    expect(drive.id).toBe("drive-123");
+    expect(drive.driveType).toBe("business");
+    expect(drive.webUrl).toBe("https://contoso-my.sharepoint.com/personal/user/Documents");
+  });
+
+  it("tolerates a drive response with no webUrl", async () => {
+    env.state.drive = { id: "drive-456", driveType: "personal", webUrl: "" };
+    const drive = await getMyDrive(client, testSignal());
+    expect(drive.id).toBe("drive-456");
+    // Empty string is a string — the schema accepts it; the tool layer treats
+    // empty as "no URL" and falls back to the default.
+    expect(drive.webUrl).toBe("");
   });
 });

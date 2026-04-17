@@ -4,8 +4,8 @@
 // selected by the user via a browser picker and persisted to config. The
 // configured ID is passed in by the caller — this module does not read config.
 
-import type { DriveItem } from "./types.js";
-import { DriveItemSchema, GraphListResponseSchema } from "./types.js";
+import type { DriveItem, Drive } from "./types.js";
+import { DriveItemSchema, DriveSchema, GraphListResponseSchema } from "./types.js";
 import type { GraphClient } from "./client.js";
 import { HttpMethod, parseResponse } from "./client.js";
 import { logger } from "../logger.js";
@@ -220,6 +220,22 @@ export async function listRootFolders(
     path,
   );
   return data.value.filter((item) => item.folder !== undefined);
+}
+
+/**
+ * Fetch the user's default drive metadata (`GET /me/drive`).
+ *
+ * Exposes the drive's user-facing `webUrl` so the picker can deep-link the
+ * user to _their own_ OneDrive UI (which may be a personal account, a
+ * business / GCC / sovereign-cloud tenant, etc.) rather than a hardcoded
+ * `onedrive.live.com` URL that is wrong for work accounts. See
+ * https://learn.microsoft.com/en-us/graph/api/drive-get.
+ */
+export async function getMyDrive(client: GraphClient, signal: AbortSignal): Promise<Drive> {
+  logger.debug("getting /me/drive");
+  const path = "/me/drive";
+  const response = await client.request(HttpMethod.GET, path, signal);
+  return parseResponse(response, DriveSchema, HttpMethod.GET, path);
 }
 
 // ---------------------------------------------------------------------------

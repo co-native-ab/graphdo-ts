@@ -32,6 +32,8 @@ export class MockState {
   driveRootChildren: DriveItem[];
   /** Children keyed by folder ID. Each folder's entry contains its files/folders. */
   driveFolderChildren: Map<string, MockDriveFile[]>;
+  /** Metadata returned by `GET /me/drive`. */
+  drive: { id: string; driveType: string; webUrl: string };
   private nextId: number;
 
   constructor() {
@@ -42,6 +44,11 @@ export class MockState {
     this.sentMails = [];
     this.driveRootChildren = [];
     this.driveFolderChildren = new Map();
+    this.drive = {
+      id: "mock-drive-1",
+      driveType: "business",
+      webUrl: "https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents",
+    };
     this.nextId = 1;
   }
 
@@ -572,6 +579,16 @@ async function handleDriveRequest(
   segments: string[],
   parsed: URL,
 ): Promise<boolean> {
+  // GET /me/drive
+  if (method === "GET" && segments.length === 2) {
+    jsonResponse(res, 200, {
+      id: state.drive.id,
+      driveType: state.drive.driveType,
+      webUrl: state.drive.webUrl,
+    });
+    return true;
+  }
+
   // GET /me/drive/root/children
   if (
     method === "GET" &&

@@ -14,6 +14,7 @@ import {
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
+  getMyDrive,
   listMarkdownFolderEntries,
   listRootFolders,
   MarkdownFileTooLargeError,
@@ -210,7 +211,14 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
       async (_args, { signal }) => {
         try {
           const client = config.graphClient;
+
+          // Fetch the drive's webUrl so the "Create new folder" link points to
+          // the user's _own_ OneDrive (work/school/personal/sovereign) rather
+          // than a hardcoded consumer URL. If the drive can't be loaded for
+          // any reason, fall back to the public consumer URL — the picker is
+          // still usable, just with a generic link.
           const folders = await listRootFolders(client, signal);
+          const driveWebUrl = await tryGetDriveWebUrl(client, signal);
 
           if (folders.length === 0) {
             return {
@@ -237,10 +245,10 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                 return refreshed.map((f) => ({ id: f.id, label: `/${f.name}` }));
               },
               createLink: {
-                url: "https://onedrive.live.com/",
+                url: driveWebUrl,
                 label: "Create a new folder in OneDrive",
                 description:
-                  "Open OneDrive in a new tab, create a top-level folder there, then click Refresh here to see it in the list.",
+                  "Open your OneDrive in a new tab, create a top-level folder there, then click Refresh here to see it in the list.",
               },
               onSelect: async (option, s) => {
                 await updateConfig(
@@ -567,4 +575,38 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
   );
 
   return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Drive webUrl lookup (best-effort)
+// ---------------------------------------------------------------------------
+
+/** Fallback link used when `GET /me/drive` fails or returns no `webUrl`. */
+const DEFAULT_ONEDRIVE_WEB_URL = "https://onedrive.live.com/";
+
+/**
+ * Best-effort fetch of the user's OneDrive `webUrl`. Returns the configured
+ * fallback link when the Graph call fails or when the drive has no `webUrl`.
+ * We never want the picker to _fail_ just because we couldn't resolve a
+ * deep-link — the picker's core function (selecting a folder) does not
+ * depend on the create-link being accurate.
+ */
+async function tryGetDriveWebUrl(
+  client: import("../graph/client.js").GraphClient,
+  signal: AbortSignal,
+): Promise<string> {
+  try {
+    const drive = await getMyDrive(client, signal);
+    const webUrl = drive.webUrl;
+    if (typeof webUrl === "string" && webUrl.length > 0) {
+      return webUrl;
+    }
+    logger.warn("/me/drive returned no webUrl; using fallback OneDrive link");
+    return DEFAULT_ONEDRIVE_WEB_URL;
+  } catch (err: unknown) {
+    logger.warn("failed to load /me/drive; using fallback OneDrive link", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return DEFAULT_ONEDRIVE_WEB_URL;
+  }
 }
