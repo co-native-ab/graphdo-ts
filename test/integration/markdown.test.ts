@@ -113,6 +113,89 @@ describe("integration: markdown", () => {
     }
   });
 
+  it("rejects a manually-corrupted config whose rootFolderId is '/' with a clear error that points back to the picker", async () => {
+    // Simulate someone editing config.json by hand and putting "/" (the drive
+    // root) where a single folder ID is expected. All four markdown tools
+    // must refuse to run and direct the user to markdown_select_root_folder.
+    const dir = await mkdtemp(path.join(tmpdir(), "graphdo-md-bad-"));
+    try {
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, "config.json"),
+        JSON.stringify({ markdown: { rootFolderId: "/" } }),
+      );
+
+      const auth = new MockAuthenticator({ token: "md-bad-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: dir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await client.connect(ct);
+
+      for (const call of [
+        { name: "markdown_list_files", arguments: {} },
+        { name: "markdown_get_file", arguments: { fileName: "x.md" } },
+        { name: "markdown_upload_file", arguments: { fileName: "x.md", content: "x" } },
+        { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
+      ]) {
+        const r = (await client.callTool(call)) as ToolResult;
+        expect(r.isError, `${call.name} should fail`).toBe(true);
+        const text = firstText(r);
+        expect(text).toMatch(/markdown root folder/i);
+        expect(text).toMatch(/drive root|invalid/i);
+        expect(text).toContain("markdown_select_root_folder");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a manually-corrupted config whose rootFolderId contains a subpath", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "graphdo-md-bad2-"));
+    try {
+      await saveConfig(
+        // saveConfig's schema allows any non-empty string, matching a hand-edit
+        { markdown: { rootFolderId: "folder-1/sub" } } as Parameters<typeof saveConfig>[0],
+        dir,
+        testSignal(),
+      );
+
+      const auth = new MockAuthenticator({ token: "md-bad-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: dir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await client.connect(ct);
+
+      const r = (await client.callTool({
+        name: "markdown_list_files",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toMatch(/path separator/);
+      expect(firstText(r)).toContain("markdown_select_root_folder");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Browser-picker root folder selection
   // -------------------------------------------------------------------------

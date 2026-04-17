@@ -67,6 +67,17 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
               title: "Configure Todo List",
               subtitle: "Select which Microsoft To Do list graphdo should use:",
               options: lists.map((l) => ({ id: l.id, label: l.displayName })),
+              filterPlaceholder: "Filter lists...",
+              refreshOptions: async (s) => {
+                const refreshed = await listTodoLists(client, s);
+                return refreshed.map((l) => ({ id: l.id, label: l.displayName }));
+              },
+              createLink: {
+                url: "https://to-do.office.com/",
+                label: "Create a new list in Microsoft To Do",
+                description:
+                  "Open Microsoft To Do in a new tab, create a new list there, then click Refresh here to see it in the list.",
+              },
               onSelect: async (option, signal) => {
                 await updateConfig(
                   { todoListId: option.id, todoListName: option.label },

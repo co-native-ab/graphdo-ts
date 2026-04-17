@@ -41,7 +41,13 @@ On first use the agent calls `markdown_select_root_folder`, which opens a browse
 
 This mirrors the existing `todo_config` design exactly: the picker runs on a local HTTP server, browser launch is injected via `ServerConfig.openBrowser`, and selection is a human-only action (the agent cannot call a hidden "set root folder" API path). Calling the tool again overwrites the stored folder.
 
-The picker lists a **flat** top-level folder listing rather than supporting recursive navigation. This keeps parity with the todo list picker and avoids building a generalised folder-tree UI.
+The picker lists a **flat** top-level folder listing rather than supporting recursive navigation. This keeps parity with the todo list picker and avoids building a generalised folder-tree UI. For usability at scale, the generic picker (used by both `markdown_select_root_folder` and `todo_config`) provides: a client-side filter/search box; a refresh button that calls `GET /options` on the picker server to re-run the provider; and an optional "Create new …" link that opens the underlying service (OneDrive, Microsoft To Do) in a new tab so users can create a new folder/list without leaving the flow. Refreshing replaces the server's set of valid selections, so a selection can never resolve to a stale option that is no longer offered.
+
+The markdown picker and its subtitle explicitly mention OneDrive — this is the one human-facing surface where naming the storage provider is useful, so the user understands _where_ the folder will live. The agent-facing tool descriptions keep the generic "markdown storage" framing from decision 7.
+
+### 2a. Strict Root-Folder ID Validation on Load
+
+`markdown.rootFolderId` must always be a non-empty opaque drive item ID pointing to a single existing top-level folder. To make this invariant a property of every tool call (not just of the picker's write path), `loadAndValidateMarkdownConfig` re-validates the stored value on every tool invocation and refuses: empty strings, `"/"` or `"\\"` (which could otherwise be misinterpreted as "the drive root"), any value containing `/` or `\\` (which could alias to a subdirectory path), and any value containing whitespace. A configured-but-invalid root folder produces a distinct error from "not configured" (e.g. `"markdown root folder invalid (contains a path separator …)"`) and in both cases the error directs the user back to `markdown_select_root_folder`. This closes the hole where a hand-edited or corrupted `config.json` could silently escalate the tools' reach from one folder to a whole drive or a deep path.
 
 ### 3. Flat, Non-Recursive File Listing
 

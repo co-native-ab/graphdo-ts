@@ -235,3 +235,98 @@ describe("round-trip", () => {
     expect(loaded).toEqual(config);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Strict markdown root folder validation
+// ---------------------------------------------------------------------------
+
+import {
+  hasMarkdownConfig,
+  loadAndValidateMarkdownConfig,
+  markdownRootFolderIdError,
+} from "../src/config.js";
+
+describe("markdownRootFolderIdError", () => {
+  it("accepts a plausible opaque drive item ID", () => {
+    expect(markdownRootFolderIdError("01ABCDEF1234567890ABCDEF")).toBeNull();
+    expect(markdownRootFolderIdError("folder-1")).toBeNull();
+  });
+  it("rejects non-strings", () => {
+    expect(markdownRootFolderIdError(undefined)).toBe("missing");
+    expect(markdownRootFolderIdError(null)).toBe("missing");
+    expect(markdownRootFolderIdError(42)).toBe("missing");
+  });
+  it("rejects the empty string", () => {
+    expect(markdownRootFolderIdError("")).toBe("empty");
+  });
+  it("rejects values equal to / or \\", () => {
+    expect(markdownRootFolderIdError("/")).toContain("drive root");
+    expect(markdownRootFolderIdError("\\")).toContain("drive root");
+  });
+  it("rejects values containing path separators (subpaths)", () => {
+    expect(markdownRootFolderIdError("foo/bar")).toContain("path separator");
+    expect(markdownRootFolderIdError("foo\\bar")).toContain("path separator");
+    expect(markdownRootFolderIdError("/foo")).toContain("path separator");
+  });
+  it("rejects values with whitespace", () => {
+    expect(markdownRootFolderIdError("foo bar")).toContain("whitespace");
+    expect(markdownRootFolderIdError("foo\tbar")).toContain("whitespace");
+  });
+});
+
+describe("hasMarkdownConfig", () => {
+  it("returns false for null, undefined, and empty configs", () => {
+    expect(hasMarkdownConfig(null)).toBe(false);
+    expect(hasMarkdownConfig({})).toBe(false);
+    expect(hasMarkdownConfig({ markdown: {} })).toBe(false);
+  });
+  it("returns false for invalid IDs", () => {
+    expect(hasMarkdownConfig({ markdown: { rootFolderId: "/" } })).toBe(false);
+    expect(hasMarkdownConfig({ markdown: { rootFolderId: "sub/dir" } })).toBe(false);
+    expect(hasMarkdownConfig({ markdown: { rootFolderId: "with space" } })).toBe(false);
+  });
+  it("returns true for valid IDs", () => {
+    expect(hasMarkdownConfig({ markdown: { rootFolderId: "folder-1" } })).toBe(true);
+  });
+});
+
+describe("loadAndValidateMarkdownConfig", () => {
+  it("throws a helpful error when not configured", async () => {
+    const dir = getTempDir();
+    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
+      /not configured.*markdown_select_root_folder/,
+    );
+  });
+
+  it("throws when rootFolderId contains a path separator", async () => {
+    const dir = getTempDir();
+    await saveConfig({ markdown: { rootFolderId: "sub/dir" } } as Config, dir, testSignal());
+    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
+      /invalid.*path separator.*markdown_select_root_folder/,
+    );
+  });
+
+  it("throws when rootFolderId is /", async () => {
+    const dir = getTempDir();
+    // Bypass zod validation by writing the file directly.
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ markdown: { rootFolderId: "/" } }),
+    );
+    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
+      /invalid.*drive root.*markdown_select_root_folder/,
+    );
+  });
+
+  it("returns the config when valid", async () => {
+    const dir = getTempDir();
+    await saveConfig(
+      { markdown: { rootFolderId: "folder-1", rootFolderName: "Notes" } } as Config,
+      dir,
+      testSignal(),
+    );
+    const loaded = await loadAndValidateMarkdownConfig(dir, testSignal());
+    expect(loaded.markdown.rootFolderId).toBe("folder-1");
+  });
+});

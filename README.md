@@ -108,7 +108,7 @@ These scopes reflect the current set of capabilities. Additional scopes may be r
 
 ### Todo List Selection
 
-Before using todo tools, select which Microsoft To Do list to use. Call the `todo_config` tool - it opens a browser window with your available lists. Click the one you want, and the configuration is saved.
+Before using todo tools, select which Microsoft To Do list to use. Call the `todo_config` tool - it opens a browser window with your available lists. The picker provides a filter/search box, a refresh button (useful after you create a new list), and a link to open Microsoft To Do in a new tab so you can create a new list without leaving the flow. Click the one you want, and the configuration is saved.
 
 **Security:** This is a human-only action. The AI agent cannot programmatically change which list it operates on - only you can make this selection through the browser.
 
@@ -122,9 +122,15 @@ The configuration is stored in the OS config directory:
 
 ### Markdown Files
 
-Before using the markdown tools, select which folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders available. Click the one you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection. (Under the hood, the storage is a OneDrive folder accessed via Microsoft Graph — see [ADR-0004](./docs/adr/0004-markdown-file-support.md).)
+Before using the markdown tools, select which folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders available. The picker supports:
 
-**Security:** This is a human-only action. The AI agent cannot programmatically change which folder it operates on — only you can make this selection via the browser. All markdown tools are confined to the children of that one folder.
+- a filter/search box so you can narrow large folder lists quickly,
+- a refresh button that re-fetches the list (useful after you create a new folder),
+- a link to open OneDrive in a new tab so you can create a new top-level folder without leaving the flow.
+
+Click the folder you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection. (Under the hood, the storage is a OneDrive folder accessed via Microsoft Graph — see [ADR-0004](./docs/adr/0004-markdown-file-support.md).)
+
+**Security:** This is a human-only action. The AI agent cannot programmatically change which folder it operates on — only you can make this selection via the browser. All markdown tools are confined to the children of that one folder. If `markdown.rootFolderId` is missing, empty, `/`, or contains any path separator or whitespace (e.g. someone edits `config.json` by hand), every markdown tool refuses to run and directs you back to `markdown_select_root_folder`. The root is always a single top-level folder — never the drive root, never a subdirectory.
 
 Once a root folder is set, four tools operate on `.md` files directly inside it:
 

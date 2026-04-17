@@ -150,16 +150,41 @@ export function hasTodoConfig(
 }
 
 /**
+ * Validate that a value is a well-formed markdown root folder ID.
+ *
+ * The root folder must always be a single existing top-level folder in the
+ * user's OneDrive. A valid drive item ID is an opaque token — it never
+ * contains path separators, whitespace, or the literal `/`. Rejecting
+ * anything else here is a last line of defence against a hand-edited or
+ * corrupted `config.json` silently turning "the configured root" into
+ * "the drive root" or a subdirectory.
+ *
+ * Returns `null` when valid, or a short reason string when invalid.
+ */
+export function markdownRootFolderIdError(rootFolderId: unknown): string | null {
+  if (typeof rootFolderId !== "string") return "missing";
+  if (rootFolderId.length === 0) return "empty";
+  if (rootFolderId === "/" || rootFolderId === "\\") return "set to the drive root";
+  if (rootFolderId.includes("/") || rootFolderId.includes("\\")) {
+    return "contains a path separator (subdirectories are not supported)";
+  }
+  if (/\s/.test(rootFolderId)) return "contains whitespace";
+  return null;
+}
+
+/**
  * Type guard that checks whether a loaded config has a markdown root folder set.
+ *
+ * A root folder ID that is missing, empty, equal to `/`, or contains path
+ * separators is treated as _not configured_ — tools that rely on it will
+ * fail with a user-friendly error directing the user to re-run the picker.
  */
 export function hasMarkdownConfig(
   config: Config | null,
 ): config is Config & { markdown: { rootFolderId: string } & MarkdownConfig } {
-  return (
-    config !== null &&
-    typeof config.markdown?.rootFolderId === "string" &&
-    config.markdown.rootFolderId.length > 0
-  );
+  if (config === null) return false;
+  const rootFolderId = config.markdown?.rootFolderId;
+  return markdownRootFolderIdError(rootFolderId) === null;
 }
 
 /** Loads config from disk and validates it has todo list fields. Throws a user-friendly error if missing or invalid. */
@@ -176,16 +201,24 @@ export async function loadAndValidateConfig(
 
 /**
  * Loads config from disk and validates that a markdown root folder is configured.
- * Throws a user-friendly error if missing.
+ * Throws a user-friendly error if missing or invalid (e.g. empty, `/`, or
+ * containing path separators — in which case the user is directed to re-run
+ * the picker, which always writes a single-folder opaque ID).
  */
 export async function loadAndValidateMarkdownConfig(
   dir: string,
   signal: AbortSignal,
 ): Promise<Config & { markdown: { rootFolderId: string } & MarkdownConfig }> {
   const config = await loadConfig(dir, signal);
-  if (!hasMarkdownConfig(config)) {
+  const rootFolderId = config?.markdown?.rootFolderId;
+  const err = markdownRootFolderIdError(rootFolderId);
+  if (err !== null || !hasMarkdownConfig(config)) {
+    const detail =
+      err === "missing"
+        ? "not configured"
+        : `invalid (${err ?? "not configured"}) — only a single OneDrive folder is allowed, never the drive root or a subdirectory`;
     throw new Error(
-      "markdown root folder not configured - use the markdown_select_root_folder tool to choose one",
+      `markdown root folder ${detail} - use the markdown_select_root_folder tool to choose one`,
     );
   }
   return config;

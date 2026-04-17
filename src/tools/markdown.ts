@@ -228,8 +228,20 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const handle = await startBrowserPicker(
             {
               title: "Select Markdown Root Folder",
-              subtitle: "Choose the folder graphdo should use as the markdown root:",
+              subtitle:
+                "Choose a single top-level folder in your OneDrive. graphdo will only operate on files directly inside this folder — subdirectories are not supported.",
               options: folders.map((f) => ({ id: f.id, label: `/${f.name}` })),
+              filterPlaceholder: "Filter folders...",
+              refreshOptions: async (s) => {
+                const refreshed = await listRootFolders(client, s);
+                return refreshed.map((f) => ({ id: f.id, label: `/${f.name}` }));
+              },
+              createLink: {
+                url: "https://onedrive.live.com/",
+                label: "Create a new folder in OneDrive",
+                description:
+                  "Open OneDrive in a new tab, create a top-level folder there, then click Refresh here to see it in the list.",
+              },
               onSelect: async (option, s) => {
                 await updateConfig(
                   {
