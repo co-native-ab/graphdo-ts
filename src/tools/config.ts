@@ -19,20 +19,21 @@ import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
 
 const CONFIG_DEF: ToolDef = {
-  name: "todo_config",
-  title: "Configure Todo List",
+  name: "todo_select_list",
+  title: "Select Todo List",
   description:
-    "Select which Microsoft To Do list to use. Call this tool directly when " +
-    "a todo list has not been configured yet - do not ask the user which list " +
-    "they want, this tool opens a browser picker where the user makes the " +
-    "selection themselves. This is a human-only action - the AI agent cannot " +
-    "choose the list programmatically.",
+    "Select which Microsoft To Do list graphdo should use. Call this tool " +
+    "directly when a todo list has not been configured yet - do not ask the " +
+    "user which list, this tool opens a browser picker where the user makes " +
+    "the selection themselves. This is a human-only action - the AI agent " +
+    "cannot choose the list programmatically. Calling it again overwrites " +
+    "the stored value.",
   requiredScopes: [GraphScope.TasksReadWrite],
 };
 
 export const CONFIG_TOOL_DEFS: readonly ToolDef[] = [CONFIG_DEF];
 
-/** Register the todo_config tool on the given MCP server. */
+/** Register the todo_select_list tool on the given MCP server. */
 export function registerConfigTools(server: McpServer, config: ServerConfig): ToolEntry[] {
   return [
     defineTool(
@@ -64,7 +65,7 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
 
           const handle = await startBrowserPicker(
             {
-              title: "Configure Todo List",
+              title: "Select Todo List",
               subtitle: "Select which Microsoft To Do list graphdo should use:",
               options: lists.map((l) => ({ id: l.id, label: l.displayName })),
               filterPlaceholder: "Filter lists...",
@@ -101,10 +102,10 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
           }
 
           const instruction = browserOpened
-            ? "A browser window has been opened to configure your todo list. " +
+            ? "A browser window has been opened to select your todo list. " +
               "Waiting for you to make a selection..."
             : "Could not open a browser automatically. " +
-              `Please visit this URL to configure your todo list:\n\n${handle.url}\n\n` +
+              `Please visit this URL to select your todo list:\n\n${handle.url}\n\n` +
               "Waiting for you to make a selection...";
 
           const result = await handle.waitForSelection;
@@ -120,7 +121,7 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
         } catch (err: unknown) {
           if (err instanceof UserCancelledError) {
             return {
-              content: [{ type: "text", text: "Todo list configuration cancelled." }],
+              content: [{ type: "text", text: "Todo list selection cancelled." }],
             };
           }
           const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
@@ -129,7 +130,7 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
               "You can call this tool again if the user would like to retry."
             : "\n\nYou can call this tool again if the user would like to retry.";
 
-          return formatError("todo_config", err, { suffix: retryHint });
+          return formatError("todo_select_list", err, { suffix: retryHint });
         }
       },
     ),

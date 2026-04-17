@@ -6,7 +6,10 @@ import { createTestEnv, testSignal, type TestEnv } from "../helpers.js";
 import { GraphClient } from "../../src/graph/client.js";
 import {
   MAX_DIRECT_CONTENT_BYTES,
+  MarkdownEtagMismatchError,
+  MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
+  createMarkdownFile,
   deleteDriveItem,
   downloadDriveItemVersionContent,
   downloadMarkdownContent,
@@ -17,7 +20,7 @@ import {
   listMarkdownFiles,
   listMarkdownFolderEntries,
   listRootFolders,
-  uploadMarkdownContent,
+  updateMarkdownFile,
 } from "../../src/graph/markdown.js";
 
 function seedOneDrive(env: TestEnv): void {
@@ -141,8 +144,21 @@ describe("markdown graph operations", () => {
     );
   });
 
-  it("uploadMarkdownContent creates a new file under the folder", async () => {
-    const item = await uploadMarkdownContent(
+  it("uploadMarkdownContent removed; createMarkdownFile and updateMarkdownFile are the supported API", async () => {
+    // Sanity check that the new API is wired up (replaces the legacy upload tests).
+    const created = await createMarkdownFile(
+      client,
+      "folder-2",
+      "fresh.md",
+      "# Fresh\n",
+      testSignal(),
+    );
+    expect(created.name).toBe("fresh.md");
+    expect(created.eTag).toMatch(/^"\{.*\},\d+"$/);
+  });
+
+  it("createMarkdownFile creates a brand-new file and returns an eTag", async () => {
+    const item = await createMarkdownFile(
       client,
       "folder-1",
       "new-note.md",
@@ -150,6 +166,7 @@ describe("markdown graph operations", () => {
       testSignal(),
     );
     expect(item.name).toBe("new-note.md");
+    expect(item.eTag).toBeTruthy();
 
     const files = await listMarkdownFiles(client, "folder-1", testSignal());
     expect(files.map((f) => f.name)).toContain("new-note.md");
@@ -158,26 +175,88 @@ describe("markdown graph operations", () => {
     expect(stored).toBe("# Hello\n");
   });
 
-  it("uploadMarkdownContent overwrites an existing file (same ID)", async () => {
-    const first = await uploadMarkdownContent(
-      client,
-      "folder-1",
-      "ideas.md",
-      "updated",
-      testSignal(),
-    );
-    expect(first.id).toBe("file-md-1");
-    const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
-    expect(body).toBe("updated");
+  it("createMarkdownFile rejects payloads over 4 MB without hitting the network", async () => {
+    const oversized = "a".repeat(1024 * 1024).repeat(5); // 5 MiB
+    await expect(
+      createMarkdownFile(client, "folder-1", "big.md", oversized, testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
-  it("uploadMarkdownContent rejects payloads over 4 MB without hitting the network", async () => {
-    // Build a >4 MB string without relying on Buffer.alloc + fill for perf.
-    const chunk = "a".repeat(1024 * 1024); // 1 MiB
-    const oversized = chunk.repeat(5); // 5 MiB
-
+  it("createMarkdownFile throws MarkdownFileAlreadyExistsError when the name is taken", async () => {
     await expect(
-      uploadMarkdownContent(client, "folder-1", "big.md", oversized, testSignal()),
+      createMarkdownFile(client, "folder-1", "ideas.md", "x", testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileAlreadyExistsError);
+
+    // The existing file's content was NOT changed.
+    const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
+    expect(body).toBe("hello world!");
+  });
+
+  it("updateMarkdownFile overwrites with matching etag and bumps the etag", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const beforeETag = before.eTag;
+    expect(beforeETag).toBeTruthy();
+
+    const updated = await updateMarkdownFile(
+      client,
+      "file-md-1",
+      beforeETag!,
+      "updated content",
+      testSignal(),
+    );
+    expect(updated.id).toBe("file-md-1");
+    expect(updated.eTag).toBeTruthy();
+    expect(updated.eTag).not.toBe(beforeETag);
+
+    const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
+    expect(body).toBe("updated content");
+  });
+
+  it("updateMarkdownFile throws MarkdownEtagMismatchError when the supplied etag is stale", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    // First update bumps the etag.
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+
+    // Second update with the now-stale etag must fail with the typed error.
+    await expect(
+      updateMarkdownFile(client, "file-md-1", before.eTag!, "v3", testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownEtagMismatchError);
+
+    // Content was NOT changed by the failed update.
+    const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
+    expect(body).toBe("v2");
+  });
+
+  it("updateMarkdownFile etag-mismatch error carries the current item with the new etag", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+
+    try {
+      await updateMarkdownFile(client, "file-md-1", before.eTag!, "v3", testSignal());
+      throw new Error("expected MarkdownEtagMismatchError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MarkdownEtagMismatchError);
+      const e = err as MarkdownEtagMismatchError;
+      expect(e.suppliedEtag).toBe(before.eTag);
+      expect(e.currentItem.id).toBe("file-md-1");
+      expect(e.currentItem.eTag).toBeTruthy();
+      expect(e.currentItem.eTag).not.toBe(before.eTag);
+    }
+  });
+
+  it("updateMarkdownFile rejects empty itemId and empty etag", async () => {
+    await expect(updateMarkdownFile(client, "", "etag", "x", testSignal())).rejects.toThrow(
+      "itemId must not be empty",
+    );
+    await expect(updateMarkdownFile(client, "file-md-1", "", "x", testSignal())).rejects.toThrow(
+      "etag must not be empty",
+    );
+  });
+
+  it("updateMarkdownFile rejects payloads over 4 MB without hitting the network", async () => {
+    const oversized = "a".repeat(1024 * 1024).repeat(5);
+    await expect(
+      updateMarkdownFile(client, "file-md-1", "any-etag", oversized, testSignal()),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -304,15 +383,15 @@ describe("markdown graph operations: classification & validation", () => {
     expect(result).toBeNull();
   });
 
-  it("uploadMarkdownContent rejects unsafe names before touching the network", async () => {
+  it("createMarkdownFile rejects unsafe names before touching the network", async () => {
     await expect(
-      uploadMarkdownContent(client, "folder-1", "sub/dir.md", "x", testSignal()),
+      createMarkdownFile(client, "folder-1", "sub/dir.md", "x", testSignal()),
     ).rejects.toThrow(/path separator/);
     await expect(
-      uploadMarkdownContent(client, "folder-1", "CON.md", "x", testSignal()),
+      createMarkdownFile(client, "folder-1", "CON.md", "x", testSignal()),
     ).rejects.toThrow(/reserved name/);
     await expect(
-      uploadMarkdownContent(client, "folder-1", "weird@name.md", "x", testSignal()),
+      createMarkdownFile(client, "folder-1", "weird@name.md", "x", testSignal()),
     ).rejects.toThrow(/not portable/);
   });
 });
@@ -375,9 +454,10 @@ describe("markdown version history graph operations", () => {
     expect(versions).toEqual([]);
   });
 
-  it("overwriting a file via uploadMarkdownContent snapshots the prior version", async () => {
-    await uploadMarkdownContent(client, "folder-1", "ideas.md", "v2", testSignal());
-    await uploadMarkdownContent(client, "folder-1", "ideas.md", "v3", testSignal());
+  it("overwriting a file via updateMarkdownFile snapshots the prior version", async () => {
+    const start = await getDriveItem(client, "file-md-1", testSignal());
+    const after1 = await updateMarkdownFile(client, "file-md-1", start.eTag!, "v2", testSignal());
+    await updateMarkdownFile(client, "file-md-1", after1.eTag!, "v3", testSignal());
 
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
     // Two overwrites produce two historical snapshots (the original + the v2).
@@ -402,7 +482,8 @@ describe("markdown version history graph operations", () => {
   });
 
   it("downloadDriveItemVersionContent returns the stored content", async () => {
-    await uploadMarkdownContent(client, "folder-1", "ideas.md", "updated", testSignal());
+    const start = await getDriveItem(client, "file-md-1", testSignal());
+    await updateMarkdownFile(client, "file-md-1", start.eTag!, "updated", testSignal());
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
     expect(versions).toHaveLength(1);
     const [prior] = versions;

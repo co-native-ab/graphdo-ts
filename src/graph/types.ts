@@ -194,6 +194,7 @@ export interface DriveItem {
   id: string;
   name: string;
   size?: number;
+  eTag?: string;
   lastModifiedDateTime?: string;
   file?: { mimeType?: string };
   folder?: { childCount?: number };
@@ -204,6 +205,7 @@ export const DriveItemSchema = z
     id: z.string(),
     name: z.string(),
     size: z.number().optional(),
+    eTag: z.string().optional(),
     lastModifiedDateTime: z.string().optional(),
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),
     folder: z.object({ childCount: z.number().optional() }).loose().optional(),

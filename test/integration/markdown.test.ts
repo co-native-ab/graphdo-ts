@@ -80,7 +80,8 @@ describe("integration: markdown", () => {
       "markdown_select_root_folder",
       "markdown_list_files",
       "markdown_get_file",
-      "markdown_upload_file",
+      "markdown_create_file",
+      "markdown_update_file",
       "markdown_delete_file",
     ]) {
       expect(names).not.toContain(n);
@@ -102,13 +103,17 @@ describe("integration: markdown", () => {
     expect(firstText(result)).toContain("markdown root folder not configured");
   });
 
-  it("markdown_get_file, markdown_upload_file, markdown_delete_file all require configuration", async () => {
+  it("markdown_get_file, markdown_create_file, markdown_update_file, markdown_delete_file all require configuration", async () => {
     const auth = new MockAuthenticator({ token: "md-token" });
     const c = await createTestClient(env, auth);
 
     for (const call of [
       { name: "markdown_get_file", arguments: { fileName: "x.md" } },
-      { name: "markdown_upload_file", arguments: { fileName: "x.md", content: "x" } },
+      { name: "markdown_create_file", arguments: { fileName: "x.md", content: "x" } },
+      {
+        name: "markdown_update_file",
+        arguments: { fileName: "x.md", etag: "any", content: "x" },
+      },
       { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
     ]) {
       const r = (await c.callTool(call)) as ToolResult;
@@ -148,7 +153,11 @@ describe("integration: markdown", () => {
       for (const call of [
         { name: "markdown_list_files", arguments: {} },
         { name: "markdown_get_file", arguments: { fileName: "x.md" } },
-        { name: "markdown_upload_file", arguments: { fileName: "x.md", content: "x" } },
+        { name: "markdown_create_file", arguments: { fileName: "x.md", content: "x" } },
+        {
+          name: "markdown_update_file",
+          arguments: { fileName: "x.md", etag: "any", content: "x" },
+        },
         { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
       ]) {
         const r = (await client.callTool(call)) as ToolResult;
@@ -354,7 +363,7 @@ describe("integration: markdown", () => {
     }
   });
 
-  it("markdown_select_root_folder preserves existing todo_config fields", async () => {
+  it("markdown_select_root_folder preserves existing todo_select_list fields", async () => {
     const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-merge-"));
     try {
       await saveConfig(
@@ -515,48 +524,164 @@ describe("integration: markdown", () => {
       expect(firstText(r)).toContain("not found");
     });
 
-    it("markdown_upload_file creates a new .md file", async () => {
+    it("markdown_create_file creates a new .md file and returns an etag", async () => {
       const r = (await c.callTool({
-        name: "markdown_upload_file",
+        name: "markdown_create_file",
         arguments: { fileName: "brand-new.md", content: "# New\n" },
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
-      expect(firstText(r)).toContain("brand-new.md");
+      const text = firstText(r);
+      expect(text).toContain("brand-new.md");
+      expect(text).toContain("eTag:");
 
       const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
       const created = files.find((f) => f.name === "brand-new.md");
       expect(created).toBeDefined();
       expect(created!.content).toBe("# New\n");
+      expect(created!.eTag).toBeTruthy();
     });
 
-    it("markdown_upload_file overwrites an existing file", async () => {
+    it("markdown_create_file fails with a clear conflict error when the file already exists", async () => {
       const r = (await c.callTool({
-        name: "markdown_upload_file",
-        arguments: { fileName: "hello.md", content: "overwritten" },
+        name: "markdown_create_file",
+        arguments: { fileName: "hello.md", content: "x" },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      const text = firstText(r);
+      expect(text).toContain("already exists");
+      expect(text).toContain("markdown_get_file");
+      expect(text).toContain("markdown_update_file");
+
+      // Existing content is unchanged.
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      const existing = files.find((f) => f.id === "file-md-1");
+      expect(existing?.content).toBe("hello");
+    });
+
+    it("markdown_update_file overwrites an existing file when the etag matches", async () => {
+      // Read first to learn the current etag.
+      const get = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { fileName: "hello.md" },
+      })) as ToolResult;
+      const getText = firstText(get);
+      const etagMatch = /eTag: (".+?")/.exec(getText);
+      expect(etagMatch).not.toBeNull();
+      const etag = etagMatch![1]!;
+
+      const r = (await c.callTool({
+        name: "markdown_update_file",
+        arguments: { fileName: "hello.md", etag, content: "overwritten" },
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
+      const text = firstText(r);
+      expect(text).toContain("Updated");
+      expect(text).toContain("hello.md");
+      expect(text).toContain("eTag:");
 
       const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
       const updated = files.find((f) => f.id === "file-md-1");
       expect(updated?.content).toBe("overwritten");
+      // eTag was bumped — no longer equal to the one we supplied.
+      expect(updated?.eTag).toBeTruthy();
+      expect(updated?.eTag).not.toBe(etag);
       // No duplicate file entry was created
       expect(files.filter((f) => f.name.toLowerCase() === "hello.md")).toHaveLength(1);
     });
 
-    it("markdown_upload_file rejects non-.md file names via schema validation", async () => {
+    it("markdown_update_file fails with reconcile guidance when the etag is stale", async () => {
+      // Snapshot the current etag, then have something else update the file
+      // (we'll do an in-test update that bumps the etag).
+      const get1 = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { fileName: "hello.md" },
+      })) as ToolResult;
+      const oldEtag = /eTag: (".+?")/.exec(firstText(get1))![1]!;
+
+      const goodUpdate = (await c.callTool({
+        name: "markdown_update_file",
+        arguments: { fileName: "hello.md", etag: oldEtag, content: "concurrent change" },
+      })) as ToolResult;
+      expect(goodUpdate.isError).toBeFalsy();
+
+      // Now retry with the OLD etag — should fail with structured reconcile guidance.
+      const stale = (await c.callTool({
+        name: "markdown_update_file",
+        arguments: { fileName: "hello.md", etag: oldEtag, content: "my stale write" },
+      })) as ToolResult;
+      expect(stale.isError).toBe(true);
+      const text = firstText(stale);
+      expect(text).toContain("modified since you last read it");
+      expect(text).toContain("Supplied eTag:");
+      expect(text).toContain("Current eTag:");
+      expect(text).toContain("markdown_get_file");
+      expect(text).toContain("reconcile");
+      expect(text).toContain("ask the user");
+
+      // Content is still the result of the earlier successful update, NOT
+      // the stale write.
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      const file = files.find((f) => f.id === "file-md-1");
+      expect(file?.content).toBe("concurrent change");
+    });
+
+    it("markdown_update_file by itemId works the same way", async () => {
+      const get = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { itemId: "file-md-1" },
+      })) as ToolResult;
+      const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
+
       const r = (await c.callTool({
-        name: "markdown_upload_file",
+        name: "markdown_update_file",
+        arguments: { itemId: "file-md-1", etag, content: "by-id update" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      const file = files.find((f) => f.id === "file-md-1");
+      expect(file?.content).toBe("by-id update");
+    });
+
+    it("markdown_update_file requires itemId or fileName", async () => {
+      const r = (await c.callTool({
+        name: "markdown_update_file",
+        arguments: { etag: "any", content: "x" },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("Either itemId or fileName must be provided");
+    });
+
+    it("markdown_create_file rejects non-.md file names via schema validation", async () => {
+      const r = (await c.callTool({
+        name: "markdown_create_file",
         arguments: { fileName: "readme.txt", content: "x" },
       })) as ToolResult;
       expect(r.isError).toBe(true);
       expect(firstText(r)).toContain(".md");
     });
 
-    it("markdown_upload_file rejects payloads larger than 4 MB", async () => {
+    it("markdown_create_file rejects payloads larger than 4 MB", async () => {
       const oversized = "a".repeat(1024 * 1024).repeat(5); // 5 MiB
       const r = (await c.callTool({
-        name: "markdown_upload_file",
+        name: "markdown_create_file",
         arguments: { fileName: "big.md", content: oversized },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      const text = firstText(r);
+      expect(text).toContain("4");
+      expect(text.toLowerCase()).toContain("limit");
+    });
+
+    it("markdown_update_file rejects payloads larger than 4 MB", async () => {
+      const get = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { fileName: "hello.md" },
+      })) as ToolResult;
+      const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
+      const oversized = "a".repeat(1024 * 1024).repeat(5);
+      const r = (await c.callTool({
+        name: "markdown_update_file",
+        arguments: { fileName: "hello.md", etag, content: oversized },
       })) as ToolResult;
       expect(r.isError).toBe(true);
       const text = firstText(r);
@@ -601,41 +726,50 @@ describe("integration: markdown", () => {
     // -------------------------------------------------------------------
 
     describe("strict file-name enforcement", () => {
-      it("markdown_upload_file rejects names with path separators (schema-level)", async () => {
+      it("markdown_create_file rejects names with path separators (schema-level)", async () => {
         const r = (await c.callTool({
-          name: "markdown_upload_file",
+          name: "markdown_create_file",
           arguments: { fileName: "sub/note.md", content: "x" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("path separator");
       });
 
-      it("markdown_upload_file rejects Windows reserved names", async () => {
+      it("markdown_create_file rejects Windows reserved names", async () => {
         const r = (await c.callTool({
-          name: "markdown_upload_file",
+          name: "markdown_create_file",
           arguments: { fileName: "CON.md", content: "x" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("reserved");
       });
 
-      it("markdown_upload_file rejects non-portable characters", async () => {
+      it("markdown_create_file rejects non-portable characters", async () => {
         const r = (await c.callTool({
-          name: "markdown_upload_file",
+          name: "markdown_create_file",
           arguments: { fileName: "weird@name.md", content: "x" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("not portable");
       });
 
-      it("markdown_upload_file rejects names over 255 chars", async () => {
+      it("markdown_create_file rejects names over 255 chars", async () => {
         const longName = `${"a".repeat(254)}.md`; // 256 chars total
         const r = (await c.callTool({
-          name: "markdown_upload_file",
+          name: "markdown_create_file",
           arguments: { fileName: longName, content: "x" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("maximum length");
+      });
+
+      it("markdown_update_file rejects unsafe names at the schema layer too", async () => {
+        const r = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "sub/note.md", etag: "any", content: "x" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
       });
 
       it("markdown_get_file rejects unsafe names with a clear error", async () => {
@@ -758,15 +892,21 @@ describe("integration: markdown", () => {
         expect(text.toLowerCase()).toContain("no prior versions");
       });
 
-      it("markdown_list_file_versions lists snapshots created by overwriting uploads", async () => {
-        // Overwrite hello.md twice so the mock produces two historical versions.
+      it("markdown_list_file_versions lists snapshots created by overwriting updates", async () => {
+        // Two updates create two historical snapshots.
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const etag1 = /eTag: (".+?")/.exec(firstText(get1))![1]!;
+        const upd1 = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: etag1, content: "v2" },
+        })) as ToolResult;
+        const etag2 = /eTag: (".+?")/.exec(firstText(upd1))![1]!;
         await c.callTool({
-          name: "markdown_upload_file",
-          arguments: { fileName: "hello.md", content: "v2" },
-        });
-        await c.callTool({
-          name: "markdown_upload_file",
-          arguments: { fileName: "hello.md", content: "v3" },
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: etag2, content: "v3" },
         });
 
         const r = (await c.callTool({
@@ -781,9 +921,14 @@ describe("integration: markdown", () => {
       });
 
       it("markdown_get_file_version returns the historical content", async () => {
+        const get = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
         await c.callTool({
-          name: "markdown_upload_file",
-          arguments: { fileName: "hello.md", content: "updated" },
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag, content: "updated" },
         });
 
         const list = (await c.callTool({

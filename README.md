@@ -8,32 +8,33 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 ## Features
 
-graphdo-ts currently exposes **20 MCP tools**:
+graphdo-ts currently exposes **23 MCP tools**:
 
-| Tool                          | Description                                                                                              |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `login`                       | Authenticate via browser login                                                                           |
-| `logout`                      | Clear cached tokens and sign out                                                                         |
-| `auth_status`                 | Check authentication status, current user, and configuration                                             |
-| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                                           |
-| `todo_config`                 | Configure which Microsoft To Do list to use (opens browser for human-only selection)                     |
-| `todo_list`                   | List todos with pagination, filtering, and sorting                                                       |
-| `todo_show`                   | Show a single todo with full details including checklist steps                                           |
-| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence                           |
-| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)                        |
-| `todo_complete`               | Mark a todo as completed                                                                                 |
-| `todo_delete`                 | Delete a todo                                                                                            |
-| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                                       |
-| `todo_add_step`               | Add a new checklist step to a todo                                                                       |
-| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                                         |
-| `todo_delete_step`            | Delete a checklist step from a todo                                                                      |
-| `markdown_select_root_folder` | Configure which folder to use for markdown files in the signed-in user's OneDrive (human-only selection) |
-| `markdown_list_files`         | List `.md` files in the configured folder; subdirectories and bad-name files appear as UNSUPPORTED       |
-| `markdown_get_file`           | Read a markdown file's current content (by file ID or strict-validated name, max 4 MB)                   |
-| `markdown_upload_file`        | Create or overwrite a markdown file (strict-validated name, max 4 MB)                                    |
-| `markdown_delete_file`        | Delete a markdown file from the configured folder                                                        |
-| `markdown_list_file_versions` | List historical versions that OneDrive retained for a markdown file (newest first)                       |
-| `markdown_get_file_version`   | Read the UTF-8 content of a specific prior version of a markdown file                                    |
+| Tool                          | Description                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `login`                       | Authenticate via browser login                                                                        |
+| `logout`                      | Clear cached tokens and sign out                                                                      |
+| `auth_status`                 | Check authentication status, current user, and configuration                                          |
+| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                                        |
+| `todo_select_list`            | Select which Microsoft To Do list to use (opens browser for human-only selection)                     |
+| `todo_list`                   | List todos with pagination, filtering, and sorting                                                    |
+| `todo_show`                   | Show a single todo with full details including checklist steps                                        |
+| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence                        |
+| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)                     |
+| `todo_complete`               | Mark a todo as completed                                                                              |
+| `todo_delete`                 | Delete a todo                                                                                         |
+| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                                    |
+| `todo_add_step`               | Add a new checklist step to a todo                                                                    |
+| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                                      |
+| `todo_delete_step`            | Delete a checklist step from a todo                                                                   |
+| `markdown_select_root_folder` | Select which folder to use for markdown files in the signed-in user's OneDrive (human-only selection) |
+| `markdown_list_files`         | List `.md` files in the configured folder; subdirectories and bad-name files appear as UNSUPPORTED    |
+| `markdown_get_file`           | Read a markdown file's current content and eTag (by file ID or strict-validated name, max 4 MB)       |
+| `markdown_create_file`        | Create a new markdown file — fails with a clear error if a file with that name already exists         |
+| `markdown_update_file`        | Overwrite an existing markdown file using `If-Match` eTag for safe optimistic concurrency             |
+| `markdown_delete_file`        | Delete a markdown file from the configured folder                                                     |
+| `markdown_list_file_versions` | List historical versions that OneDrive retained for a markdown file (newest first)                    |
+| `markdown_get_file_version`   | Read the UTF-8 content of a specific prior version of a markdown file                                 |
 
 ---
 
@@ -110,7 +111,7 @@ These scopes reflect the current set of capabilities. Additional scopes may be r
 
 ### Todo List Selection
 
-Before using todo tools, select which Microsoft To Do list to use. Call the `todo_config` tool - it opens a browser window with your available lists. The picker provides a filter/search box, a refresh button (useful after you create a new list), and a link to open Microsoft To Do in a new tab so you can create a new list without leaving the flow. Click the one you want, and the configuration is saved.
+Before using todo tools, select which Microsoft To Do list to use. Call the `todo_select_list` tool - it opens a browser window with your available lists. The picker provides a filter/search box, a refresh button (useful after you create a new list), and a link to open Microsoft To Do in a new tab so you can create a new list without leaving the flow. Click the one you want, and the configuration is saved.
 
 **Security:** This is a human-only action. The AI agent cannot programmatically change which list it operates on - only you can make this selection through the browser.
 
@@ -137,11 +138,12 @@ Click the folder you want, and the configuration is saved to `markdown.rootFolde
 Once a root folder is set, the markdown tools operate on `.md` files directly inside it:
 
 - `markdown_list_files` — list the supported `.md` files (name, file ID, last modified timestamp, size in bytes). Subdirectories and `.md` files whose names violate the strict naming rules are reported alongside as `UNSUPPORTED`, so the agent knows they exist but cannot operate on them.
-- `markdown_get_file` — read a file by file ID **or** by file name (strict naming rules apply) and return its UTF-8 content.
-- `markdown_upload_file` — create or overwrite a file by name using a direct write of the file content.
+- `markdown_get_file` — read a file by file ID **or** by file name (strict naming rules apply) and return its UTF-8 content along with the current `eTag` (used by `markdown_update_file` for safe concurrency).
+- `markdown_create_file` — create a new file by name. Fails with a clear error if a file with the same name already exists in the folder. Uses OneDrive's `@microsoft.graph.conflictBehavior=fail` so the distinction from update is server-enforced, not just a client-side check.
+- `markdown_update_file` — overwrite an existing file. Requires the `eTag` previously returned by `markdown_get_file` (or `markdown_create_file` / `markdown_update_file`). The update is sent with an `If-Match` header and succeeds only when the supplied eTag matches the file's current eTag. If the file has changed since you last read it, the call fails with structured reconcile guidance: re-read the file to get the latest content and new eTag, decide whether your intended update still applies, reconcile your changes against any new content, and call update again with the new eTag — or ask the user how to proceed when the meaning of your update no longer fits.
 - `markdown_delete_file` — permanently delete a file by file ID or name.
 - `markdown_list_file_versions` — list the historical versions OneDrive retained for a file (newest first). OneDrive automatically snapshots prior content whenever a file is overwritten; this tool surfaces that history with each version's opaque ID, timestamp, size, and — when available — the name of the user who last modified it.
-- `markdown_get_file_version` — read the UTF-8 content of a specific prior version returned by `markdown_list_file_versions`. This is read-only; it does _not_ restore the file. To promote an older version back to current, pass its content to `markdown_upload_file`.
+- `markdown_get_file_version` — read the UTF-8 content of a specific prior version returned by `markdown_list_file_versions`. This is read-only; it does _not_ restore the file. To promote an older version back to current, pass its content to `markdown_update_file`.
 
 #### Strict file-name rules
 
@@ -158,9 +160,9 @@ A file name is accepted **only when all of the following hold:**
 - Has no leading or trailing whitespace, and no trailing dot before `.md`.
 - Is no longer than 255 characters.
 
-Requests with invalid names are rejected with a clear error that states which rule was violated. This enforcement applies to `markdown_upload_file`, `markdown_get_file`, and `markdown_delete_file` — including when these tools are called by drive item ID and the stored name is unsupported.
+Requests with invalid names are rejected with a clear error that states which rule was violated. This enforcement applies to every markdown tool that accepts a file name (`markdown_create_file`, `markdown_update_file`, `markdown_get_file`, `markdown_delete_file`, `markdown_list_file_versions`, `markdown_get_file_version`) — both at the MCP schema layer (before the handler runs) and again after resolving drive item IDs, so a file whose stored remote name is unsupported also cannot be operated on.
 
-**4 MB limit.** `markdown_get_file` and `markdown_upload_file` enforce a hard 4 MB (4,194,304 bytes) limit per request. This is the Microsoft Graph limit for direct content transfers. graphdo-ts deliberately does not support resumable upload sessions — markdown notes are expected to be well under this limit, and avoiding the complexity of session-based uploads keeps the tool surface small. Files over 4 MB return a clear error.
+**4 MB limit.** `markdown_get_file`, `markdown_create_file`, and `markdown_update_file` enforce a hard 4 MB (4,194,304 bytes) limit per request. This is the Microsoft Graph limit for direct content transfers. graphdo-ts deliberately does not support resumable upload sessions — markdown notes are expected to be well under this limit, and avoiding the complexity of session-based uploads keeps the tool surface small. Files over 4 MB return a clear error.
 
 See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MB limit, the folder picker approach, the Graph API constraints, and the strict file-name rules.
 
@@ -219,7 +221,7 @@ As new Graph surfaces are added, the same principle applies: minimize blast radi
 Your organization's IT administrator needs to approve graphdo-ts. See [Organization Setup](#organization-setup) for what to tell them.
 
 **"No todo lists found"**
-Create a list in Microsoft To Do first. Open [to-do.office.com/tasks/](https://to-do.office.com/tasks/), create a list, then call `todo_config` again.
+Create a list in Microsoft To Do first. Open [to-do.office.com/tasks/](https://to-do.office.com/tasks/), create a list, then call `todo_select_list` again.
 
 **"The browser didn't open"**
 The `login` tool will return the login URL in its error message. Copy and paste the URL into your browser to complete authentication.

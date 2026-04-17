@@ -48,7 +48,7 @@ Each capability is scoped as narrowly as possible beyond what the permission mod
 Operations that change the agent's access scope require human interaction via the browser, ensuring the AI agent cannot perform them programmatically:
 
 - **Login**: the `login` tool opens a browser for interactive MSAL authentication. The agent cannot authenticate without a human completing the sign-in.
-- **List selection**: the `todo_config` tool starts a local HTTP server and opens a browser picker where the user clicks the list to use. The agent cannot programmatically change which list it operates on — the picker is served as an HTML page that requires a human click.
+- **List selection**: the `todo_select_list` tool starts a local HTTP server and opens a browser picker where the user clicks the list to use. The agent cannot programmatically change which list it operates on — the picker is served as an HTML page that requires a human click.
 
 ### 4. Minimal Permissions
 
@@ -101,7 +101,7 @@ All permissions are delegated (user-level). The Azure AD app registration does n
 ## Implementation Notes
 
 - **IMP-001**: The `mail_send` tool enforces the email-to-self constraint by fetching the user profile (`getMe`) and using `user.mail` as the recipient — the tool's input schema does not accept a recipient parameter.
-- **IMP-002**: The `todo_config` tool uses the generic browser picker (`src/picker.ts`) which starts a local HTTP server on `127.0.0.1` with a random port, serves clickable options, and waits for a human selection (2-minute timeout). The selected list ID is persisted to `config.json` in the OS config directory.
+- **IMP-002**: The `todo_select_list` tool uses the generic browser picker (`src/picker.ts`) which starts a local HTTP server on `127.0.0.1` with a random port, serves clickable options, and waits for a human selection (2-minute timeout). The selected list ID is persisted to `config.json` in the OS config directory.
 - **IMP-003**: When adding new Graph surfaces (e.g., Calendar, OneDrive), developers must document which new scopes are required, what constraints limit blast radius, and whether any operations require human-in-the-loop confirmation. This ADR should be referenced in the PR.
 - **IMP-004**: All tool handlers follow the pattern of catching errors and returning `{ isError: true }` rather than throwing — this prevents agent confusion from unhandled exceptions and ensures error messages guide the agent toward correct usage (e.g., "Please use the login tool first").
 - **IMP-005**: Success criteria for this principle: no tool should allow the agent to affect resources outside the explicitly configured scope (the user's own email address and the selected todo list) without human interaction.

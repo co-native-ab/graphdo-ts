@@ -189,7 +189,7 @@ describe("buildInstructions", () => {
     const text = buildInstructions(defs);
     expect(text).toContain("IMPORTANT BEHAVIOR RULES:");
     expect(text).toContain("authentication error");
-    expect(text).toContain("todo_config");
+    expect(text).toContain("todo_select_list");
   });
 
   it("includes workflow guidance", () => {

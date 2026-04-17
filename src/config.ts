@@ -194,7 +194,7 @@ export async function loadAndValidateConfig(
 ): Promise<Config & { todoListId: string; todoListName: string }> {
   const config = await loadConfig(dir, signal);
   if (!hasTodoConfig(config)) {
-    throw new Error("todo list not configured - use the todo_config tool to select one");
+    throw new Error("todo list not configured - use the todo_select_list tool to select one");
   }
   return config;
 }

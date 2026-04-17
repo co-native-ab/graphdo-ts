@@ -44,8 +44,8 @@
       "description": "Check authentication status, current user, configured todo list, and server version. Use this as a first step to diagnose issues or understand current state."
     },
     {
-      "name": "todo_config",
-      "description": "Select which Microsoft To Do list to use. Call this directly when no todo list is configured - do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
+      "name": "todo_select_list",
+      "description": "Select which Microsoft To Do list graphdo should use. Call this directly when no todo list is configured - do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
     },
     {
       "name": "todo_list",
@@ -101,11 +101,15 @@
     },
     {
       "name": "markdown_get_file",
-      "description": "Read the current UTF-8 content of a markdown file in the configured root folder. Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
+      "description": "Read the current UTF-8 content of a markdown file in the configured root folder, along with its eTag (which markdown_update_file requires for safe optimistic concurrency). Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
     },
     {
-      "name": "markdown_upload_file",
-      "description": "Create or overwrite a markdown file in the configured root folder. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected. When an existing file is overwritten, OneDrive retains the previous content as a version that markdown_list_file_versions can surface."
+      "name": "markdown_create_file",
+      "description": "Create a new markdown file in the configured root folder. Fails with a clear error when a file with the same name already exists - in that case, call markdown_get_file to fetch the existing content and eTag, then call markdown_update_file. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected."
+    },
+    {
+      "name": "markdown_update_file",
+      "description": "Overwrite an existing markdown file using If-Match eTag for safe optimistic concurrency. Requires the eTag previously returned by markdown_get_file (or markdown_create_file / markdown_update_file). If the file has changed since you last read it the call fails with the current eTag and reconcile guidance: re-fetch the latest content and eTag, decide whether your update still applies, reconcile your changes, and retry - or ask the user how to proceed. Accepts the file by ID (preferred) or name. Payloads larger than 4 MB are rejected."
     },
     {
       "name": "markdown_delete_file",
@@ -117,7 +121,7 @@
     },
     {
       "name": "markdown_get_file_version",
-      "description": "Read the UTF-8 content of a specific historical version of a markdown file. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_upload_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded."
+      "description": "Read the UTF-8 content of a specific historical version of a markdown file. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_update_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded."
     }
   ],
   "keywords": [

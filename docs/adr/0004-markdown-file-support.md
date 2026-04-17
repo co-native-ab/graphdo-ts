@@ -39,9 +39,9 @@ The Graph API has no native way to pre-restrict a delegated token to a single fo
 
 On first use the agent calls `markdown_select_root_folder`, which opens a browser picker listing the top-level folders in the user's OneDrive. The user clicks one, and the chosen drive item ID is stored in `markdown.rootFolderId` in `config.json`. All subsequent file tools operate **only** on children of that folder.
 
-This mirrors the existing `todo_config` design exactly: the picker runs on a local HTTP server, browser launch is injected via `ServerConfig.openBrowser`, and selection is a human-only action (the agent cannot call a hidden "set root folder" API path). Calling the tool again overwrites the stored folder.
+This mirrors the existing `todo_select_list` design exactly: the picker runs on a local HTTP server, browser launch is injected via `ServerConfig.openBrowser`, and selection is a human-only action (the agent cannot call a hidden "set root folder" API path). Calling the tool again overwrites the stored folder.
 
-The picker lists a **flat** top-level folder listing rather than supporting recursive navigation. This keeps parity with the todo list picker and avoids building a generalised folder-tree UI. For usability at scale, the generic picker (used by both `markdown_select_root_folder` and `todo_config`) provides: a client-side filter/search box; a refresh button that calls `GET /options` on the picker server to re-run the provider; and an optional "Create new …" link that opens the underlying service (OneDrive, Microsoft To Do) in a new tab so users can create a new folder/list without leaving the flow. Refreshing replaces the server's set of valid selections, so a selection can never resolve to a stale option that is no longer offered.
+The picker lists a **flat** top-level folder listing rather than supporting recursive navigation. This keeps parity with the todo list picker and avoids building a generalised folder-tree UI. For usability at scale, the generic picker (used by both `markdown_select_root_folder` and `todo_select_list`) provides: a client-side filter/search box; a refresh button that calls `GET /options` on the picker server to re-run the provider; and an optional "Create new …" link that opens the underlying service (OneDrive, Microsoft To Do) in a new tab so users can create a new folder/list without leaving the flow. Refreshing replaces the server's set of valid selections, so a selection can never resolve to a stale option that is no longer offered.
 
 The markdown picker and its subtitle explicitly mention OneDrive — this is the one human-facing surface where naming the storage provider is useful, so the user understands _where_ the folder will live. The agent-facing tool descriptions keep the generic "markdown storage" framing from decision 7.
 
@@ -61,11 +61,11 @@ Filtering is primarily client-side: Graph's `$filter` on drive items does not re
 
 ### 4. Hard 4 MB Limit on Content Transfers
 
-Both `markdown_get_file` and `markdown_upload_file` use direct `GET` / `PUT` against `/content`. The Microsoft Graph documented limit for a single request is 4 MiB = 4,194,304 bytes; larger payloads require an upload session. We deliberately do **not** implement upload sessions.
+`markdown_get_file`, `markdown_create_file`, and `markdown_update_file` use direct `GET` / `PUT` against `/content`. The Microsoft Graph documented limit for a single request is 4 MiB = 4,194,304 bytes; larger payloads require an upload session. We deliberately do **not** implement upload sessions.
 
 Concretely:
 
-- `markdown_upload_file` checks `Buffer.byteLength(content, "utf-8")` **before** making any network call and returns a structured `MarkdownFileTooLargeError` if over 4 MiB.
+- `markdown_create_file` and `markdown_update_file` check `Buffer.byteLength(content, "utf-8")` **before** making any network call and return a structured `MarkdownFileTooLargeError` if over 4 MiB.
 - `markdown_get_file` reads the target's `size` via a metadata request first and refuses to download when it exceeds 4 MiB; it also re-checks the received body length as a defence-in-depth measure.
 
 Rationale for the hard limit:
@@ -76,7 +76,7 @@ Rationale for the hard limit:
 
 ### 5. ID-or-Name Addressing
 
-`markdown_get_file` and `markdown_delete_file` accept either a `itemId` (canonical drive item ID) or a `fileName` (case-insensitive match against files in the configured root folder, subject to the naming rules in decision 7). Name-only calls perform a listing and match locally — this keeps the API ergonomic for agents that rarely remember opaque IDs and avoids fragile URL encoding of names with special characters. `markdown_upload_file` is keyed by `fileName` only, since Graph's path-style `PUT` (`/items/{parent}:/filename:/content`) is the natural create-or-overwrite endpoint.
+`markdown_get_file`, `markdown_update_file`, and `markdown_delete_file` accept either a `itemId` (canonical drive item ID) or a `fileName` (case-insensitive match against files in the configured root folder, subject to the naming rules in decision 7). Name-only calls perform a listing and match locally — this keeps the API ergonomic for agents that rarely remember opaque IDs and avoids fragile URL encoding of names with special characters. `markdown_create_file` is keyed by `fileName` only, since Graph's path-style `PUT` (`/items/{parent}:/filename:/content?@microsoft.graph.conflictBehavior=fail`) is the natural create-only endpoint.
 
 ### 6. Raw-Body Request Path in `GraphClient`
 
@@ -88,9 +88,9 @@ All tools that accept a markdown file name enforce a conservative allow-list: na
 
 Enforcement points:
 
-- **`markdown_upload_file`**: validated at the zod-schema layer so the MCP SDK rejects bad names before the handler runs. The agent receives a structured `Invalid arguments` error whose message reproduces the specific violated rule.
-- **`markdown_get_file` / `markdown_delete_file` by name**: validated explicitly in the handler so the agent sees the same error message style as upload.
-- **`markdown_get_file` / `markdown_delete_file` by itemId**: the resolved drive item is re-validated after fetch. Subdirectories (drive items with a `folder` facet) are rejected with a dedicated "subdirectory is not supported" message; files whose _stored_ name violates the rules — which can happen if a file was created or renamed outside graphdo — are rejected with the specific rule that was violated. This closes the loophole where a valid-looking itemId could bypass the name validation that guards the by-name path.
+- **`markdown_create_file` / `markdown_update_file`**: validated at the zod-schema layer so the MCP SDK rejects bad names before the handler runs. The agent receives a structured `Invalid arguments` error whose message reproduces the specific violated rule.
+- **`markdown_get_file` / `markdown_delete_file` / `markdown_update_file` / `markdown_list_file_versions` / `markdown_get_file_version` by name**: validated at the zod-schema layer via the shared `idOrNameShape`, so the MCP SDK rejects bad names before the handler runs — and the handler additionally re-validates the resolved item as defence in depth.
+- **`markdown_get_file` / `markdown_update_file` / `markdown_delete_file` by itemId**: the resolved drive item is re-validated after fetch. Subdirectories (drive items with a `folder` facet) are rejected with a dedicated "subdirectory is not supported" message; files whose _stored_ name violates the rules — which can happen if a file was created or renamed outside graphdo — are rejected with the specific rule that was violated. This closes the loophole where a valid-looking itemId could bypass the name validation that guards the by-name path.
 - **`findMarkdownFileByName`** (internal): re-validates its input argument and only searches among names that pass validation, so a name-based lookup can never silently resolve to a file whose stored name is unsupported.
 
 Rationale for this specific allow-list:
@@ -164,10 +164,10 @@ Listings take a different tack: rather than hide things that fail validation, `m
 
 - **IMP-001**: New scope `Files.ReadWrite` is added to `GraphScope` and `AVAILABLE_SCOPES` with `required: false`, matching the design of `Mail.Send` and `Tasks.ReadWrite`. Tool registration uses the existing `requiredScopes` mechanism so markdown tools are hidden until the user consents to the scope.
 - **IMP-002**: Config is extended with an optional `markdown: { rootFolderId, rootFolderName, rootFolderPath }` object. A new `updateConfig` helper performs load-merge-save so writing the markdown config does not clobber the todo config and vice versa. `hasMarkdownConfig` and `loadAndValidateMarkdownConfig` mirror the existing todo helpers.
-- **IMP-003**: Graph operations live in `src/graph/markdown.ts` and cover folder listing, file listing with `.md` filter, metadata fetch, content download, content upload, and delete. The 4 MiB constant is exported as `MAX_DIRECT_CONTENT_BYTES`. A dedicated `MarkdownFileTooLargeError` class surfaces size-limit violations without being conflated with network or authorization errors.
-- **IMP-004**: `GraphClient` gains a `requestRaw` method that sends a raw string / `Uint8Array` body with a caller-specified `Content-Type`. The retry / auth / timeout loop is extracted into a private `performRequest` helper reused by `request` and `requestRaw`.
-- **IMP-005**: Five MCP tools live in `src/tools/markdown.ts`: `markdown_select_root_folder`, `markdown_list_files`, `markdown_get_file`, `markdown_upload_file`, `markdown_delete_file`. The picker tool reuses `startBrowserPicker` from `src/picker.ts`. All tools return a friendly "not configured — use `markdown_select_root_folder`" error when `markdown.rootFolderId` is missing.
-- **IMP-006**: Success criteria: (a) all five tools are registered and scope-gated, (b) size-limit enforcement is exercised by unit tests on both the download and upload paths, (c) the picker persists the selection without overwriting unrelated config, (d) the mock Graph server models the `/me/drive/...` endpoints sufficiently for full end-to-end integration tests against an in-process MCP client, and (e) the strict file-name rules are enforced at every entry point and tested for all rejection classes (path separators, non-portable characters, control chars, reserved device names, leading-dot/hyphen/underscore, trailing dot/whitespace, length limit, subdirectory entries, and itemId-based access to files with unsafe stored names).
+- **IMP-003**: Graph operations live in `src/graph/markdown.ts` and cover folder listing, file listing with `.md` filter, metadata fetch, content download, conditional create and update, version history, and delete. The 4 MiB constant is exported as `MAX_DIRECT_CONTENT_BYTES`. Dedicated `MarkdownFileTooLargeError`, `MarkdownFileAlreadyExistsError`, and `MarkdownEtagMismatchError` classes surface size-limit, create-conflict, and update-etag-mismatch cases without being conflated with network or authorization errors.
+- **IMP-004**: `GraphClient` gains a `requestRaw` method that sends a raw string / `Uint8Array` body with a caller-specified `Content-Type` and optional extra headers (used for `If-Match`). The retry / auth / timeout loop is extracted into a private `performRequest` helper reused by `request` and `requestRaw`.
+- **IMP-005**: Eight MCP tools live in `src/tools/markdown.ts`: `markdown_select_root_folder`, `markdown_list_files`, `markdown_get_file`, `markdown_create_file`, `markdown_update_file`, `markdown_delete_file`, `markdown_list_file_versions`, `markdown_get_file_version`. The picker tool reuses `startBrowserPicker` from `src/picker.ts`. All tools return a friendly "not configured — use `markdown_select_root_folder`" error when `markdown.rootFolderId` is missing.
+- **IMP-006**: Success criteria: (a) all tools are registered and scope-gated, (b) size-limit enforcement is exercised by unit tests on the download, create, and update paths, (c) the picker persists the selection without overwriting unrelated config, (d) the mock Graph server models the `/me/drive/...` endpoints sufficiently for full end-to-end integration tests against an in-process MCP client (including `?@microsoft.graph.conflictBehavior=fail` 409 conflicts on create and `If-Match` 412 etag mismatches on update), and (e) the strict file-name rules are enforced at every entry point and tested for all rejection classes.
 
 ## References
 

@@ -1,7 +1,7 @@
 // MCP tools for OneDrive-backed markdown file management.
 //
 // All file operations are scoped to a root folder that is selected once by the
-// user via a browser picker (human-only action, analogous to `todo_config`).
+// user via a browser picker (human-only action, analogous to `todo_select_list`).
 // The selection is persisted to `markdown.rootFolderId` in the shared config.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -10,6 +10,7 @@ import { z } from "zod";
 import { loadAndValidateMarkdownConfig, updateConfig } from "../config.js";
 import { UserCancelledError } from "../errors.js";
 import {
+  createMarkdownFile,
   deleteDriveItem,
   downloadDriveItemVersionContent,
   downloadMarkdownContent,
@@ -19,9 +20,11 @@ import {
   listDriveItemVersions,
   listMarkdownFolderEntries,
   listRootFolders,
+  MarkdownEtagMismatchError,
+  MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
   MARKDOWN_FILE_NAME_RULES,
-  uploadMarkdownContent,
+  updateMarkdownFile,
   validateMarkdownFileName,
 } from "../graph/markdown.js";
 import type { DriveItem } from "../graph/types.js";
@@ -77,25 +80,45 @@ const GET_FILE_DEF: ToolDef = {
     "file name. File names must follow the strict naming rules and are " +
     "rejected otherwise - paths, subdirectories, and characters that are " +
     "not portable across Linux, macOS, and Windows are not allowed. Returns " +
-    "the current UTF-8 content of the file. Files larger than 4 MB cannot " +
-    "be downloaded and will return an error. To read a previous version, " +
-    "use markdown_get_file_version. " +
+    "the current UTF-8 content of the file along with its etag, which " +
+    "markdown_update_file requires for safe optimistic concurrency. Files " +
+    "larger than 4 MB cannot be downloaded and will return an error. To " +
+    "read a previous version, use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
-const UPLOAD_FILE_DEF: ToolDef = {
-  name: "markdown_upload_file",
-  title: "Upload Markdown File",
+const CREATE_FILE_DEF: ToolDef = {
+  name: "markdown_create_file",
+  title: "Create Markdown File",
   description:
-    "Create or overwrite a markdown file in the configured root folder of " +
-    "the signed-in user's OneDrive. The file name must follow the strict " +
+    "Create a new markdown file in the configured root folder. Fails with a " +
+    "clear error when a file with the same name already exists - in that " +
+    "case, call markdown_get_file to fetch the existing content and etag, " +
+    "then call markdown_update_file. The file name must follow the strict " +
     "naming rules - paths, subdirectories, and characters that are not " +
-    "portable across Linux, macOS, and Windows are rejected with a clear " +
-    "error. Accepts the UTF-8 markdown content. Payloads larger than 4 MB " +
-    "are rejected - upload sessions are not supported. When an existing " +
-    "file is overwritten, OneDrive retains the previous content as a " +
-    "version that markdown_list_file_versions can surface. " +
+    "portable across Linux, macOS, and Windows are rejected. Payloads " +
+    "larger than 4 MB are rejected. " +
+    MARKDOWN_FILE_NAME_RULES,
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
+const UPDATE_FILE_DEF: ToolDef = {
+  name: "markdown_update_file",
+  title: "Update Markdown File",
+  description:
+    "Overwrite the content of an existing markdown file in the configured " +
+    "root folder. Requires the etag previously returned by markdown_get_file " +
+    "(or markdown_create_file / markdown_update_file). The update succeeds " +
+    "only when the supplied etag matches the file's current etag - if the " +
+    "file has changed since you read it, the call fails with the current " +
+    "etag and modification time. When that happens you must call " +
+    "markdown_get_file again to retrieve the latest content + etag, decide " +
+    "whether your intended update still applies, reconcile your changes " +
+    "against any new content, and call markdown_update_file again with the " +
+    "new etag - or ask the user how to proceed if the meaning of your " +
+    "update no longer fits. Accepts the file by id (preferred) or by name. " +
+    "Payloads larger than 4 MB are rejected. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -136,7 +159,7 @@ const GET_VERSION_DEF: ToolDef = {
     "file in the signed-in user's OneDrive. Requires the file (by ID or " +
     "name) and the version ID previously returned by " +
     "markdown_list_file_versions. This does not restore or modify the file " +
-    "- it only reads the prior content. Use markdown_upload_file to " +
+    "- it only reads the prior content. Use markdown_update_file to " +
     "re-upload that content if you want to make it current. Files larger " +
     "than 4 MB cannot be downloaded. " +
     MARKDOWN_FILE_NAME_RULES,
@@ -147,7 +170,8 @@ export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
   SELECT_ROOT_DEF,
   LIST_FILES_DEF,
   GET_FILE_DEF,
-  UPLOAD_FILE_DEF,
+  CREATE_FILE_DEF,
+  UPDATE_FILE_DEF,
   DELETE_FILE_DEF,
   LIST_VERSIONS_DEF,
   GET_VERSION_DEF,
@@ -172,15 +196,19 @@ const markdownNameSchema = z.string().superRefine((value, ctx) => {
 // Either an ID or a name must be provided. The input object shape is the
 // full union — validation of "exactly one" is done in the handler because MCP
 // tool inputs must be plain object schemas without discriminated unions.
+//
+// The fileName field uses the strict markdown name schema so the MCP SDK
+// rejects unsafe or non-portable names (path separators, Windows reserved
+// names, etc.) at input-validation time, before any handler code runs. The
+// handler still re-validates the resolved item's stored name as defence in
+// depth.
 const idOrNameShape = {
   itemId: z
     .string()
     .min(1)
     .optional()
     .describe("Opaque file ID previously returned by markdown_list_files."),
-  fileName: z
-    .string()
-    .min(1)
+  fileName: markdownNameSchema
     .optional()
     .describe(
       "Markdown file name. Must follow the strict naming rules: " + MARKDOWN_FILE_NAME_RULES,
@@ -488,6 +516,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             `${item.name} (${item.id})\n` +
             `Size: ${formatSize(item.size)}\n` +
             `Modified: ${item.lastModifiedDateTime ?? "unknown"}\n` +
+            `eTag: ${item.eTag ?? "(none)"}\n` +
+            "(supply the eTag verbatim to markdown_update_file for safe optimistic concurrency)\n" +
             "---";
           return {
             content: [{ type: "text", text: `${header}\n${content}` }],
@@ -499,22 +529,22 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
     ),
   );
 
-  // -------- markdown_upload_file --------
+  // -------- markdown_create_file --------
   entries.push(
     defineTool(
       server,
-      UPLOAD_FILE_DEF,
+      CREATE_FILE_DEF,
       {
         inputSchema: {
           fileName: markdownNameSchema.describe(
-            "File name, must end in .md. Created or overwritten in the configured root folder.",
+            "File name, must end in .md. Must not already exist in the configured root folder.",
           ),
           content: z.string().describe("UTF-8 markdown content (max 4 MB / 4,194,304 bytes)."),
         },
         annotations: {
-          title: UPLOAD_FILE_DEF.title,
+          title: CREATE_FILE_DEF.title,
           readOnlyHint: false,
-          idempotentHint: true,
+          idempotentHint: false,
           openWorldHint: false,
         },
       },
@@ -522,7 +552,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
         try {
           const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
           const client = config.graphClient;
-          const item = await uploadMarkdownContent(
+          const item = await createMarkdownFile(
             client,
             cfg.markdown.rootFolderId,
             args.fileName,
@@ -534,15 +564,158 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             content: [
               {
                 type: "text",
-                text: `Uploaded "${item.name}" (${item.id})\n` + `Size: ${String(bytes)} bytes`,
+                text:
+                  `Created "${item.name}" (${item.id})\n` +
+                  `Size: ${String(bytes)} bytes\n` +
+                  `eTag: ${item.eTag ?? "(none)"}\n` +
+                  "(supply the eTag verbatim to markdown_update_file for safe optimistic concurrency)",
               },
             ],
           };
         } catch (err: unknown) {
+          if (err instanceof MarkdownFileAlreadyExistsError) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `A file named "${err.fileName}" already exists in the configured ` +
+                    `root folder. Either choose a different name, or - if you intended ` +
+                    `to overwrite - call markdown_get_file to fetch the existing ` +
+                    `content and eTag, decide whether your update still applies, then ` +
+                    `call markdown_update_file with the eTag.`,
+                },
+              ],
+              isError: true,
+            };
+          }
           if (err instanceof MarkdownFileTooLargeError) {
             return { content: [{ type: "text", text: err.message }], isError: true };
           }
-          return formatError("markdown_upload_file", err);
+          return formatError("markdown_create_file", err);
+        }
+      },
+    ),
+  );
+
+  // -------- markdown_update_file --------
+  entries.push(
+    defineTool(
+      server,
+      UPDATE_FILE_DEF,
+      {
+        inputSchema: {
+          ...idOrNameShape,
+          etag: z
+            .string()
+            .min(1)
+            .describe(
+              "Opaque eTag previously returned by markdown_get_file, " +
+                "markdown_create_file, or markdown_update_file. Sent verbatim in If-Match.",
+            ),
+          content: z.string().describe("New UTF-8 markdown content (max 4 MB / 4,194,304 bytes)."),
+        },
+        annotations: {
+          title: UPDATE_FILE_DEF.title,
+          readOnlyHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (args, { signal }) => {
+        try {
+          if (!args.itemId && !args.fileName) {
+            return {
+              content: [{ type: "text", text: "Either itemId or fileName must be provided." }],
+              isError: true,
+            };
+          }
+
+          const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+          const client = config.graphClient;
+          const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+          // Defence in depth: re-validate the resolved item before writing.
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory and cannot be updated by the markdown tools. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          const nameCheck = validateMarkdownFileName(item.name);
+          if (!nameCheck.valid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `"${item.name}" cannot be updated: ${nameCheck.reason}. ${MARKDOWN_FILE_NAME_RULES}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const updated = await updateMarkdownFile(
+            client,
+            item.id,
+            args.etag,
+            args.content,
+            signal,
+          );
+          const bytes = Buffer.byteLength(args.content, "utf-8");
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Updated "${updated.name}" (${updated.id})\n` +
+                  `Size: ${String(bytes)} bytes\n` +
+                  `eTag: ${updated.eTag ?? "(none)"}\n` +
+                  "(supply the new eTag verbatim to the next markdown_update_file call)",
+              },
+            ],
+          };
+        } catch (err: unknown) {
+          if (err instanceof MarkdownEtagMismatchError) {
+            const cur = err.currentItem;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `Update rejected: the file "${cur.name}" (${cur.id}) has been ` +
+                    `modified since you last read it.\n` +
+                    `Supplied eTag: ${err.suppliedEtag}\n` +
+                    `Current eTag:  ${cur.eTag ?? "(unknown)"}\n` +
+                    `Modified:      ${cur.lastModifiedDateTime ?? "unknown"}\n` +
+                    `Size:          ${formatSize(cur.size)}\n\n` +
+                    `Required next steps:\n` +
+                    `1. Call markdown_get_file (with itemId="${cur.id}") to fetch the ` +
+                    `current content and the new eTag.\n` +
+                    `2. Compare the new content with the version you previously read ` +
+                    `to understand what changed.\n` +
+                    `3. Decide whether your intended update still applies. If it ` +
+                    `does, reconcile your changes against the new content and call ` +
+                    `markdown_update_file again with the new eTag. If your update no ` +
+                    `longer fits the new content, ask the user how to proceed - do ` +
+                    `not silently discard the user's intent or overwrite the newer ` +
+                    `version.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          if (err instanceof MarkdownFileTooLargeError) {
+            return { content: [{ type: "text", text: err.message }], isError: true };
+          }
+          return formatError("markdown_update_file", err);
         }
       },
     ),
@@ -782,7 +955,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const header =
             `${item.name} (${item.id})\n` +
             `Version: ${args.versionId}\n` +
-            "(historical content, not the current version — use markdown_upload_file to restore)\n" +
+            "(historical content, not the current version — use markdown_update_file to restore)\n" +
             "---";
           return {
             content: [{ type: "text", text: `${header}\n${content}` }],

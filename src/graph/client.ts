@@ -159,6 +159,9 @@ export class GraphClient {
    *
    * Unlike {@link request}, the body is sent as-is (not JSON-stringified).
    * Used for OneDrive content uploads where the payload is raw text/bytes.
+   *
+   * Optional `extraHeaders` are merged on top of the Content-Type header. Use
+   * this for conditional requests like `If-Match` / `If-None-Match`.
    */
   async requestRaw(
     method: HttpMethod,
@@ -166,8 +169,10 @@ export class GraphClient {
     body: string | Uint8Array,
     contentType: string,
     signal: AbortSignal,
+    extraHeaders?: Readonly<Record<string, string>>,
   ): Promise<Response> {
-    return this.performRequest(method, path, { "Content-Type": contentType }, body, signal);
+    const headers: Record<string, string> = { "Content-Type": contentType, ...extraHeaders };
+    return this.performRequest(method, path, headers, body, signal);
   }
 
   private async performRequest(

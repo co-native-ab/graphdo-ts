@@ -48,6 +48,8 @@ export class MockState {
   drive: { id: string; driveType: string; webUrl: string };
   private nextId: number;
   private nextVersionSeq: number;
+  /** Per-item eTag sequence so etags monotonically bump on every write. */
+  private eTagSeq: Map<string, number>;
 
   constructor() {
     this.user = { id: "", displayName: "", mail: "", userPrincipalName: "" };
@@ -65,12 +67,23 @@ export class MockState {
     };
     this.nextId = 1;
     this.nextVersionSeq = 1;
+    this.eTagSeq = new Map();
   }
 
   genId(): string {
     const id = `mock-${this.nextId}`;
     this.nextId++;
     return id;
+  }
+
+  /**
+   * Generate an opaque eTag string for a drive item. Bumped on every write so
+   * conditional-update tests can exercise both matching and stale etags.
+   */
+  genETag(itemId: string): string {
+    const seq = (this.eTagSeq.get(itemId) ?? 0) + 1;
+    this.eTagSeq.set(itemId, seq);
+    return `"{${itemId}},${String(seq)}"`;
   }
 
   /**
@@ -629,7 +642,7 @@ async function handleDriveRequest(
     return false;
   }
 
-  // Upload: PUT /me/drive/items/{folderId}:/{fileName}:/content
+  // Upload by path: PUT /me/drive/items/{folderId}:/{fileName}:/content
   // Segments look like: ["me","drive","items","{folderId}:","{fileName}:","content"]
   if (
     method === "PUT" &&
@@ -640,7 +653,20 @@ async function handleDriveRequest(
   ) {
     const folderId = decodeURIComponent(segments[3].slice(0, -1));
     const fileName = decodeURIComponent(segments[4].slice(0, -1));
-    await handleUploadMarkdown(state, req, res, folderId, fileName, parsed);
+    await handleUploadByPath(state, req, res, folderId, fileName, parsed);
+    return true;
+  }
+
+  // Update by id: PUT /me/drive/items/{itemId}/content (honours If-Match)
+  if (
+    method === "PUT" &&
+    segments.length === 5 &&
+    segments[4] === "content" &&
+    segments[3] !== undefined &&
+    !segments[3].endsWith(":")
+  ) {
+    const itemIdRaw = decodeURIComponent(segments[3]);
+    await handleUpdateById(state, req, res, itemIdRaw);
     return true;
   }
 
@@ -655,7 +681,10 @@ async function handleDriveRequest(
       errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
       return true;
     }
-    jsonResponse(res, 200, item);
+    // Route through driveItemView so the response matches the wire shape
+    // (no in-memory `content` field) and so any missing eTag is filled in.
+    const view = "file" in item ? driveItemView(item as MockDriveFile, state) : item;
+    jsonResponse(res, 200, view);
     return true;
   }
 
@@ -679,7 +708,7 @@ async function handleDriveRequest(
   if (method === "GET" && segments.length === 5 && segments[4] === "children") {
     const children = state.driveFolderChildren.get(itemId) ?? [];
     // Strip in-memory content from responses so the wire shape matches Graph's DriveItem.
-    const value = children.map((f) => driveItemView(f));
+    const value = children.map((f) => driveItemView(f, state));
     jsonResponse(res, 200, { value });
     return true;
   }
@@ -751,11 +780,18 @@ function findMockFile(state: MockState, itemId: string): MockDriveFile | undefin
   return undefined;
 }
 
-function driveItemView(file: MockDriveFile): DriveItem {
+function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
+  // Lazily assign an eTag on first view if the seed didn't set one. Real Graph
+  // always returns an eTag for files; tests that don't care about specific
+  // values shouldn't have to set it explicitly.
+  if (file.eTag === undefined && file.file !== undefined && state !== undefined) {
+    file.eTag = state.genETag(file.id);
+  }
   return {
     id: file.id,
     name: file.name,
     size: file.size,
+    eTag: file.eTag,
     lastModifiedDateTime: file.lastModifiedDateTime,
     file: file.file,
     folder: file.folder,
@@ -774,13 +810,13 @@ function driveItemVersionView(v: MockDriveItemVersion): DriveItemVersion {
   };
 }
 
-async function handleUploadMarkdown(
+async function handleUploadByPath(
   state: MockState,
   req: http.IncomingMessage,
   res: http.ServerResponse,
   folderId: string,
   fileName: string,
-  _parsed: URL,
+  parsed: URL,
 ): Promise<void> {
   // Require folder to exist (either as a root child or as a registered folder).
   const folderExists =
@@ -797,6 +833,19 @@ async function handleUploadMarkdown(
 
   const existing = state.driveFolderChildren.get(folderId) ?? [];
   const existingFile = existing.find((f) => f.name.toLowerCase() === fileName.toLowerCase());
+
+  // Honour @microsoft.graph.conflictBehavior=fail (used by markdown_create_file
+  // to make create-vs-update an explicit, server-enforced distinction).
+  const conflictBehavior = parsed.searchParams.get("@microsoft.graph.conflictBehavior");
+  if (conflictBehavior === "fail" && existingFile) {
+    errorResponse(
+      res,
+      409,
+      "nameAlreadyExists",
+      `An item with the name "${fileName}" already exists in this folder.`,
+    );
+    return;
+  }
 
   let file: MockDriveFile;
   let status: number;
@@ -820,14 +869,17 @@ async function handleUploadMarkdown(
     existingFile.content = content;
     existingFile.size = bytes;
     existingFile.lastModifiedDateTime = now;
+    existingFile.eTag = state.genETag(existingFile.id);
     file = existingFile;
     status = 200;
   } else {
+    const id = state.genId();
     file = {
-      id: state.genId(),
+      id,
       name: fileName,
       size: bytes,
       lastModifiedDateTime: now,
+      eTag: state.genETag(id),
       file: { mimeType: "text/markdown" },
       content,
     };
@@ -837,4 +889,74 @@ async function handleUploadMarkdown(
   }
 
   jsonResponse(res, status, driveItemView(file));
+}
+
+/**
+ * Update by id: `PUT /me/drive/items/{id}/content` with `If-Match` for
+ * optimistic concurrency. Returns 412 when the supplied etag doesn't match
+ * the current one. Used by `markdown_update_file`.
+ */
+async function handleUpdateById(
+  state: MockState,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  itemId: string,
+): Promise<void> {
+  const file = findMockFile(state, itemId);
+  if (!file) {
+    errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+    return;
+  }
+
+  const ifMatch = headerValue(req, "if-match");
+  if (ifMatch === null) {
+    errorResponse(
+      res,
+      400,
+      "invalidRequest",
+      "If-Match header is required for PUT /items/{id}/content in this mock.",
+    );
+    return;
+  }
+  if (ifMatch !== file.eTag) {
+    errorResponse(
+      res,
+      412,
+      "etagMismatch",
+      `If-Match etag ${ifMatch} does not match current ${file.eTag ?? "(none)"}`,
+    );
+    return;
+  }
+
+  const content = await readRawBody(req);
+  const bytes = Buffer.byteLength(content, "utf-8");
+  const now = new Date().toISOString();
+
+  // Snapshot previous content before overwriting.
+  if (file.content !== undefined) {
+    const prior: MockDriveItemVersion = {
+      id: state.genVersionId(),
+      lastModifiedDateTime: file.lastModifiedDateTime ?? now,
+      size: file.size,
+      content: file.content,
+      lastModifiedBy: { user: { displayName: "Mock User" } },
+    };
+    const history = state.driveItemVersions.get(file.id) ?? [];
+    history.unshift(prior);
+    state.driveItemVersions.set(file.id, history);
+  }
+
+  file.content = content;
+  file.size = bytes;
+  file.lastModifiedDateTime = now;
+  file.eTag = state.genETag(file.id);
+
+  jsonResponse(res, 200, driveItemView(file));
+}
+
+function headerValue(req: http.IncomingMessage, name: string): string | null {
+  const v = req.headers[name];
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") return v[0];
+  return null;
 }

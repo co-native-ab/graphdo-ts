@@ -12,7 +12,7 @@ import {
   GraphListResponseSchema,
 } from "./types.js";
 import type { GraphClient } from "./client.js";
-import { HttpMethod, parseResponse } from "./client.js";
+import { GraphRequestError, HttpMethod, parseResponse } from "./client.js";
 import { logger } from "../logger.js";
 
 /**
@@ -412,19 +412,64 @@ export async function downloadMarkdownContent(
   return buf.toString("utf-8");
 }
 
+// ---------------------------------------------------------------------------
+// Create-only / conditional-update (etag-protected)
+// ---------------------------------------------------------------------------
+
 /**
- * Upload (or overwrite) a markdown file under the given folder via a direct
- * PUT to `/content`. Returns the resulting drive item. Throws
- * {@link MarkdownFileTooLargeError} when the payload exceeds 4 MB.
+ * Error raised when {@link createMarkdownFile} encounters an existing file
+ * with the same name in the target folder. Allows callers to render a clear
+ * "use update instead" message to the agent.
  */
-export async function uploadMarkdownContent(
+export class MarkdownFileAlreadyExistsError extends Error {
+  constructor(
+    public readonly folderId: string,
+    public readonly fileName: string,
+  ) {
+    super(`Markdown file "${fileName}" already exists in folder ${folderId}.`);
+    this.name = "MarkdownFileAlreadyExistsError";
+  }
+}
+
+/**
+ * Error raised when {@link updateMarkdownFile} fails because the supplied
+ * etag does not match the file's current etag (HTTP 412). Carries the
+ * file's current metadata so callers can report it back to the agent and
+ * trigger a reconcile-and-retry workflow.
+ */
+export class MarkdownEtagMismatchError extends Error {
+  constructor(
+    public readonly itemId: string,
+    public readonly suppliedEtag: string,
+    public readonly currentItem: DriveItem,
+  ) {
+    super(
+      `etag mismatch for item ${itemId}: supplied ${suppliedEtag}, ` +
+        `current ${currentItem.eTag ?? "(unknown)"}`,
+    );
+    this.name = "MarkdownEtagMismatchError";
+  }
+}
+
+/**
+ * Create a new markdown file under the given folder. Fails with
+ * {@link MarkdownFileAlreadyExistsError} if a file with the same name
+ * already exists.
+ *
+ * Uses OneDrive's `@microsoft.graph.conflictBehavior=fail` query parameter
+ * so the create-vs-update distinction is enforced server-side, not just by a
+ * client-side existence check (which would race).
+ *
+ * See https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_put_content.
+ */
+export async function createMarkdownFile(
   client: GraphClient,
   folderId: string,
   fileName: string,
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (!folderId) throw new Error("uploadMarkdownContent: folderId must not be empty");
+  if (!folderId) throw new Error("createMarkdownFile: folderId must not be empty");
   assertValidMarkdownFileName(fileName);
 
   const bytes = Buffer.byteLength(content, "utf-8");
@@ -434,10 +479,63 @@ export async function uploadMarkdownContent(
 
   const path =
     `/me/drive/items/${encodeURIComponent(folderId)}:/` +
-    `${encodeURIComponent(fileName)}:/content`;
-  logger.debug("uploading markdown content", { folderId, fileName, bytes });
+    `${encodeURIComponent(fileName)}:/content` +
+    `?@microsoft.graph.conflictBehavior=fail`;
+  logger.debug("creating markdown file", { folderId, fileName, bytes });
 
-  const response = await client.requestRaw(HttpMethod.PUT, path, content, "text/markdown", signal);
+  let response: Response;
+  try {
+    response = await client.requestRaw(HttpMethod.PUT, path, content, "text/markdown", signal);
+  } catch (err: unknown) {
+    if (err instanceof GraphRequestError && err.statusCode === 409) {
+      throw new MarkdownFileAlreadyExistsError(folderId, fileName);
+    }
+    throw err;
+  }
+  return parseResponse(response, DriveItemSchema, HttpMethod.PUT, path);
+}
+
+/**
+ * Conditionally overwrite the content of an existing markdown file using an
+ * `If-Match` header. Fails with {@link MarkdownEtagMismatchError} when the
+ * supplied etag does not match the file's current etag (HTTP 412). On
+ * mismatch the error carries the current drive item (with the new etag) so
+ * callers can guide the agent to re-fetch, reconcile, and retry.
+ *
+ * See https://learn.microsoft.com/en-us/graph/api/driveitem-put-content.
+ */
+export async function updateMarkdownFile(
+  client: GraphClient,
+  itemId: string,
+  etag: string,
+  content: string,
+  signal: AbortSignal,
+): Promise<DriveItem> {
+  if (!itemId) throw new Error("updateMarkdownFile: itemId must not be empty");
+  if (!etag) throw new Error("updateMarkdownFile: etag must not be empty");
+
+  const bytes = Buffer.byteLength(content, "utf-8");
+  if (bytes > MAX_DIRECT_CONTENT_BYTES) {
+    throw new MarkdownFileTooLargeError(bytes, MAX_DIRECT_CONTENT_BYTES);
+  }
+
+  const path = `/me/drive/items/${encodeURIComponent(itemId)}/content`;
+  logger.debug("updating markdown file", { itemId, bytes });
+
+  let response: Response;
+  try {
+    response = await client.requestRaw(HttpMethod.PUT, path, content, "text/markdown", signal, {
+      "If-Match": etag,
+    });
+  } catch (err: unknown) {
+    if (err instanceof GraphRequestError && err.statusCode === 412) {
+      // Fetch the latest item so callers can show the agent the current etag /
+      // size / timestamp and explain how to reconcile.
+      const current = await getDriveItem(client, itemId, signal);
+      throw new MarkdownEtagMismatchError(itemId, etag, current);
+    }
+    throw err;
+  }
   return parseResponse(response, DriveItemSchema, HttpMethod.PUT, path);
 }
 
