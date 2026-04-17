@@ -9,6 +9,7 @@ import {
   MarkdownEtagMismatchError,
   MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
+  MarkdownUnknownVersionError,
   createMarkdownFile,
   deleteDriveItem,
   downloadDriveItemVersionContent,
@@ -16,6 +17,7 @@ import {
   findMarkdownFileByName,
   getDriveItem,
   getMyDrive,
+  getRevisionContent,
   listDriveItemVersions,
   listMarkdownFiles,
   listMarkdownFolderEntries,
@@ -514,5 +516,116 @@ describe("markdown version history graph operations", () => {
     await expect(
       downloadDriveItemVersionContent(client, "file-md-1", "", testSignal()),
     ).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Current revision surfacing + getRevisionContent
+// ---------------------------------------------------------------------------
+
+describe("markdown current revision tracking", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    seedOneDrive(env);
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("getDriveItem returns a `version` field for seeded files (lazy-assigned)", async () => {
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    expect(item.version).toBeTruthy();
+    expect(typeof item.version).toBe("string");
+  });
+
+  it("createMarkdownFile returns a `version` field on creation", async () => {
+    const created = await createMarkdownFile(client, "folder-2", "fresh.md", "one", testSignal());
+    expect(created.version).toBeTruthy();
+  });
+
+  it("updateMarkdownFile bumps the `version` on every write", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const v0 = before.version!;
+    const after1 = await updateMarkdownFile(client, "file-md-1", before.eTag!, "v1", testSignal());
+    expect(after1.version).toBeTruthy();
+    expect(after1.version).not.toBe(v0);
+    const after2 = await updateMarkdownFile(client, "file-md-1", after1.eTag!, "v2", testSignal());
+    expect(after2.version).not.toBe(after1.version);
+  });
+
+  it("prior revision ID surfaces as a history entry after an update", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const priorRevision = before.version!;
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v1", testSignal());
+    const history = await listDriveItemVersions(client, "file-md-1", testSignal());
+    // The first overwrite promotes the prior current revision into history.
+    expect(history.map((v) => v.id)).toContain(priorRevision);
+  });
+});
+
+describe("getRevisionContent", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    seedOneDrive(env);
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("returns live content when the revision id matches item.version", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "current-body", testSignal());
+    const current = await getDriveItem(client, "file-md-1", testSignal());
+    const body = await getRevisionContent(client, current, current.version!, testSignal());
+    expect(body).toBe("current-body");
+  });
+
+  it("returns historical content when the revision id matches a /versions entry", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const originalRevision = before.version!;
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "second-body", testSignal());
+    const current = await getDriveItem(client, "file-md-1", testSignal());
+    const body = await getRevisionContent(client, current, originalRevision, testSignal());
+    expect(body).toBe("hello world!");
+  });
+
+  it("throws MarkdownUnknownVersionError for a revision id that matches neither", async () => {
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    await expect(
+      getRevisionContent(client, item, "bogus-revision", testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownUnknownVersionError);
+  });
+
+  it("unknown-version error enumerates both the current revision and history", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const originalRevision = before.version!;
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+    const current = await getDriveItem(client, "file-md-1", testSignal());
+    try {
+      await getRevisionContent(client, current, "nope", testSignal());
+      throw new Error("expected MarkdownUnknownVersionError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MarkdownUnknownVersionError);
+      const known = (err as MarkdownUnknownVersionError).availableVersionIds;
+      expect(known).toContain(current.version);
+      expect(known).toContain(originalRevision);
+    }
+  });
+
+  it("rejects empty versionId", async () => {
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    await expect(getRevisionContent(client, item, "", testSignal())).rejects.toThrow(
+      "versionId must not be empty",
+    );
   });
 });

@@ -195,6 +195,16 @@ export interface DriveItem {
   name: string;
   size?: number;
   eTag?: string;
+  /**
+   * Opaque identifier of the file's current revision. Synthesised by
+   * graphdo-ts so the agent can reference the live state the same way it
+   * references historical versions returned by `/versions`. Lines up with
+   * the version IDs in that list: when a new version is created (on create
+   * or update), it becomes the file's `version`, and the prior value moves
+   * to the version history. Optional because folders and pre-existing
+   * third-party items may not carry one.
+   */
+  version?: string;
   lastModifiedDateTime?: string;
   file?: { mimeType?: string };
   folder?: { childCount?: number };
@@ -206,6 +216,7 @@ export const DriveItemSchema = z
     name: z.string(),
     size: z.number().optional(),
     eTag: z.string().optional(),
+    version: z.string().optional(),
     lastModifiedDateTime: z.string().optional(),
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),
     folder: z.object({ childCount: z.number().optional() }).loose().optional(),

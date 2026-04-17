@@ -781,17 +781,21 @@ function findMockFile(state: MockState, itemId: string): MockDriveFile | undefin
 }
 
 function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
-  // Lazily assign an eTag on first view if the seed didn't set one. Real Graph
-  // always returns an eTag for files; tests that don't care about specific
-  // values shouldn't have to set it explicitly.
+  // Lazily assign an eTag / version on first view if the seed didn't set one.
+  // Real Graph always returns an eTag for files; tests that don't care about
+  // specific values shouldn't have to set them explicitly.
   if (file.eTag === undefined && file.file !== undefined && state !== undefined) {
     file.eTag = state.genETag(file.id);
+  }
+  if (file.version === undefined && file.file !== undefined && state !== undefined) {
+    file.version = state.genVersionId();
   }
   return {
     id: file.id,
     name: file.name,
     size: file.size,
     eTag: file.eTag,
+    version: file.version,
     lastModifiedDateTime: file.lastModifiedDateTime,
     file: file.file,
     folder: file.folder,
@@ -852,10 +856,13 @@ async function handleUploadByPath(
   if (existingFile) {
     // Snapshot the previous content as a historical version before
     // overwriting, so tests for markdown_list_file_versions /
-    // markdown_get_file_version see OneDrive-like behaviour.
+    // markdown_get_file_version see OneDrive-like behaviour. The snapshot
+    // carries the prior state's `version` ID so the agent can round-trip
+    // between the revision it read and the entry in the /versions list.
     if (existingFile.content !== undefined) {
+      const priorVersionId = existingFile.version ?? state.genVersionId();
       const prior: MockDriveItemVersion = {
-        id: state.genVersionId(),
+        id: priorVersionId,
         lastModifiedDateTime: existingFile.lastModifiedDateTime ?? now,
         size: existingFile.size,
         content: existingFile.content,
@@ -870,6 +877,7 @@ async function handleUploadByPath(
     existingFile.size = bytes;
     existingFile.lastModifiedDateTime = now;
     existingFile.eTag = state.genETag(existingFile.id);
+    existingFile.version = state.genVersionId();
     file = existingFile;
     status = 200;
   } else {
@@ -880,6 +888,7 @@ async function handleUploadByPath(
       size: bytes,
       lastModifiedDateTime: now,
       eTag: state.genETag(id),
+      version: state.genVersionId(),
       file: { mimeType: "text/markdown" },
       content,
     };
@@ -932,10 +941,13 @@ async function handleUpdateById(
   const bytes = Buffer.byteLength(content, "utf-8");
   const now = new Date().toISOString();
 
-  // Snapshot previous content before overwriting.
+  // Snapshot previous content before overwriting. Carry the prior state's
+  // `version` ID into the history list so the agent can round-trip between
+  // the revision it read and the entry in /versions.
   if (file.content !== undefined) {
+    const priorVersionId = file.version ?? state.genVersionId();
     const prior: MockDriveItemVersion = {
-      id: state.genVersionId(),
+      id: priorVersionId,
       lastModifiedDateTime: file.lastModifiedDateTime ?? now,
       size: file.size,
       content: file.content,
@@ -950,6 +962,7 @@ async function handleUpdateById(
   file.size = bytes;
   file.lastModifiedDateTime = now;
   file.eTag = state.genETag(file.id);
+  file.version = state.genVersionId();
 
   jsonResponse(res, 200, driveItemView(file));
 }

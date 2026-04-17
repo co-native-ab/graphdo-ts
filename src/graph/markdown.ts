@@ -612,3 +612,57 @@ export async function downloadDriveItemVersionContent(
   }
   return buf.toString("utf-8");
 }
+
+/**
+ * Error raised when a caller references a revision that does not exist for
+ * the given file — neither as the current `version` nor in the `/versions`
+ * history list. Distinct from `GraphRequestError` so tool handlers can
+ * render a clear, actionable message.
+ */
+export class MarkdownUnknownVersionError extends Error {
+  constructor(
+    public readonly itemId: string,
+    public readonly versionId: string,
+    public readonly availableVersionIds: readonly string[],
+  ) {
+    super(
+      `Version ${versionId} not found for item ${itemId}. ` +
+        `Known version IDs: ${availableVersionIds.length === 0 ? "(none)" : availableVersionIds.join(", ")}`,
+    );
+    this.name = "MarkdownUnknownVersionError";
+  }
+}
+
+/**
+ * Fetch the UTF-8 content of a specific revision — either the current
+ * revision (matched by the drive item's `version` field) or any historical
+ * version from `/versions`. Throws {@link MarkdownUnknownVersionError} when
+ * the ID matches neither.
+ *
+ * Pre-fetches the item and version list once so the caller can diff two
+ * revisions with a single pair of resolution calls, and so the error message
+ * can enumerate the known IDs.
+ */
+export async function getRevisionContent(
+  client: GraphClient,
+  item: DriveItem,
+  versionId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!versionId) throw new Error("getRevisionContent: versionId must not be empty");
+
+  if (item.version === versionId) {
+    return downloadMarkdownContent(client, item.id, signal);
+  }
+
+  const history = await listDriveItemVersions(client, item.id, signal);
+  const match = history.find((v) => v.id === versionId);
+  if (!match) {
+    const known = item.version
+      ? [item.version, ...history.map((v) => v.id)]
+      : history.map((v) => v.id);
+    throw new MarkdownUnknownVersionError(item.id, versionId, known);
+  }
+
+  return downloadDriveItemVersionContent(client, item.id, versionId, signal);
+}

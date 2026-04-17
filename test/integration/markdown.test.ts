@@ -115,6 +115,10 @@ describe("integration: markdown", () => {
         arguments: { fileName: "x.md", etag: "any", content: "x" },
       },
       { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
+      {
+        name: "markdown_diff_file_versions",
+        arguments: { fileName: "x.md", fromVersionId: "a", toVersionId: "b" },
+      },
     ]) {
       const r = (await c.callTool(call)) as ToolResult;
       expect(r.isError).toBe(true);
@@ -978,6 +982,219 @@ describe("integration: markdown", () => {
         const r = (await c.callTool({
           name: "markdown_list_file_versions",
           arguments: { itemId: "sub" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("subdirectory");
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // markdown_diff_file_versions + current-revision surfacing
+    // -----------------------------------------------------------------------
+
+    describe("current revision + diff", () => {
+      function extract(label: string, text: string): string {
+        // Lines look like `Revision: abc` / `Current Revision: abc` / `Current Revision:    abc`.
+        const re = new RegExp(`${label}:\\s*(\\S+)`);
+        const m = re.exec(text);
+        if (!m?.[1]) throw new Error(`expected to find '${label}' in:\n${text}`);
+        return m[1];
+      }
+
+      it("markdown_get_file surfaces a non-empty Revision", async () => {
+        const r = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const rev = extract("Revision", firstText(r));
+        expect(rev).not.toBe("(none)");
+      });
+
+      it("markdown_create_file surfaces a non-empty Revision", async () => {
+        const r = (await c.callTool({
+          name: "markdown_create_file",
+          arguments: { fileName: "brand-new.md", content: "hello" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        extract("Revision", firstText(r));
+      });
+
+      it("markdown_update_file bumps the Revision", async () => {
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const get1Text = firstText(get1);
+        const origRev = extract("Revision", get1Text);
+        const etag = extract("eTag", get1Text);
+
+        const upd = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag, content: "body-v2" },
+        })) as ToolResult;
+        expect(upd.isError).toBeFalsy();
+        const newRev = extract("Revision", firstText(upd));
+        expect(newRev).not.toBe(origRev);
+      });
+
+      it("etag-mismatch error surfaces the Current Revision and points at the diff tool", async () => {
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const t1 = firstText(get1);
+        const staleEtag = extract("eTag", t1);
+
+        // Make a successful update to bump the revision.
+        await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: staleEtag, content: "someone-elses-write" },
+        });
+
+        // Retry with the OLD eTag → 412 surfaced as agent-facing reconcile guidance.
+        const stale = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: staleEtag, content: "my-intended-write" },
+        })) as ToolResult;
+        expect(stale.isError).toBe(true);
+        const body = firstText(stale);
+        expect(body).toContain("Current Revision:");
+        expect(body).toContain("markdown_diff_file_versions");
+        expect(body).toContain("fromVersionId");
+        expect(body).toContain("toVersionId");
+      });
+
+      it("markdown_diff_file_versions produces a unified patch between historical and current", async () => {
+        // Read the seeded file to learn its original revision.
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const t1 = firstText(get1);
+        const origRev = extract("Revision", t1);
+        const etag = extract("eTag", t1);
+
+        // Overwrite it.
+        const upd = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: {
+            fileName: "hello.md",
+            etag,
+            content: "hello world, with additions!",
+          },
+        })) as ToolResult;
+        const newRev = extract("Revision", firstText(upd));
+
+        // Diff the two revisions.
+        const diff = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: {
+            fileName: "hello.md",
+            fromVersionId: origRev,
+            toVersionId: newRev,
+          },
+        })) as ToolResult;
+        expect(diff.isError).toBeFalsy();
+        const body = firstText(diff);
+        expect(body).toContain(`hello.md@${origRev}`);
+        expect(body).toContain(`hello.md@${newRev}`);
+        // Unified-diff header lines.
+        expect(body).toMatch(/^---/m);
+        expect(body).toMatch(/^\+\+\+/m);
+        // The old body and the new body both appear with +/- markers.
+        expect(body).toContain("-hello");
+        expect(body).toContain("+hello world, with additions!");
+      });
+
+      it("markdown_diff_file_versions reports 'no content differences' when two revisions hold identical content", async () => {
+        // Two updates with the same body produce two distinct revisions whose
+        // content is identical.
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const etag1 = extract("eTag", firstText(get1));
+
+        const upd1 = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: etag1, content: "identical" },
+        })) as ToolResult;
+        const rev1 = extract("Revision", firstText(upd1));
+        const etag2 = extract("eTag", firstText(upd1));
+
+        const upd2 = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", etag: etag2, content: "identical" },
+        })) as ToolResult;
+        const rev2 = extract("Revision", firstText(upd2));
+
+        const diff = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { fileName: "hello.md", fromVersionId: rev1, toVersionId: rev2 },
+        })) as ToolResult;
+        expect(diff.isError).toBeFalsy();
+        expect(firstText(diff)).toContain("no content differences");
+      });
+
+      it("markdown_diff_file_versions short-circuits when from and to are the same id", async () => {
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const rev = extract("Revision", firstText(get1));
+
+        const diff = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { fileName: "hello.md", fromVersionId: rev, toVersionId: rev },
+        })) as ToolResult;
+        expect(diff.isError).toBeFalsy();
+        expect(firstText(diff)).toContain("same");
+      });
+
+      it("markdown_diff_file_versions returns a clear error for an unknown revision id", async () => {
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const rev = extract("Revision", firstText(get1));
+
+        const diff = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { fileName: "hello.md", fromVersionId: "nope", toVersionId: rev },
+        })) as ToolResult;
+        expect(diff.isError).toBe(true);
+        const body = firstText(diff);
+        expect(body).toContain("Version nope not found");
+        expect(body).toContain("markdown_list_file_versions");
+        expect(body).toContain("markdown_get_file");
+      });
+
+      it("markdown_diff_file_versions requires itemId or fileName", async () => {
+        const r = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { fromVersionId: "a", toVersionId: "b" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r)).toContain("Either itemId or fileName");
+      });
+
+      it("markdown_diff_file_versions rejects unsafe names at the schema layer", async () => {
+        const r = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { fileName: "../escape.md", fromVersionId: "a", toVersionId: "b" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
+      });
+
+      it("markdown_diff_file_versions rejects a subdirectory", async () => {
+        env.graphState.driveFolderChildren.set("folder-1", [
+          { id: "sub", name: "archive", folder: {} },
+        ]);
+        const r = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: { itemId: "sub", fromVersionId: "a", toVersionId: "b" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("subdirectory");

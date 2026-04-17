@@ -101,7 +101,7 @@
     },
     {
       "name": "markdown_get_file",
-      "description": "Read the current UTF-8 content of a markdown file in the configured root folder, along with its eTag (which markdown_update_file requires for safe optimistic concurrency). Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
+      "description": "Read the current UTF-8 content of a markdown file in the configured root folder, along with its eTag (required by markdown_update_file for safe optimistic concurrency) and a Revision identifier (which lines up with the IDs returned by markdown_list_file_versions so it can be passed to markdown_diff_file_versions). Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
     },
     {
       "name": "markdown_create_file",
@@ -109,7 +109,7 @@
     },
     {
       "name": "markdown_update_file",
-      "description": "Overwrite an existing markdown file using If-Match eTag for safe optimistic concurrency. Requires the eTag previously returned by markdown_get_file (or markdown_create_file / markdown_update_file). If the file has changed since you last read it the call fails with the current eTag and reconcile guidance: re-fetch the latest content and eTag, decide whether your update still applies, reconcile your changes, and retry - or ask the user how to proceed. Accepts the file by ID (preferred) or name. Payloads larger than 4 MB are rejected."
+      "description": "Overwrite an existing markdown file using If-Match eTag for safe optimistic concurrency. Requires the eTag previously returned by markdown_get_file (or markdown_create_file / markdown_update_file). If the file has changed since you last read it the call fails with the current eTag, the current Revision, and reconcile guidance: use markdown_diff_file_versions (fromVersionId=<the revision you originally read>, toVersionId=<the current revision>) to see exactly what changed, decide whether your update still applies, reconcile your changes, and retry - or ask the user how to proceed. Accepts the file by ID (preferred) or name. Payloads larger than 4 MB are rejected."
     },
     {
       "name": "markdown_delete_file",
@@ -122,6 +122,10 @@
     {
       "name": "markdown_get_file_version",
       "description": "Read the UTF-8 content of a specific historical version of a markdown file. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_update_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded."
+    },
+    {
+      "name": "markdown_diff_file_versions",
+      "description": "Return a unified diff between two revisions of a markdown file, computed server-side using jsdiff so you do not have to diff the content yourself. Accepts the file by id (preferred) or name, plus a fromVersionId and a toVersionId. Each ID may be either a historical version ID returned by markdown_list_file_versions, or the current Revision surfaced by markdown_get_file / markdown_create_file / markdown_update_file (including the Current Revision reported in an etag-mismatch error). This is the preferred way to reconcile a stale update: pass the revision you originally read as fromVersionId and the current revision as toVersionId."
     }
   ],
   "keywords": [
