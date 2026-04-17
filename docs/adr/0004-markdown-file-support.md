@@ -70,11 +70,32 @@ Rationale for the hard limit:
 
 ### 5. ID-or-Name Addressing
 
-`markdown_get_file` and `markdown_delete_file` accept either a `itemId` (canonical drive item ID) or a `fileName` (case-insensitive match against files in the configured root folder). Name-only calls perform a listing and match locally — this keeps the API ergonomic for agents that rarely remember opaque IDs and avoids fragile URL encoding of names with special characters. `markdown_upload_file` is keyed by `fileName` only, since Graph's path-style `PUT` (`/items/{parent}:/filename:/content`) is the natural create-or-overwrite endpoint.
+`markdown_get_file` and `markdown_delete_file` accept either a `itemId` (canonical drive item ID) or a `fileName` (case-insensitive match against files in the configured root folder, subject to the naming rules in decision 7). Name-only calls perform a listing and match locally — this keeps the API ergonomic for agents that rarely remember opaque IDs and avoids fragile URL encoding of names with special characters. `markdown_upload_file` is keyed by `fileName` only, since Graph's path-style `PUT` (`/items/{parent}:/filename:/content`) is the natural create-or-overwrite endpoint.
 
 ### 6. Raw-Body Request Path in `GraphClient`
 
 The existing `GraphClient.request` always JSON-encodes the body and sets `Content-Type: application/json`. OneDrive `/content` uploads require a **raw** request body with a non-JSON content type. We add `GraphClient.requestRaw(method, path, body, contentType, signal)` that shares the retry, auth, and timeout logic via a common private `performRequest` helper, and keeps the JSON path unchanged. This is the minimum viable extension to the HTTP client — it does not introduce a streaming API, since upload sessions are not supported.
+
+### 7. Strict, Cross-OS-Safe File Names with UNSUPPORTED Classification on Listing
+
+All tools that accept a markdown file name enforce a conservative allow-list: names must end in `.md` (case-insensitive), contain only letters, digits, space, dot, underscore, and hyphen, start with a letter or digit, be at most 255 characters, must not contain path separators or subdirectory segments, must not be a Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`), and must not have leading/trailing whitespace or a trailing dot before `.md`. The full rule set lives in `validateMarkdownFileName` and is also exported as a human-readable `MARKDOWN_FILE_NAME_RULES` string embedded verbatim in each tool's description.
+
+Enforcement points:
+
+- **`markdown_upload_file`**: validated at the zod-schema layer so the MCP SDK rejects bad names before the handler runs. The agent receives a structured `Invalid arguments` error whose message reproduces the specific violated rule.
+- **`markdown_get_file` / `markdown_delete_file` by name**: validated explicitly in the handler so the agent sees the same error message style as upload.
+- **`markdown_get_file` / `markdown_delete_file` by itemId**: the resolved drive item is re-validated after fetch. Subdirectories (drive items with a `folder` facet) are rejected with a dedicated "subdirectory is not supported" message; files whose _stored_ name violates the rules — which can happen if a file was created or renamed outside graphdo — are rejected with the specific rule that was violated. This closes the loophole where a valid-looking itemId could bypass the name validation that guards the by-name path.
+- **`findMarkdownFileByName`** (internal): re-validates its input argument and only searches among names that pass validation, so a name-based lookup can never silently resolve to a file whose stored name is unsupported.
+
+Rationale for this specific allow-list:
+
+- **Portability first**: the allow-list is the intersection of what works unchanged on Linux, macOS, and Windows. This matters because users sync these files locally, and files that fail to materialise on a Windows machine are worse than files that were never created.
+- **No subdirectories**: rejecting path separators (and reserving the folder facet check in the resolver) means the agent _cannot_ introduce a directory structure via the markdown tools — even if the user's underlying storage supports it. The configured root folder is always the exact and only place the agent writes to.
+- **No leading dot / underscore / hyphen**: leading `.` produces hidden files on Unix (which agents rarely want but users rarely audit); leading `-` looks like a CLI flag when the file name is piped into a shell; leading `_` is banned on symmetry with the other two.
+- **No Windows reserved names**: `CON.md`, `NUL.md`, etc. are legal on Linux but impossible to create/open on Windows. Rejecting them at write time means everything readable by the agent remains readable on every platform.
+- **Length limit of 255**: matches the `NAME_MAX` limit on most filesystems (ext4, HFS+, NTFS per-segment).
+
+Listings take a different tack: rather than hide things that fail validation, `markdown_list_files` surfaces them under an `UNSUPPORTED` section with the specific reason (`"subdirectory — only files directly inside the configured root folder are supported"`, `"unsupported file name: ..."`). The reasoning is that the agent needs to know those entries exist — to avoid picking a file name that would collide with an existing-but-inaccessible file, and to answer questions like "what's in the folder?" accurately — but it must not be able to read, write, or delete them. Non-markdown files (e.g. `photo.jpg`) are not markdown-tool concerns and are omitted from the listing entirely.
 
 ## Consequences
 
@@ -85,6 +106,8 @@ The existing `GraphClient.request` always JSON-encodes the body and sets `Conten
 - **POS-003**: The 4 MB hard limit keeps the codebase small. No session management, no chunked streaming, no progress reporting, no resume logic. Fewer code paths means fewer bugs and easier security review.
 - **POS-004**: ID-or-name addressing makes the tools ergonomic for agents without compromising correctness: internally operations always resolve to an ID before acting.
 - **POS-005**: The raw-body request path in `GraphClient` generalises cleanly to any future non-JSON Graph surface (e.g., images, ICS files) without requiring another rewrite.
+- **POS-006**: Strict, cross-OS-safe naming and the subdirectory ban make the blast radius of a compromised or misbehaving agent bounded _at the file-name layer_, not only at the folder layer. An agent cannot create `../../secrets.md`, `../archive/overwrite.md`, or `CON.md`; it also cannot address such a file even if it already exists on disk.
+- **POS-007**: Listings expose unsupported entries explicitly rather than hiding them, so agents planning filenames have an accurate view of the folder and humans reading the listing are not surprised by "missing" files.
 
 ### Negative
 
@@ -92,6 +115,7 @@ The existing `GraphClient.request` always JSON-encodes the body and sets `Conten
 - **NEG-002**: Files larger than 4 MiB cannot be read or written. Users with that use case must use a different tool. We accept this on the grounds that markdown notes exceeding 4 MiB are well outside the intended use case.
 - **NEG-003**: Flat (non-recursive) listing means users who organise notes into nested folders see only one level. They can still re-point the root folder via `markdown_select_root_folder` to a different subtree.
 - **NEG-004**: Name-based lookups require a list request, so operating on a file by name costs one extra Graph call compared to operating by ID.
+- **NEG-005**: Files created outside graphdo with names that fail the naming rules are visible in listings (under `UNSUPPORTED`) but unreadable and undeletable by the tools. Users who need to manipulate such files must rename them in their storage provider first, or use a different tool. We accept this because the alternative — relaxing the rules — would undo the cross-OS and blast-radius guarantees.
 
 ## Alternatives Considered
 
@@ -120,6 +144,16 @@ The existing `GraphClient.request` always JSON-encodes the body and sets `Conten
 - **ALT-009**: **Description**: Persist the selected folder as a human-readable path (e.g. `/Notes`) rather than a drive item ID.
 - **ALT-010**: **Rejection Reason**: Paths are mutable — users rename and move folders in OneDrive — but drive item IDs are stable. Persisting the ID guarantees the configured folder keeps working across renames. We keep the path as a display-only field in config.
 
+### Looser / Platform-Specific File-Name Rules
+
+- **ALT-011**: **Description**: Accept any Unicode name that happens to be valid on the user's own OS, or accept the broader set that OneDrive itself allows, rather than the strict cross-OS-safe allow-list.
+- **ALT-012**: **Rejection Reason**: An agent running on Linux would happily create `emoji 😀.md` or `a:b.md`, which then breaks the moment the file is synced to a Windows machine or checked into a git repo on a case-sensitive filesystem. Worse, any relaxed rule has to answer the question "can the agent create a subdirectory via `..` or `/` in the name" — and every relaxed answer opens attack surface. The strict allow-list is small, easy to describe in one sentence, and makes "what can the agent create?" trivially answerable.
+
+### Hiding Unsupported Entries from Listings
+
+- **ALT-013**: **Description**: Have `markdown_list_files` return only supported files and silently drop everything else.
+- **ALT-014**: **Rejection Reason**: Silence causes collisions: an agent asked "is `notes.md` available?" would get "yes" even if an unsupported-named `notes.md` already exists at a different casing or with unsafe characters, and the subsequent upload would overwrite it. Surfacing unsupported entries with their reason lets the agent reason about the full folder contents without being able to _act_ on them. The cost is a few extra lines in the listing output.
+
 ## Implementation Notes
 
 - **IMP-001**: New scope `Files.ReadWrite` is added to `GraphScope` and `AVAILABLE_SCOPES` with `required: false`, matching the design of `Mail.Send` and `Tasks.ReadWrite`. Tool registration uses the existing `requiredScopes` mechanism so markdown tools are hidden until the user consents to the scope.
@@ -127,7 +161,7 @@ The existing `GraphClient.request` always JSON-encodes the body and sets `Conten
 - **IMP-003**: Graph operations live in `src/graph/markdown.ts` and cover folder listing, file listing with `.md` filter, metadata fetch, content download, content upload, and delete. The 4 MiB constant is exported as `MAX_DIRECT_CONTENT_BYTES`. A dedicated `MarkdownFileTooLargeError` class surfaces size-limit violations without being conflated with network or authorization errors.
 - **IMP-004**: `GraphClient` gains a `requestRaw` method that sends a raw string / `Uint8Array` body with a caller-specified `Content-Type`. The retry / auth / timeout loop is extracted into a private `performRequest` helper reused by `request` and `requestRaw`.
 - **IMP-005**: Five MCP tools live in `src/tools/markdown.ts`: `markdown_select_root_folder`, `markdown_list_files`, `markdown_get_file`, `markdown_upload_file`, `markdown_delete_file`. The picker tool reuses `startBrowserPicker` from `src/picker.ts`. All tools return a friendly "not configured — use `markdown_select_root_folder`" error when `markdown.rootFolderId` is missing.
-- **IMP-006**: Success criteria: (a) all five tools are registered and scope-gated, (b) size-limit enforcement is exercised by unit tests on both the download and upload paths, (c) the picker persists the selection without overwriting unrelated config, and (d) the mock Graph server models the `/me/drive/...` endpoints sufficiently for full end-to-end integration tests against an in-process MCP client.
+- **IMP-006**: Success criteria: (a) all five tools are registered and scope-gated, (b) size-limit enforcement is exercised by unit tests on both the download and upload paths, (c) the picker persists the selection without overwriting unrelated config, (d) the mock Graph server models the `/me/drive/...` endpoints sufficiently for full end-to-end integration tests against an in-process MCP client, and (e) the strict file-name rules are enforced at every entry point and tested for all rejection classes (path separators, non-portable characters, control chars, reserved device names, leading-dot/hyphen/underscore, trailing dot/whitespace, length limit, subdirectory entries, and itemId-based access to files with unsafe stored names).
 
 ## References
 

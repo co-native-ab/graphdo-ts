@@ -14,10 +14,12 @@ import {
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
-  listMarkdownFiles,
+  listMarkdownFolderEntries,
   listRootFolders,
   MarkdownFileTooLargeError,
+  MARKDOWN_FILE_NAME_RULES,
   uploadMarkdownContent,
+  validateMarkdownFileName,
 } from "../graph/markdown.js";
 import type { DriveItem } from "../graph/types.js";
 import type { ServerConfig } from "../index.js";
@@ -36,7 +38,7 @@ const SELECT_ROOT_DEF: ToolDef = {
   name: "markdown_select_root_folder",
   title: "Select Markdown Root Folder",
   description:
-    "Select which OneDrive folder graphdo should use for markdown files. Call " +
+    "Select the root folder that graphdo should use for markdown files. Call " +
     "this tool directly when a markdown root folder has not been configured " +
     "yet - do not ask the user which folder, this tool opens a browser picker " +
     "where the user makes the selection themselves. This is a human-only " +
@@ -49,8 +51,13 @@ const LIST_FILES_DEF: ToolDef = {
   name: "markdown_list_files",
   title: "List Markdown Files",
   description:
-    "List .md files in the configured OneDrive root folder. Returns file name, " +
-    "drive item ID, last modified timestamp, and size in bytes for each file.",
+    "List markdown files directly inside the configured root folder. Each " +
+    "entry reports the file name, opaque file ID, last modified timestamp, " +
+    "and size in bytes. Subdirectories and files whose names do not follow " +
+    "the strict naming rules are also reported, but marked as UNSUPPORTED - " +
+    "these entries exist but cannot be read, written, or deleted by the " +
+    "markdown tools. " +
+    MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
@@ -59,9 +66,12 @@ const GET_FILE_DEF: ToolDef = {
   title: "Get Markdown File",
   description:
     "Read a markdown file from the configured root folder. Accepts either a " +
-    "drive item ID or a file name (case-insensitive, must end in .md). " +
-    "Returns the file's UTF-8 content. Files larger than 4 MB cannot be " +
-    "downloaded directly and will return an error.",
+    "file ID (from markdown_list_files) or a file name. File names must follow " +
+    "the strict naming rules and are rejected otherwise - paths, subdirectories, " +
+    "and characters that are not portable across Linux, macOS, and Windows are " +
+    "not allowed. Returns the file's UTF-8 content. Files larger than 4 MB " +
+    "cannot be downloaded and will return an error. " +
+    MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
@@ -70,9 +80,12 @@ const UPLOAD_FILE_DEF: ToolDef = {
   title: "Upload Markdown File",
   description:
     "Create or overwrite a markdown file in the configured root folder. " +
-    "Accepts a file name (must end in .md) and UTF-8 markdown content. " +
+    "The file name must follow the strict naming rules - paths, subdirectories, " +
+    "and characters that are not portable across Linux, macOS, and Windows are " +
+    "rejected with a clear error. Accepts the UTF-8 markdown content. " +
     "Payloads larger than 4 MB are rejected - upload sessions are not " +
-    "supported.",
+    "supported. " +
+    MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
@@ -81,7 +94,9 @@ const DELETE_FILE_DEF: ToolDef = {
   title: "Delete Markdown File",
   description:
     "Permanently delete a markdown file from the configured root folder. " +
-    "Accepts either a drive item ID or a file name (case-insensitive).",
+    "Accepts either a file ID or a file name. File names must follow the " +
+    "strict naming rules and are rejected otherwise. " +
+    MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
@@ -97,23 +112,34 @@ export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
 // Zod helpers
 // ---------------------------------------------------------------------------
 
-const markdownNameSchema = z
-  .string()
-  .min(1)
-  .refine((v) => v.toLowerCase().endsWith(".md"), {
-    message: "file name must end with .md",
-  });
+/**
+ * Zod schema for strict markdown file names. Applies the full
+ * {@link validateMarkdownFileName} check at input-validation time so the MCP
+ * SDK rejects bad names before the handler runs.
+ */
+const markdownNameSchema = z.string().superRefine((value, ctx) => {
+  const result = validateMarkdownFileName(value);
+  if (!result.valid) {
+    ctx.addIssue({ code: "custom", message: result.reason });
+  }
+});
 
 // Either an ID or a name must be provided. The input object shape is the
 // full union — validation of "exactly one" is done in the handler because MCP
 // tool inputs must be plain object schemas without discriminated unions.
 const idOrNameShape = {
-  itemId: z.string().min(1).optional().describe("Drive item ID of the markdown file."),
+  itemId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Opaque file ID previously returned by markdown_list_files."),
   fileName: z
     .string()
     .min(1)
     .optional()
-    .describe("File name of the markdown file (must end in .md, case-insensitive)."),
+    .describe(
+      "Markdown file name. Must follow the strict naming rules: " + MARKDOWN_FILE_NAME_RULES,
+    ),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -132,12 +158,25 @@ async function resolveDriveItem(
   if (!args.fileName) {
     throw new Error("Either itemId or fileName must be provided.");
   }
-  if (!args.fileName.toLowerCase().endsWith(".md")) {
-    throw new Error("fileName must end in .md");
+  const validation = validateMarkdownFileName(args.fileName);
+  if (!validation.valid) {
+    throw new Error(
+      `Invalid markdown file name "${args.fileName}": ${validation.reason}. ${MARKDOWN_FILE_NAME_RULES}`,
+    );
   }
   const match = await findMarkdownFileByName(client, folderId, args.fileName, signal);
   if (!match) {
     throw new Error(`Markdown file "${args.fileName}" not found in the configured root folder.`);
+  }
+  // Defensive: the stored name on the remote could still be unsafe even if the
+  // caller-supplied name was fine (e.g. a rename happened after creation).
+  // Block reads/deletes on such items.
+  const storedValidation = validateMarkdownFileName(match.name);
+  if (!storedValidation.valid) {
+    throw new Error(
+      `Matched file "${match.name}" has a name that is not supported by the markdown tools: ` +
+        `${storedValidation.reason}. Use markdown_list_files to see entries marked UNSUPPORTED.`,
+    );
   }
   return match;
 }
@@ -179,8 +218,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                 {
                   type: "text",
                   text:
-                    "No folders found at the root of your OneDrive. " +
-                    "Create a folder in OneDrive first, then run this tool again.",
+                    "No top-level folders are available to choose from. " +
+                    "Create a folder in your markdown storage location first, then run this tool again.",
                 },
               ],
             };
@@ -189,7 +228,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const handle = await startBrowserPicker(
             {
               title: "Select Markdown Root Folder",
-              subtitle: "Choose the OneDrive folder graphdo should use for markdown files:",
+              subtitle: "Choose the folder graphdo should use as the markdown root:",
               options: folders.map((f) => ({ id: f.id, label: `/${f.name}` })),
               onSelect: async (option, s) => {
                 await updateConfig(
@@ -272,23 +311,50 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
         try {
           const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
           const client = config.graphClient;
-          const files = await listMarkdownFiles(client, cfg.markdown.rootFolderId, signal);
+          const allEntries = await listMarkdownFolderEntries(
+            client,
+            cfg.markdown.rootFolderId,
+            signal,
+          );
 
-          const header = `Markdown files in ${cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "the configured folder"}:`;
-          if (files.length === 0) {
-            return {
-              content: [{ type: "text", text: `${header}\n\nNo .md files found.` }],
-            };
+          const supported = allEntries.filter((e) => e.kind === "supported");
+          const unsupported = allEntries.filter((e) => e.kind === "unsupported");
+
+          const folderLabel =
+            cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "the configured folder";
+          const header = `Markdown files in ${folderLabel}:`;
+
+          const sections: string[] = [header];
+
+          if (supported.length === 0) {
+            sections.push("\nNo supported markdown files found.");
+          } else {
+            const lines = supported.map((entry, i) => {
+              const f = entry.item;
+              const modified = f.lastModifiedDateTime ?? "unknown";
+              return `${String(i + 1)}. ${f.name} — ${formatSize(f.size)}, modified ${modified} (${f.id})`;
+            });
+            sections.push(`\n${lines.join("\n")}`);
           }
 
-          const lines = files.map((f, i) => {
-            const modified = f.lastModifiedDateTime ?? "unknown";
-            return `${String(i + 1)}. ${f.name} — ${formatSize(f.size)}, modified ${modified} (${f.id})`;
-          });
-          const footer = `\nTotal: ${String(files.length)} file(s)`;
+          if (unsupported.length > 0) {
+            const unsupportedLines = unsupported.map((entry, i) => {
+              const f = entry.item;
+              const kind = f.folder !== undefined ? "subdirectory" : "file";
+              return `${String(i + 1)}. [UNSUPPORTED ${kind}] ${f.name} — ${entry.reason}`;
+            });
+            sections.push(
+              "\nUNSUPPORTED entries (visible but cannot be read, written, or deleted by the markdown tools):\n" +
+                unsupportedLines.join("\n"),
+            );
+          }
+
+          sections.push(
+            `\nTotal: ${String(supported.length)} supported, ${String(unsupported.length)} unsupported`,
+          );
 
           return {
-            content: [{ type: "text", text: `${header}\n\n${lines.join("\n")}${footer}` }],
+            content: [{ type: "text", text: sections.join("\n") }],
           };
         } catch (err: unknown) {
           return formatError("markdown_list_files", err);
@@ -322,6 +388,35 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
           const client = config.graphClient;
           const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+          // Enforce naming rules against the resolved item too. This catches
+          // cases where a caller supplied an itemId whose remote name is
+          // invalid (e.g. a subdirectory or a file with unsafe characters).
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory, which is not supported. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          const nameCheck = validateMarkdownFileName(item.name);
+          if (!nameCheck.valid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `"${item.name}" cannot be read: ${nameCheck.reason}. ${MARKDOWN_FILE_NAME_RULES}`,
+                },
+              ],
+              isError: true,
+            };
+          }
 
           const content = await downloadMarkdownContent(client, item.id, signal);
 
@@ -415,6 +510,33 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
           const client = config.graphClient;
           const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory and cannot be deleted by the markdown tools. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          const nameCheck = validateMarkdownFileName(item.name);
+          if (!nameCheck.valid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `"${item.name}" cannot be deleted: ${nameCheck.reason}. ${MARKDOWN_FILE_NAME_RULES}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
           await deleteDriveItem(client, item.id, signal);
 
           return {

@@ -10,28 +10,28 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 graphdo-ts currently exposes **20 MCP tools**:
 
-| Tool                          | Description                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------ |
-| `login`                       | Authenticate via browser login                                                       |
-| `logout`                      | Clear cached tokens and sign out                                                     |
-| `auth_status`                 | Check authentication status, current user, and configuration                         |
-| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                       |
-| `todo_config`                 | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
-| `todo_list`                   | List todos with pagination, filtering, and sorting                                   |
-| `todo_show`                   | Show a single todo with full details including checklist steps                       |
-| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence       |
-| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)    |
-| `todo_complete`               | Mark a todo as completed                                                             |
-| `todo_delete`                 | Delete a todo                                                                        |
-| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                   |
-| `todo_add_step`               | Add a new checklist step to a todo                                                   |
-| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                     |
-| `todo_delete_step`            | Delete a checklist step from a todo                                                  |
-| `markdown_select_root_folder` | Configure which OneDrive folder to use for markdown files (human-only selection)     |
-| `markdown_list_files`         | List `.md` files in the configured OneDrive folder                                   |
-| `markdown_get_file`           | Read a markdown file's content (by drive item ID or file name, max 4 MB)             |
-| `markdown_upload_file`        | Create or overwrite a markdown file in the configured folder (max 4 MB)              |
-| `markdown_delete_file`        | Delete a markdown file from the configured folder                                    |
+| Tool                          | Description                                                                                        |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| `login`                       | Authenticate via browser login                                                                     |
+| `logout`                      | Clear cached tokens and sign out                                                                   |
+| `auth_status`                 | Check authentication status, current user, and configuration                                       |
+| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                                     |
+| `todo_config`                 | Configure which Microsoft To Do list to use (opens browser for human-only selection)               |
+| `todo_list`                   | List todos with pagination, filtering, and sorting                                                 |
+| `todo_show`                   | Show a single todo with full details including checklist steps                                     |
+| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence                     |
+| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)                  |
+| `todo_complete`               | Mark a todo as completed                                                                           |
+| `todo_delete`                 | Delete a todo                                                                                      |
+| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                                 |
+| `todo_add_step`               | Add a new checklist step to a todo                                                                 |
+| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                                   |
+| `todo_delete_step`            | Delete a checklist step from a todo                                                                |
+| `markdown_select_root_folder` | Configure which folder to use for markdown files (human-only selection)                            |
+| `markdown_list_files`         | List `.md` files in the configured folder; subdirectories and bad-name files appear as UNSUPPORTED |
+| `markdown_get_file`           | Read a markdown file's content (by file ID or strict-validated name, max 4 MB)                     |
+| `markdown_upload_file`        | Create or overwrite a markdown file (strict-validated name, max 4 MB)                              |
+| `markdown_delete_file`        | Delete a markdown file from the configured folder                                                  |
 
 ---
 
@@ -120,22 +120,39 @@ The configuration is stored in the OS config directory:
 - **macOS:** `~/Library/Application Support/graphdo-ts/config.json`
 - **Windows:** `%APPDATA%/graphdo-ts/config.json`
 
-### Markdown Files (OneDrive)
+### Markdown Files
 
-Before using the markdown tools, select which OneDrive folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders in your OneDrive. Click the one you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection.
+Before using the markdown tools, select which folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders available. Click the one you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection. (Under the hood, the storage is a OneDrive folder accessed via Microsoft Graph — see [ADR-0004](./docs/adr/0004-markdown-file-support.md).)
 
 **Security:** This is a human-only action. The AI agent cannot programmatically change which folder it operates on — only you can make this selection via the browser. All markdown tools are confined to the children of that one folder.
 
 Once a root folder is set, four tools operate on `.md` files directly inside it:
 
-- `markdown_list_files` — list the `.md` files, including name, drive item ID, last modified timestamp, and size in bytes.
-- `markdown_get_file` — read a file by drive item ID **or** by file name (case-insensitive, must end in `.md`) and return its UTF-8 content.
-- `markdown_upload_file` — create or overwrite a file by name using a direct `PUT` to `/content`.
-- `markdown_delete_file` — permanently delete a file by drive item ID or name.
+- `markdown_list_files` — list the supported `.md` files (name, file ID, last modified timestamp, size in bytes). Subdirectories and `.md` files whose names violate the strict naming rules are reported alongside as `UNSUPPORTED`, so the agent knows they exist but cannot operate on them.
+- `markdown_get_file` — read a file by file ID **or** by file name (strict naming rules apply) and return its UTF-8 content.
+- `markdown_upload_file` — create or overwrite a file by name using a direct write of the file content.
+- `markdown_delete_file` — permanently delete a file by file ID or name.
+
+#### Strict file-name rules
+
+All markdown tool calls that accept a file name enforce a strict, cross-OS-safe naming rule. The goal is to make sure the agent can never create subdirectories, never use characters that only work on some operating systems, and never overwrite files whose names only _look_ like markdown files.
+
+A file name is accepted **only when all of the following hold:**
+
+- Ends in `.md` (case-insensitive).
+- Contains only letters (A–Z, a–z), digits, space, dot (`.`), underscore (`_`), and hyphen (`-`).
+- Starts with a letter or digit (no leading dot, space, or hyphen).
+- Does not contain path separators (`/`, `\`) or any subdirectory segments.
+- Does not contain control characters.
+- Is not a Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`).
+- Has no leading or trailing whitespace, and no trailing dot before `.md`.
+- Is no longer than 255 characters.
+
+Requests with invalid names are rejected with a clear error that states which rule was violated. This enforcement applies to `markdown_upload_file`, `markdown_get_file`, and `markdown_delete_file` — including when these tools are called by drive item ID and the stored name is unsupported.
 
 **4 MB limit.** `markdown_get_file` and `markdown_upload_file` enforce a hard 4 MB (4,194,304 bytes) limit per request. This is the Microsoft Graph limit for direct content transfers. graphdo-ts deliberately does not support resumable upload sessions — markdown notes are expected to be well under this limit, and avoiding the complexity of session-based uploads keeps the tool surface small. Files over 4 MB return a clear error.
 
-See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MB limit, the folder picker approach, and the Graph API constraints.
+See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MB limit, the folder picker approach, the Graph API constraints, and the strict file-name rules.
 
 ---
 

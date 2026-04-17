@@ -17,9 +17,9 @@ export interface SentMail {
   contentType: string;
 }
 
-/** A mock OneDrive file with in-memory content. */
+/** A mock child of a OneDrive folder — either a file with in-memory content or a subfolder. */
 export interface MockDriveFile extends DriveItem {
-  content: string;
+  content?: string;
 }
 
 export class MockState {
@@ -620,15 +620,16 @@ async function handleDriveRequest(
   // GET /me/drive/items/{id}/content
   if (method === "GET" && segments.length === 5 && segments[4] === "content") {
     const file = findMockFile(state, itemId);
-    if (!file) {
+    if (file?.content === undefined) {
       errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
       return true;
     }
+    const body = file.content;
     res.writeHead(200, {
       "Content-Type": "text/markdown; charset=utf-8",
-      "Content-Length": String(Buffer.byteLength(file.content, "utf-8")),
+      "Content-Length": String(Buffer.byteLength(body, "utf-8")),
     });
-    res.end(file.content);
+    res.end(body);
     return true;
   }
 

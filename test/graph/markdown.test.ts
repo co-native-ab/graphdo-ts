@@ -12,6 +12,7 @@ import {
   findMarkdownFileByName,
   getDriveItem,
   listMarkdownFiles,
+  listMarkdownFolderEntries,
   listRootFolders,
   uploadMarkdownContent,
 } from "../../src/graph/markdown.js";
@@ -181,5 +182,134 @@ describe("markdown graph operations", () => {
     await deleteDriveItem(client, "file-md-1", testSignal());
     const files = await listMarkdownFiles(client, "folder-1", testSignal());
     expect(files.map((f) => f.id)).not.toContain("file-md-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Classification (listMarkdownFolderEntries) + strict naming enforcement
+// ---------------------------------------------------------------------------
+
+describe("markdown graph operations: classification & validation", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    env.state.driveRootChildren = [{ id: "folder-1", name: "Notes", folder: { childCount: 0 } }];
+    env.state.driveFolderChildren.set("folder-1", [
+      // Supported: plain .md file with a safe name
+      {
+        id: "ok-1",
+        name: "plain.md",
+        size: 4,
+        file: { mimeType: "text/markdown" },
+        content: "body",
+      },
+      // Unsupported: subdirectory
+      {
+        id: "subdir-1",
+        name: "archive",
+        folder: { childCount: 0 },
+      },
+      // Unsupported: .md file with a name containing a character not in the allow-list
+      {
+        id: "weird-1",
+        name: "weird@name.md",
+        size: 3,
+        file: { mimeType: "text/markdown" },
+        content: "weird",
+      },
+      // Unsupported: .md file with the Windows reserved stem
+      {
+        id: "reserved-1",
+        name: "CON.md",
+        size: 3,
+        file: { mimeType: "text/markdown" },
+        content: "reserved",
+      },
+      // Excluded from listing entirely: non-.md file
+      {
+        id: "txt-1",
+        name: "plain.txt",
+        size: 5,
+        file: { mimeType: "text/plain" },
+        content: "plain",
+      },
+    ]);
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("listMarkdownFolderEntries classifies supported .md files", async () => {
+    const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
+    const supported = entries.filter((e) => e.kind === "supported");
+    expect(supported.map((e) => e.item.id)).toEqual(["ok-1"]);
+  });
+
+  it("listMarkdownFolderEntries flags subdirectories as unsupported", async () => {
+    const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
+    const subdir = entries.find((e) => e.item.id === "subdir-1");
+    expect(subdir).toBeDefined();
+    expect(subdir!.kind).toBe("unsupported");
+    if (subdir!.kind === "unsupported") {
+      expect(subdir!.reason).toContain("subdirectory");
+    }
+  });
+
+  it("listMarkdownFolderEntries flags .md files with unsupported names", async () => {
+    const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
+    const weird = entries.find((e) => e.item.id === "weird-1");
+    expect(weird?.kind).toBe("unsupported");
+    if (weird?.kind === "unsupported") {
+      expect(weird.reason).toContain("unsupported file name");
+    }
+    const reserved = entries.find((e) => e.item.id === "reserved-1");
+    expect(reserved?.kind).toBe("unsupported");
+    if (reserved?.kind === "unsupported") {
+      expect(reserved.reason).toContain("reserved");
+    }
+  });
+
+  it("listMarkdownFolderEntries omits non-markdown files entirely", async () => {
+    const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
+    expect(entries.some((e) => e.item.id === "txt-1")).toBe(false);
+  });
+
+  it("listMarkdownFiles returns only supported entries", async () => {
+    const files = await listMarkdownFiles(client, "folder-1", testSignal());
+    expect(files.map((f) => f.id)).toEqual(["ok-1"]);
+  });
+
+  it("findMarkdownFileByName rejects invalid names before touching the network", async () => {
+    await expect(
+      findMarkdownFileByName(client, "folder-1", "../escape.md", testSignal()),
+    ).rejects.toThrow(/path separator/);
+  });
+
+  it("findMarkdownFileByName returns null for a valid-but-missing name", async () => {
+    const result = await findMarkdownFileByName(client, "folder-1", "missing.md", testSignal());
+    expect(result).toBeNull();
+  });
+
+  it("findMarkdownFileByName does not match a file whose remote name is unsupported", async () => {
+    // Even though "weird@name.md" exists remotely, it should not be reachable
+    // by name-based lookup because listMarkdownFiles filters it out.
+    const result = await findMarkdownFileByName(client, "folder-1", "notes.md", testSignal());
+    expect(result).toBeNull();
+  });
+
+  it("uploadMarkdownContent rejects unsafe names before touching the network", async () => {
+    await expect(
+      uploadMarkdownContent(client, "folder-1", "sub/dir.md", "x", testSignal()),
+    ).rejects.toThrow(/path separator/);
+    await expect(
+      uploadMarkdownContent(client, "folder-1", "CON.md", "x", testSignal()),
+    ).rejects.toThrow(/reserved name/);
+    await expect(
+      uploadMarkdownContent(client, "folder-1", "weird@name.md", "x", testSignal()),
+    ).rejects.toThrow(/not portable/);
   });
 });

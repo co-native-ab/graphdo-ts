@@ -229,7 +229,7 @@ describe("integration: markdown", () => {
         arguments: {},
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
-      expect(firstText(r)).toContain("No folders found");
+      expect(firstText(r)).toContain("No top-level folders");
     } finally {
       env.graphState.driveRootChildren = originalRoot;
     }
@@ -408,6 +408,152 @@ describe("integration: markdown", () => {
       })) as ToolResult;
       expect(r.isError).toBe(true);
       expect(firstText(r)).toContain("Either itemId or fileName must be provided");
+    });
+
+    // -------------------------------------------------------------------
+    // Strict naming enforcement
+    // -------------------------------------------------------------------
+
+    describe("strict file-name enforcement", () => {
+      it("markdown_upload_file rejects names with path separators (schema-level)", async () => {
+        const r = (await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "sub/note.md", content: "x" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
+      });
+
+      it("markdown_upload_file rejects Windows reserved names", async () => {
+        const r = (await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "CON.md", content: "x" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("reserved");
+      });
+
+      it("markdown_upload_file rejects non-portable characters", async () => {
+        const r = (await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "weird@name.md", content: "x" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("not portable");
+      });
+
+      it("markdown_upload_file rejects names over 255 chars", async () => {
+        const longName = `${"a".repeat(254)}.md`; // 256 chars total
+        const r = (await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: longName, content: "x" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("maximum length");
+      });
+
+      it("markdown_get_file rejects unsafe names with a clear error", async () => {
+        const r = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "../escape.md" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
+      });
+
+      it("markdown_delete_file rejects unsafe names with a clear error", async () => {
+        const r = (await c.callTool({
+          name: "markdown_delete_file",
+          arguments: { fileName: "sub/file.md" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
+      });
+
+      it("markdown_list_files marks subdirectories and unsafe .md files as UNSUPPORTED", async () => {
+        // Seed the configured folder with a subdirectory and an unsafe-named .md file.
+        env.graphState.driveFolderChildren.set("folder-1", [
+          // supported
+          {
+            id: "ok",
+            name: "ok.md",
+            size: 1,
+            file: { mimeType: "text/markdown" },
+            content: "x",
+          },
+          // subdirectory
+          { id: "sub", name: "archive", folder: {} },
+          // unsafe-named markdown
+          {
+            id: "bad",
+            name: "bad name?.md",
+            size: 1,
+            file: { mimeType: "text/markdown" },
+            content: "x",
+          },
+        ]);
+
+        const r = (await c.callTool({
+          name: "markdown_list_files",
+          arguments: {},
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const text = firstText(r);
+
+        // Supported file appears in the normal list
+        expect(text).toContain("ok.md");
+
+        // Subdirectory and unsafe-name file appear under UNSUPPORTED with a reason
+        expect(text).toContain("UNSUPPORTED");
+        expect(text).toContain("archive");
+        expect(text).toContain("subdirectory");
+        expect(text).toContain("bad name?.md");
+
+        // Footer mentions both counts
+        expect(text).toMatch(/Total:\s*1 supported, 2 unsupported/);
+      });
+
+      it("markdown_get_file by itemId refuses to download a subdirectory", async () => {
+        env.graphState.driveFolderChildren.set("folder-1", [
+          { id: "sub", name: "archive", folder: {} },
+        ]);
+        const r = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { itemId: "sub" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("subdirectory");
+      });
+
+      it("markdown_get_file by itemId refuses to download a file with an unsafe stored name", async () => {
+        env.graphState.driveFolderChildren.set("folder-1", [
+          {
+            id: "bad",
+            name: "bad name?.md",
+            size: 1,
+            file: { mimeType: "text/markdown" },
+            content: "x",
+          },
+        ]);
+        const r = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { itemId: "bad" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r)).toContain("cannot be read");
+      });
+
+      it("markdown_delete_file by itemId refuses to delete a subdirectory", async () => {
+        env.graphState.driveFolderChildren.set("folder-1", [
+          { id: "sub", name: "archive", folder: {} },
+        ]);
+        const r = (await c.callTool({
+          name: "markdown_delete_file",
+          arguments: { itemId: "sub" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("subdirectory");
+      });
     });
   });
 });

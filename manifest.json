@@ -93,23 +93,23 @@
     },
     {
       "name": "markdown_select_root_folder",
-      "description": "Select which OneDrive folder graphdo should use for markdown files. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves."
+      "description": "Select the root folder graphdo should use for markdown files. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves."
     },
     {
       "name": "markdown_list_files",
-      "description": "List .md files in the configured OneDrive root folder, including name, drive item ID, last modified timestamp, and size in bytes."
+      "description": "List markdown files in the configured root folder, including name, file ID, last modified timestamp, and size in bytes. Subdirectories and files whose names violate the strict naming rules are reported as UNSUPPORTED so they are visible but cannot be acted on."
     },
     {
       "name": "markdown_get_file",
-      "description": "Read a markdown file's UTF-8 content. Accepts either a drive item ID or a file name (case-insensitive, must end in .md). Files larger than 4 MB are not supported."
+      "description": "Read a markdown file's UTF-8 content. Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported."
     },
     {
       "name": "markdown_upload_file",
-      "description": "Create or overwrite a markdown file in the configured OneDrive root folder. Accepts a file name (must end in .md) and UTF-8 content. Payloads larger than 4 MB are rejected."
+      "description": "Create or overwrite a markdown file in the configured root folder. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected."
     },
     {
       "name": "markdown_delete_file",
-      "description": "Permanently delete a markdown file from the configured OneDrive root folder. Accepts either a drive item ID or a file name."
+      "description": "Permanently delete a markdown file from the configured root folder. Accepts either a file ID or a file name. File names must follow the strict naming rules."
     }
   ],
   "keywords": [
