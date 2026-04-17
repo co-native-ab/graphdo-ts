@@ -36,122 +36,109 @@ import { formatError } from "./shared.js";
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
-
-// These markdown tools are deliberately **single-user / "single player"** — they
-// operate on files in _your own_ OneDrive only. There is no support for
-// sharing, co-authoring, commenting, or otherwise collaborating with other
-// people on the same file. Collaborative ("multi-player") file workflows are a
-// separate, future feature and will be provided as a different set of tools
-// with different names. Descriptions below state this explicitly so that the
-// agent does not suggest or attempt collaboration through these tools.
+//
+// All markdown tools operate on the signed-in user's own OneDrive, scoped to a
+// single root folder selected via markdown_select_root_folder.
 
 const SELECT_ROOT_DEF: ToolDef = {
   name: "markdown_select_root_folder",
-  title: "Select Markdown Root Folder (personal)",
+  title: "Select Markdown Root Folder",
   description:
     "Select the root folder that graphdo should use for markdown files in " +
-    "YOUR OWN OneDrive. Call this tool directly when a markdown root folder " +
-    "has not been configured yet - do not ask the user which folder, this " +
-    "tool opens a browser picker where the user makes the selection " +
-    "themselves. This is a human-only action - the AI agent cannot choose " +
-    "the folder programmatically. Calling it again overwrites the stored " +
-    "value. These markdown tools are single-user/personal: they do not " +
-    "support sharing or collaboration with other people; a separate set of " +
-    "collaborative tools will be added in the future.",
+    "the signed-in user's OneDrive. Call this tool directly when a markdown " +
+    "root folder has not been configured yet - do not ask the user which " +
+    "folder, this tool opens a browser picker where the user makes the " +
+    "selection themselves. This is a human-only action - the AI agent cannot " +
+    "choose the folder programmatically. Calling it again overwrites the " +
+    "stored value.",
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const LIST_FILES_DEF: ToolDef = {
   name: "markdown_list_files",
-  title: "List Markdown Files (personal)",
+  title: "List Markdown Files",
   description:
-    "List markdown files directly inside the configured root folder in YOUR " +
-    "OWN OneDrive. Each entry reports the file name, opaque file ID, last " +
-    "modified timestamp, and size in bytes. Subdirectories and files whose " +
-    "names do not follow the strict naming rules are also reported, but " +
-    "marked as UNSUPPORTED - these entries exist but cannot be read, " +
-    "written, or deleted by the markdown tools. Single-user/personal: " +
-    "does not list files shared by other people. " +
+    "List markdown files directly inside the configured root folder in the " +
+    "signed-in user's OneDrive. Each entry reports the file name, opaque " +
+    "file ID, last modified timestamp, and size in bytes. Subdirectories " +
+    "and files whose names do not follow the strict naming rules are also " +
+    "reported, but marked as UNSUPPORTED - these entries exist but cannot " +
+    "be read, written, or deleted by the markdown tools. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const GET_FILE_DEF: ToolDef = {
   name: "markdown_get_file",
-  title: "Get Markdown File (personal)",
+  title: "Get Markdown File",
   description:
-    "Read a markdown file from YOUR OWN OneDrive (the configured root " +
-    "folder). Accepts either a file ID (from markdown_list_files) or a " +
+    "Read a markdown file from the signed-in user's OneDrive (the configured " +
+    "root folder). Accepts either a file ID (from markdown_list_files) or a " +
     "file name. File names must follow the strict naming rules and are " +
     "rejected otherwise - paths, subdirectories, and characters that are " +
     "not portable across Linux, macOS, and Windows are not allowed. Returns " +
-    "the file's UTF-8 content. Files larger than 4 MB cannot be downloaded " +
-    "and will return an error. Single-user/personal: always reads the " +
-    "current version from your own drive, not a shared or co-authored " +
-    "copy. To read a previous version, use markdown_get_file_version. " +
+    "the current UTF-8 content of the file. Files larger than 4 MB cannot " +
+    "be downloaded and will return an error. To read a previous version, " +
+    "use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const UPLOAD_FILE_DEF: ToolDef = {
   name: "markdown_upload_file",
-  title: "Upload Markdown File (personal)",
+  title: "Upload Markdown File",
   description:
-    "Create or overwrite a markdown file in YOUR OWN OneDrive (the " +
-    "configured root folder). The file name must follow the strict naming " +
-    "rules - paths, subdirectories, and characters that are not portable " +
-    "across Linux, macOS, and Windows are rejected with a clear error. " +
-    "Accepts the UTF-8 markdown content. Payloads larger than 4 MB are " +
-    "rejected - upload sessions are not supported. Single-user/personal: " +
-    "this is a solo write, not a collaborative edit. OneDrive keeps the " +
-    "previous content as a version, which markdown_list_file_versions can " +
-    "surface. " +
+    "Create or overwrite a markdown file in the configured root folder of " +
+    "the signed-in user's OneDrive. The file name must follow the strict " +
+    "naming rules - paths, subdirectories, and characters that are not " +
+    "portable across Linux, macOS, and Windows are rejected with a clear " +
+    "error. Accepts the UTF-8 markdown content. Payloads larger than 4 MB " +
+    "are rejected - upload sessions are not supported. When an existing " +
+    "file is overwritten, OneDrive retains the previous content as a " +
+    "version that markdown_list_file_versions can surface. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const DELETE_FILE_DEF: ToolDef = {
   name: "markdown_delete_file",
-  title: "Delete Markdown File (personal)",
+  title: "Delete Markdown File",
   description:
-    "Permanently delete a markdown file from YOUR OWN OneDrive (the " +
-    "configured root folder). Accepts either a file ID or a file name. " +
-    "File names must follow the strict naming rules and are rejected " +
-    "otherwise. Single-user/personal: deletes only your own copy; this " +
-    "tool is not aware of shares or co-authors. " +
+    "Permanently delete a markdown file from the configured root folder of " +
+    "the signed-in user's OneDrive. Accepts either a file ID or a file " +
+    "name. File names must follow the strict naming rules and are rejected " +
+    "otherwise. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const LIST_VERSIONS_DEF: ToolDef = {
   name: "markdown_list_file_versions",
-  title: "List Markdown File Versions (personal)",
+  title: "List Markdown File Versions",
   description:
-    "List historical versions of a markdown file in YOUR OWN OneDrive. " +
-    "OneDrive retains previous versions automatically whenever a file is " +
-    "overwritten; this tool surfaces that history (newest first) so the " +
-    "agent can see when the file changed and, together with " +
+    "List historical versions of a markdown file in the signed-in user's " +
+    "OneDrive. OneDrive retains previous versions automatically whenever a " +
+    "file is overwritten; this tool surfaces that history (newest first) " +
+    "so the agent can see when the file changed and, together with " +
     "markdown_get_file_version, recover earlier content. Accepts either a " +
     "file ID or a file name. Returns each version's opaque version ID, " +
-    "last modified timestamp, size in bytes, and — when available — the " +
-    "name of the user who last modified it. Single-user/personal: lists " +
-    "versions stored under your own account. " +
+    "last modified timestamp, size in bytes, and - when available - the " +
+    "name of the user who last modified it. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const GET_VERSION_DEF: ToolDef = {
   name: "markdown_get_file_version",
-  title: "Get Markdown File Version (personal)",
+  title: "Get Markdown File Version",
   description:
     "Read the UTF-8 content of a specific historical version of a markdown " +
-    "file in YOUR OWN OneDrive. Requires the file (by ID or name) and the " +
-    "version ID previously returned by markdown_list_file_versions. This " +
-    "does not restore or modify the file - it only reads the prior " +
-    "content. Use markdown_upload_file to re-upload that content if you " +
-    "want to make it current. Files larger than 4 MB cannot be " +
-    "downloaded. Single-user/personal: reads only versions of your own " +
-    "file. " +
+    "file in the signed-in user's OneDrive. Requires the file (by ID or " +
+    "name) and the version ID previously returned by " +
+    "markdown_list_file_versions. This does not restore or modify the file " +
+    "- it only reads the prior content. Use markdown_upload_file to " +
+    "re-upload that content if you want to make it current. Files larger " +
+    "than 4 MB cannot be downloaded. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };

@@ -93,31 +93,31 @@
     },
     {
       "name": "markdown_select_root_folder",
-      "description": "Select the root folder graphdo should use for markdown files in your own OneDrive. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves. Single-user/personal: these markdown tools do not support sharing or collaboration; collaborative tools are a separate, future feature."
+      "description": "Select the root folder graphdo should use for markdown files in the signed-in user's OneDrive. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves."
     },
     {
       "name": "markdown_list_files",
-      "description": "List markdown files in the configured root folder of your own OneDrive, including name, file ID, last modified timestamp, and size in bytes. Subdirectories and files whose names violate the strict naming rules are reported as UNSUPPORTED so they are visible but cannot be acted on. Single-user/personal: does not list files shared by others."
+      "description": "List markdown files in the configured root folder of the signed-in user's OneDrive, including name, file ID, last modified timestamp, and size in bytes. Subdirectories and files whose names violate the strict naming rules are reported as UNSUPPORTED so they are visible but cannot be acted on."
     },
     {
       "name": "markdown_get_file",
-      "description": "Read a markdown file's UTF-8 content from your own OneDrive. Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Single-user/personal: reads the current version of your own file; use markdown_get_file_version for prior versions."
+      "description": "Read the current UTF-8 content of a markdown file in the configured root folder. Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
     },
     {
       "name": "markdown_upload_file",
-      "description": "Create or overwrite a markdown file in the configured root folder of your own OneDrive. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected. Single-user/personal: this is a solo write, not a collaborative edit."
+      "description": "Create or overwrite a markdown file in the configured root folder. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected. When an existing file is overwritten, OneDrive retains the previous content as a version that markdown_list_file_versions can surface."
     },
     {
       "name": "markdown_delete_file",
-      "description": "Permanently delete a markdown file from the configured root folder of your own OneDrive. Accepts either a file ID or a file name. File names must follow the strict naming rules. Single-user/personal: deletes only your own copy."
+      "description": "Permanently delete a markdown file from the configured root folder. Accepts either a file ID or a file name. File names must follow the strict naming rules."
     },
     {
       "name": "markdown_list_file_versions",
-      "description": "List historical versions OneDrive retained for a markdown file in your own OneDrive (newest first). Returns each version's opaque version ID, last modified timestamp, size, and - when available - the user who last modified it. Use the version ID with markdown_get_file_version to read the prior content. Single-user/personal."
+      "description": "List historical versions OneDrive retained for a markdown file (newest first). Returns each version's opaque version ID, last modified timestamp, size, and - when available - the user who last modified it. Use the version ID with markdown_get_file_version to read the prior content."
     },
     {
       "name": "markdown_get_file_version",
-      "description": "Read the UTF-8 content of a specific historical version of a markdown file in your own OneDrive. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_upload_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded. Single-user/personal."
+      "description": "Read the UTF-8 content of a specific historical version of a markdown file. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_upload_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded."
     }
   ],
   "keywords": [
