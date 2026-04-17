@@ -42,6 +42,8 @@ describe("integration: discovery & login", () => {
         "mail_send",
         "markdown_delete_file",
         "markdown_get_file",
+        "markdown_get_file_version",
+        "markdown_list_file_versions",
         "markdown_list_files",
         "markdown_select_root_folder",
         "markdown_upload_file",

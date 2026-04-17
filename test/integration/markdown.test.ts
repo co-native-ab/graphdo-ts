@@ -46,6 +46,10 @@ function seedDrive(env: IntegrationEnv): void {
     },
   ]);
   env.graphState.driveFolderChildren.set("folder-2", []);
+  // Historical versions are stored in a separate map that is NOT cleared by
+  // replacing driveFolderChildren. Reset it here so version-related tests
+  // start from a known-clean state and don't see leftovers from prior runs.
+  env.graphState.driveItemVersions.clear();
 }
 
 let env: IntegrationEnv;
@@ -731,6 +735,103 @@ describe("integration: markdown", () => {
         ]);
         const r = (await c.callTool({
           name: "markdown_delete_file",
+          arguments: { itemId: "sub" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("subdirectory");
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Version history
+    // -----------------------------------------------------------------------
+
+    describe("version history", () => {
+      it("markdown_list_file_versions returns no-prior-versions text for an untouched file", async () => {
+        const r = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const text = firstText(r);
+        expect(text).toContain("hello.md");
+        expect(text.toLowerCase()).toContain("no prior versions");
+      });
+
+      it("markdown_list_file_versions lists snapshots created by overwriting uploads", async () => {
+        // Overwrite hello.md twice so the mock produces two historical versions.
+        await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "hello.md", content: "v2" },
+        });
+        await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "hello.md", content: "v3" },
+        });
+
+        const r = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const text = firstText(r);
+        expect(text).toContain("hello.md");
+        expect(text).toMatch(/Total: 2 version\(s\)/);
+        expect(text).toContain("markdown_get_file_version");
+      });
+
+      it("markdown_get_file_version returns the historical content", async () => {
+        await c.callTool({
+          name: "markdown_upload_file",
+          arguments: { fileName: "hello.md", content: "updated" },
+        });
+
+        const list = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const listText = firstText(list);
+        // Extract the first "1. <versionId> — ..." entry.
+        const match = /^1\. (\S+) —/m.exec(listText);
+        expect(match).not.toBeNull();
+        const versionId = match?.[1];
+        if (!versionId) throw new Error("expected to parse a versionId from list output");
+
+        const r = (await c.callTool({
+          name: "markdown_get_file_version",
+          arguments: { fileName: "hello.md", versionId },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const body = firstText(r);
+        expect(body).toContain(`Version: ${versionId}`);
+        // The original seeded content before the overwrite was "hello".
+        expect(body).toContain("hello");
+        expect(body).not.toContain("updated");
+      });
+
+      it("markdown_get_file_version errors with an unknown versionId", async () => {
+        const r = (await c.callTool({
+          name: "markdown_get_file_version",
+          arguments: { fileName: "hello.md", versionId: "does-not-exist" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+      });
+
+      it("markdown_list_file_versions requires itemId or fileName", async () => {
+        const r = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: {},
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r)).toContain("Either itemId or fileName");
+      });
+
+      it("markdown_list_file_versions rejects a subdirectory", async () => {
+        env.graphState.driveFolderChildren.set("folder-1", [
+          { id: "sub", name: "archive", folder: {} },
+        ]);
+        const r = (await c.callTool({
+          name: "markdown_list_file_versions",
           arguments: { itemId: "sub" },
         })) as ToolResult;
         expect(r.isError).toBe(true);

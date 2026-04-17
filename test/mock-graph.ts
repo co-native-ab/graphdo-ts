@@ -6,6 +6,7 @@ import type {
   TodoList,
   ChecklistItem,
   DriveItem,
+  DriveItemVersion,
   SendMailRequest,
   GraphErrorEnvelope,
 } from "../src/graph/types.js";
@@ -22,6 +23,11 @@ export interface MockDriveFile extends DriveItem {
   content?: string;
 }
 
+/** A mock historical version of a drive item, with in-memory content. */
+export interface MockDriveItemVersion extends DriveItemVersion {
+  content: string;
+}
+
 export class MockState {
   user: User;
   todoLists: TodoList[];
@@ -32,9 +38,16 @@ export class MockState {
   driveRootChildren: DriveItem[];
   /** Children keyed by folder ID. Each folder's entry contains its files/folders. */
   driveFolderChildren: Map<string, MockDriveFile[]>;
+  /**
+   * Historical versions keyed by file ID, newest first. Populated
+   * automatically when a file is overwritten via the upload endpoint; tests
+   * may also seed entries directly for explicit scenarios.
+   */
+  driveItemVersions: Map<string, MockDriveItemVersion[]>;
   /** Metadata returned by `GET /me/drive`. */
   drive: { id: string; driveType: string; webUrl: string };
   private nextId: number;
+  private nextVersionSeq: number;
 
   constructor() {
     this.user = { id: "", displayName: "", mail: "", userPrincipalName: "" };
@@ -44,17 +57,29 @@ export class MockState {
     this.sentMails = [];
     this.driveRootChildren = [];
     this.driveFolderChildren = new Map();
+    this.driveItemVersions = new Map();
     this.drive = {
       id: "mock-drive-1",
       driveType: "business",
       webUrl: "https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents",
     };
     this.nextId = 1;
+    this.nextVersionSeq = 1;
   }
 
   genId(): string {
     const id = `mock-${this.nextId}`;
     this.nextId++;
+    return id;
+  }
+
+  /**
+   * Generate the next version ID. OneDrive on SharePoint uses "1.0", "2.0",
+   * etc.; we use the same shape but treat it as opaque in production code.
+   */
+  genVersionId(): string {
+    const id = `${String(this.nextVersionSeq)}.0`;
+    this.nextVersionSeq++;
     return id;
   }
 
@@ -659,6 +684,36 @@ async function handleDriveRequest(
     return true;
   }
 
+  // GET /me/drive/items/{id}/versions
+  if (method === "GET" && segments.length === 5 && segments[4] === "versions") {
+    const versions = state.driveItemVersions.get(itemId) ?? [];
+    const value = versions.map((v) => driveItemVersionView(v));
+    jsonResponse(res, 200, { value });
+    return true;
+  }
+
+  // GET /me/drive/items/{id}/versions/{versionId}/content
+  if (
+    method === "GET" &&
+    segments.length === 7 &&
+    segments[4] === "versions" &&
+    segments[6] === "content"
+  ) {
+    const versionId = decodeURIComponent(segments[5] ?? "");
+    const versions = state.driveItemVersions.get(itemId) ?? [];
+    const match = versions.find((v) => v.id === versionId);
+    if (!match) {
+      errorResponse(res, 404, "itemNotFound", `version ${versionId} of item ${itemId} not found`);
+      return true;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Length": String(Buffer.byteLength(match.content, "utf-8")),
+    });
+    res.end(match.content);
+    return true;
+  }
+
   // DELETE /me/drive/items/{id}
   if (method === "DELETE" && segments.length === 4) {
     const parentId = state.findParentFolderId(itemId);
@@ -707,6 +762,18 @@ function driveItemView(file: MockDriveFile): DriveItem {
   };
 }
 
+function driveItemVersionView(v: MockDriveItemVersion): DriveItemVersion {
+  // Strip the in-memory content from wire responses so tests exercise the
+  // same shape the real Graph API returns: content is only available via
+  // the /content sub-resource, not the list.
+  return {
+    id: v.id,
+    lastModifiedDateTime: v.lastModifiedDateTime,
+    size: v.size,
+    lastModifiedBy: v.lastModifiedBy,
+  };
+}
+
 async function handleUploadMarkdown(
   state: MockState,
   req: http.IncomingMessage,
@@ -734,6 +801,22 @@ async function handleUploadMarkdown(
   let file: MockDriveFile;
   let status: number;
   if (existingFile) {
+    // Snapshot the previous content as a historical version before
+    // overwriting, so tests for markdown_list_file_versions /
+    // markdown_get_file_version see OneDrive-like behaviour.
+    if (existingFile.content !== undefined) {
+      const prior: MockDriveItemVersion = {
+        id: state.genVersionId(),
+        lastModifiedDateTime: existingFile.lastModifiedDateTime ?? now,
+        size: existingFile.size,
+        content: existingFile.content,
+        lastModifiedBy: { user: { displayName: "Mock User" } },
+      };
+      const history = state.driveItemVersions.get(existingFile.id) ?? [];
+      // Newest first — unshift the prior content.
+      history.unshift(prior);
+      state.driveItemVersions.set(existingFile.id, history);
+    }
     existingFile.content = content;
     existingFile.size = bytes;
     existingFile.lastModifiedDateTime = now;

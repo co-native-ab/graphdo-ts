@@ -8,10 +8,12 @@ import {
   MAX_DIRECT_CONTENT_BYTES,
   MarkdownFileTooLargeError,
   deleteDriveItem,
+  downloadDriveItemVersionContent,
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
   getMyDrive,
+  listDriveItemVersions,
   listMarkdownFiles,
   listMarkdownFolderEntries,
   listRootFolders,
@@ -351,5 +353,85 @@ describe("getMyDrive", () => {
     // Empty string is a string — the schema accepts it; the tool layer treats
     // empty as "no URL" and falls back to the default.
     expect(drive.webUrl).toBe("");
+  });
+});
+
+describe("markdown version history graph operations", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    seedOneDrive(env);
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("listDriveItemVersions returns an empty array for a file with no prior versions", async () => {
+    const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    expect(versions).toEqual([]);
+  });
+
+  it("overwriting a file via uploadMarkdownContent snapshots the prior version", async () => {
+    await uploadMarkdownContent(client, "folder-1", "ideas.md", "v2", testSignal());
+    await uploadMarkdownContent(client, "folder-1", "ideas.md", "v3", testSignal());
+
+    const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    // Two overwrites produce two historical snapshots (the original + the v2).
+    expect(versions).toHaveLength(2);
+    // Every version carries a non-empty ID and a timestamp.
+    for (const v of versions) {
+      expect(v.id.length).toBeGreaterThan(0);
+      expect(typeof v.lastModifiedDateTime).toBe("string");
+    }
+    // Content is NOT part of the list response — only the /content sub-resource.
+    // Confirm we can still download the most recent snapshot (which is the v2
+    // payload, since v3 became current).
+    const [firstVersion] = versions;
+    if (!firstVersion) throw new Error("expected at least one version");
+    const firstContent = await downloadDriveItemVersionContent(
+      client,
+      "file-md-1",
+      firstVersion.id,
+      testSignal(),
+    );
+    expect(["v2", "hello world!"]).toContain(firstContent);
+  });
+
+  it("downloadDriveItemVersionContent returns the stored content", async () => {
+    await uploadMarkdownContent(client, "folder-1", "ideas.md", "updated", testSignal());
+    const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    expect(versions).toHaveLength(1);
+    const [prior] = versions;
+    if (!prior) throw new Error("expected prior version");
+    const content = await downloadDriveItemVersionContent(
+      client,
+      "file-md-1",
+      prior.id,
+      testSignal(),
+    );
+    expect(content).toBe("hello world!");
+  });
+
+  it("downloadDriveItemVersionContent returns a 404-style error for an unknown versionId", async () => {
+    await expect(
+      downloadDriveItemVersionContent(client, "file-md-1", "does-not-exist", testSignal()),
+    ).rejects.toThrow();
+  });
+
+  it("listDriveItemVersions rejects empty itemId", async () => {
+    await expect(listDriveItemVersions(client, "", testSignal())).rejects.toThrow(
+      "itemId must not be empty",
+    );
+  });
+
+  it("downloadDriveItemVersionContent rejects empty ids", async () => {
+    await expect(downloadDriveItemVersionContent(client, "", "v", testSignal())).rejects.toThrow();
+    await expect(
+      downloadDriveItemVersionContent(client, "file-md-1", "", testSignal()),
+    ).rejects.toThrow();
   });
 });

@@ -11,10 +11,12 @@ import { loadAndValidateMarkdownConfig, updateConfig } from "../config.js";
 import { UserCancelledError } from "../errors.js";
 import {
   deleteDriveItem,
+  downloadDriveItemVersionContent,
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
   getMyDrive,
+  listDriveItemVersions,
   listMarkdownFolderEntries,
   listRootFolders,
   MarkdownFileTooLargeError,
@@ -35,68 +37,121 @@ import { formatError } from "./shared.js";
 // Tool definitions
 // ---------------------------------------------------------------------------
 
+// These markdown tools are deliberately **single-user / "single player"** — they
+// operate on files in _your own_ OneDrive only. There is no support for
+// sharing, co-authoring, commenting, or otherwise collaborating with other
+// people on the same file. Collaborative ("multi-player") file workflows are a
+// separate, future feature and will be provided as a different set of tools
+// with different names. Descriptions below state this explicitly so that the
+// agent does not suggest or attempt collaboration through these tools.
+
 const SELECT_ROOT_DEF: ToolDef = {
   name: "markdown_select_root_folder",
-  title: "Select Markdown Root Folder",
+  title: "Select Markdown Root Folder (personal)",
   description:
-    "Select the root folder that graphdo should use for markdown files. Call " +
-    "this tool directly when a markdown root folder has not been configured " +
-    "yet - do not ask the user which folder, this tool opens a browser picker " +
-    "where the user makes the selection themselves. This is a human-only " +
-    "action - the AI agent cannot choose the folder programmatically. Calling " +
-    "it again overwrites the stored value.",
+    "Select the root folder that graphdo should use for markdown files in " +
+    "YOUR OWN OneDrive. Call this tool directly when a markdown root folder " +
+    "has not been configured yet - do not ask the user which folder, this " +
+    "tool opens a browser picker where the user makes the selection " +
+    "themselves. This is a human-only action - the AI agent cannot choose " +
+    "the folder programmatically. Calling it again overwrites the stored " +
+    "value. These markdown tools are single-user/personal: they do not " +
+    "support sharing or collaboration with other people; a separate set of " +
+    "collaborative tools will be added in the future.",
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const LIST_FILES_DEF: ToolDef = {
   name: "markdown_list_files",
-  title: "List Markdown Files",
+  title: "List Markdown Files (personal)",
   description:
-    "List markdown files directly inside the configured root folder. Each " +
-    "entry reports the file name, opaque file ID, last modified timestamp, " +
-    "and size in bytes. Subdirectories and files whose names do not follow " +
-    "the strict naming rules are also reported, but marked as UNSUPPORTED - " +
-    "these entries exist but cannot be read, written, or deleted by the " +
-    "markdown tools. " +
+    "List markdown files directly inside the configured root folder in YOUR " +
+    "OWN OneDrive. Each entry reports the file name, opaque file ID, last " +
+    "modified timestamp, and size in bytes. Subdirectories and files whose " +
+    "names do not follow the strict naming rules are also reported, but " +
+    "marked as UNSUPPORTED - these entries exist but cannot be read, " +
+    "written, or deleted by the markdown tools. Single-user/personal: " +
+    "does not list files shared by other people. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const GET_FILE_DEF: ToolDef = {
   name: "markdown_get_file",
-  title: "Get Markdown File",
+  title: "Get Markdown File (personal)",
   description:
-    "Read a markdown file from the configured root folder. Accepts either a " +
-    "file ID (from markdown_list_files) or a file name. File names must follow " +
-    "the strict naming rules and are rejected otherwise - paths, subdirectories, " +
-    "and characters that are not portable across Linux, macOS, and Windows are " +
-    "not allowed. Returns the file's UTF-8 content. Files larger than 4 MB " +
-    "cannot be downloaded and will return an error. " +
+    "Read a markdown file from YOUR OWN OneDrive (the configured root " +
+    "folder). Accepts either a file ID (from markdown_list_files) or a " +
+    "file name. File names must follow the strict naming rules and are " +
+    "rejected otherwise - paths, subdirectories, and characters that are " +
+    "not portable across Linux, macOS, and Windows are not allowed. Returns " +
+    "the file's UTF-8 content. Files larger than 4 MB cannot be downloaded " +
+    "and will return an error. Single-user/personal: always reads the " +
+    "current version from your own drive, not a shared or co-authored " +
+    "copy. To read a previous version, use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const UPLOAD_FILE_DEF: ToolDef = {
   name: "markdown_upload_file",
-  title: "Upload Markdown File",
+  title: "Upload Markdown File (personal)",
   description:
-    "Create or overwrite a markdown file in the configured root folder. " +
-    "The file name must follow the strict naming rules - paths, subdirectories, " +
-    "and characters that are not portable across Linux, macOS, and Windows are " +
-    "rejected with a clear error. Accepts the UTF-8 markdown content. " +
-    "Payloads larger than 4 MB are rejected - upload sessions are not " +
-    "supported. " +
+    "Create or overwrite a markdown file in YOUR OWN OneDrive (the " +
+    "configured root folder). The file name must follow the strict naming " +
+    "rules - paths, subdirectories, and characters that are not portable " +
+    "across Linux, macOS, and Windows are rejected with a clear error. " +
+    "Accepts the UTF-8 markdown content. Payloads larger than 4 MB are " +
+    "rejected - upload sessions are not supported. Single-user/personal: " +
+    "this is a solo write, not a collaborative edit. OneDrive keeps the " +
+    "previous content as a version, which markdown_list_file_versions can " +
+    "surface. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 const DELETE_FILE_DEF: ToolDef = {
   name: "markdown_delete_file",
-  title: "Delete Markdown File",
+  title: "Delete Markdown File (personal)",
   description:
-    "Permanently delete a markdown file from the configured root folder. " +
-    "Accepts either a file ID or a file name. File names must follow the " +
-    "strict naming rules and are rejected otherwise. " +
+    "Permanently delete a markdown file from YOUR OWN OneDrive (the " +
+    "configured root folder). Accepts either a file ID or a file name. " +
+    "File names must follow the strict naming rules and are rejected " +
+    "otherwise. Single-user/personal: deletes only your own copy; this " +
+    "tool is not aware of shares or co-authors. " +
+    MARKDOWN_FILE_NAME_RULES,
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
+const LIST_VERSIONS_DEF: ToolDef = {
+  name: "markdown_list_file_versions",
+  title: "List Markdown File Versions (personal)",
+  description:
+    "List historical versions of a markdown file in YOUR OWN OneDrive. " +
+    "OneDrive retains previous versions automatically whenever a file is " +
+    "overwritten; this tool surfaces that history (newest first) so the " +
+    "agent can see when the file changed and, together with " +
+    "markdown_get_file_version, recover earlier content. Accepts either a " +
+    "file ID or a file name. Returns each version's opaque version ID, " +
+    "last modified timestamp, size in bytes, and — when available — the " +
+    "name of the user who last modified it. Single-user/personal: lists " +
+    "versions stored under your own account. " +
+    MARKDOWN_FILE_NAME_RULES,
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
+const GET_VERSION_DEF: ToolDef = {
+  name: "markdown_get_file_version",
+  title: "Get Markdown File Version (personal)",
+  description:
+    "Read the UTF-8 content of a specific historical version of a markdown " +
+    "file in YOUR OWN OneDrive. Requires the file (by ID or name) and the " +
+    "version ID previously returned by markdown_list_file_versions. This " +
+    "does not restore or modify the file - it only reads the prior " +
+    "content. Use markdown_upload_file to re-upload that content if you " +
+    "want to make it current. Files larger than 4 MB cannot be " +
+    "downloaded. Single-user/personal: reads only versions of your own " +
+    "file. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -107,6 +162,8 @@ export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
   GET_FILE_DEF,
   UPLOAD_FILE_DEF,
   DELETE_FILE_DEF,
+  LIST_VERSIONS_DEF,
+  GET_VERSION_DEF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -569,6 +626,185 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           };
         } catch (err: unknown) {
           return formatError("markdown_delete_file", err);
+        }
+      },
+    ),
+  );
+
+  // -------- markdown_list_file_versions --------
+  entries.push(
+    defineTool(
+      server,
+      LIST_VERSIONS_DEF,
+      {
+        inputSchema: idOrNameShape,
+        annotations: {
+          title: LIST_VERSIONS_DEF.title,
+          readOnlyHint: true,
+          openWorldHint: false,
+        },
+      },
+      async (args, { signal }) => {
+        try {
+          if (!args.itemId && !args.fileName) {
+            return {
+              content: [{ type: "text", text: "Either itemId or fileName must be provided." }],
+              isError: true,
+            };
+          }
+
+          const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+          const client = config.graphClient;
+          const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory, which is not supported. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          const nameCheck = validateMarkdownFileName(item.name);
+          if (!nameCheck.valid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" cannot have its versions listed: ${nameCheck.reason}. ` +
+                    MARKDOWN_FILE_NAME_RULES,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const versions = await listDriveItemVersions(client, item.id, signal);
+
+          const header = `Versions of "${item.name}" (${item.id}) — newest first:`;
+          if (versions.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `${header}\n\nNo prior versions are available for this file.`,
+                },
+              ],
+            };
+          }
+
+          const lines = versions.map((v, i) => {
+            const modified = v.lastModifiedDateTime ?? "unknown";
+            const size = formatSize(v.size);
+            const by = v.lastModifiedBy?.user?.displayName;
+            const byPart = by !== undefined && by.length > 0 ? `, by ${by}` : "";
+            return `${String(i + 1)}. ${v.id} — ${size}, modified ${modified}${byPart}`;
+          });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `${header}\n${lines.join("\n")}\n\n` +
+                  `Total: ${String(versions.length)} version(s). ` +
+                  "Use markdown_get_file_version with the versionId to read a specific prior version.",
+              },
+            ],
+          };
+        } catch (err: unknown) {
+          return formatError("markdown_list_file_versions", err);
+        }
+      },
+    ),
+  );
+
+  // -------- markdown_get_file_version --------
+  entries.push(
+    defineTool(
+      server,
+      GET_VERSION_DEF,
+      {
+        inputSchema: {
+          ...idOrNameShape,
+          versionId: z
+            .string()
+            .min(1)
+            .describe("Opaque version ID previously returned by markdown_list_file_versions."),
+        },
+        annotations: {
+          title: GET_VERSION_DEF.title,
+          readOnlyHint: true,
+          openWorldHint: false,
+        },
+      },
+      async (args, { signal }) => {
+        try {
+          if (!args.itemId && !args.fileName) {
+            return {
+              content: [{ type: "text", text: "Either itemId or fileName must be provided." }],
+              isError: true,
+            };
+          }
+
+          const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+          const client = config.graphClient;
+          const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory, which is not supported. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+          const nameCheck = validateMarkdownFileName(item.name);
+          if (!nameCheck.valid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" cannot have a version read: ${nameCheck.reason}. ` +
+                    MARKDOWN_FILE_NAME_RULES,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const content = await downloadDriveItemVersionContent(
+            client,
+            item.id,
+            args.versionId,
+            signal,
+          );
+
+          const header =
+            `${item.name} (${item.id})\n` +
+            `Version: ${args.versionId}\n` +
+            "(historical content, not the current version — use markdown_upload_file to restore)\n" +
+            "---";
+          return {
+            content: [{ type: "text", text: `${header}\n${content}` }],
+          };
+        } catch (err: unknown) {
+          if (err instanceof MarkdownFileTooLargeError) {
+            return { content: [{ type: "text", text: err.message }], isError: true };
+          }
+          return formatError("markdown_get_file_version", err);
         }
       },
     ),

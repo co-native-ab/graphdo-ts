@@ -4,8 +4,13 @@
 // selected by the user via a browser picker and persisted to config. The
 // configured ID is passed in by the caller — this module does not read config.
 
-import type { DriveItem, Drive } from "./types.js";
-import { DriveItemSchema, DriveSchema, GraphListResponseSchema } from "./types.js";
+import type { DriveItem, Drive, DriveItemVersion } from "./types.js";
+import {
+  DriveItemSchema,
+  DriveSchema,
+  DriveItemVersionSchema,
+  GraphListResponseSchema,
+} from "./types.js";
 import type { GraphClient } from "./client.js";
 import { HttpMethod, parseResponse } from "./client.js";
 import { logger } from "../logger.js";
@@ -445,4 +450,67 @@ export async function deleteDriveItem(
   if (!itemId) throw new Error("deleteDriveItem: itemId must not be empty");
   logger.debug("deleting drive item", { itemId });
   await client.request(HttpMethod.DELETE, `/me/drive/items/${encodeURIComponent(itemId)}`, signal);
+}
+
+// ---------------------------------------------------------------------------
+// Version history (read-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * List historical versions of a drive item, newest first.
+ *
+ * OneDrive automatically retains previous versions whenever a file is
+ * overwritten. This surfaces that history so a user can see "what was the
+ * file like last Tuesday?" and (via {@link downloadDriveItemVersionContent})
+ * read the content of a specific prior version.
+ *
+ * See https://learn.microsoft.com/en-us/graph/api/driveitem-list-versions.
+ */
+export async function listDriveItemVersions(
+  client: GraphClient,
+  itemId: string,
+  signal: AbortSignal,
+): Promise<DriveItemVersion[]> {
+  if (!itemId) throw new Error("listDriveItemVersions: itemId must not be empty");
+  logger.debug("listing drive item versions", { itemId });
+
+  const path = `/me/drive/items/${encodeURIComponent(itemId)}/versions`;
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const data = await parseResponse(
+    response,
+    GraphListResponseSchema(DriveItemVersionSchema),
+    HttpMethod.GET,
+    path,
+  );
+  return data.value;
+}
+
+/**
+ * Download the UTF-8 content of a specific historical version of a drive
+ * item. Enforces the same 4 MB direct-transfer limit as
+ * {@link downloadMarkdownContent}. Throws {@link MarkdownFileTooLargeError}
+ * when the limit is exceeded.
+ *
+ * See https://learn.microsoft.com/en-us/graph/api/driveitemversion-get-contents.
+ */
+export async function downloadDriveItemVersionContent(
+  client: GraphClient,
+  itemId: string,
+  versionId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!itemId) throw new Error("downloadDriveItemVersionContent: itemId must not be empty");
+  if (!versionId) throw new Error("downloadDriveItemVersionContent: versionId must not be empty");
+
+  const path =
+    `/me/drive/items/${encodeURIComponent(itemId)}` +
+    `/versions/${encodeURIComponent(versionId)}/content`;
+  logger.debug("downloading drive item version content", { itemId, versionId });
+
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (buf.byteLength > MAX_DIRECT_CONTENT_BYTES) {
+    throw new MarkdownFileTooLargeError(buf.byteLength, MAX_DIRECT_CONTENT_BYTES);
+  }
+  return buf.toString("utf-8");
 }

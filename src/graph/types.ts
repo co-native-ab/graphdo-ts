@@ -231,6 +231,48 @@ export const DriveSchema = z
   })
   .loose();
 
+/**
+ * A single historical version of a OneDrive drive item, as returned by
+ * `GET /me/drive/items/{id}/versions`. See
+ * https://learn.microsoft.com/en-us/graph/api/driveitem-list-versions.
+ *
+ * The ID is an opaque string assigned by OneDrive (for SharePoint-backed
+ * drives it looks like "1.0", "2.0", etc., but code must treat it as opaque).
+ * `lastModifiedBy.user.displayName` is populated on SharePoint/business drives
+ * but may be absent on personal OneDrive.
+ */
+export interface DriveItemVersion {
+  id: string;
+  lastModifiedDateTime?: string;
+  size?: number;
+  lastModifiedBy?: {
+    user?: {
+      displayName?: string;
+      email?: string;
+    };
+  };
+}
+
+export const DriveItemVersionSchema = z
+  .object({
+    id: z.string(),
+    lastModifiedDateTime: z.string().optional(),
+    size: z.number().optional(),
+    lastModifiedBy: z
+      .object({
+        user: z
+          .object({
+            displayName: z.string().optional(),
+            email: z.string().optional(),
+          })
+          .loose()
+          .optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();
+
 /** Graph API error response envelope. */
 export interface GraphErrorEnvelope {
   error: {
