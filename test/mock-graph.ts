@@ -5,6 +5,7 @@ import type {
   TodoItem,
   TodoList,
   ChecklistItem,
+  DriveItem,
   SendMailRequest,
   GraphErrorEnvelope,
 } from "../src/graph/types.js";
@@ -16,12 +17,21 @@ export interface SentMail {
   contentType: string;
 }
 
+/** A mock OneDrive file with in-memory content. */
+export interface MockDriveFile extends DriveItem {
+  content: string;
+}
+
 export class MockState {
   user: User;
   todoLists: TodoList[];
   todos: Map<string, TodoItem[]>;
   checklistItems: Map<string, ChecklistItem[]>;
   sentMails: SentMail[];
+  /** Top-level drive items under /me/drive/root (folders and/or files). */
+  driveRootChildren: DriveItem[];
+  /** Children keyed by folder ID. Each folder's entry contains its files/folders. */
+  driveFolderChildren: Map<string, MockDriveFile[]>;
   private nextId: number;
 
   constructor() {
@@ -30,6 +40,8 @@ export class MockState {
     this.todos = new Map();
     this.checklistItems = new Map();
     this.sentMails = [];
+    this.driveRootChildren = [];
+    this.driveFolderChildren = new Map();
     this.nextId = 1;
   }
 
@@ -49,6 +61,25 @@ export class MockState {
 
   getChecklistItems(taskId: string): ChecklistItem[] {
     return [...(this.checklistItems.get(taskId) ?? [])];
+  }
+
+  /** Find a drive item by ID anywhere in the mock state. */
+  findDriveItem(itemId: string): DriveItem | undefined {
+    const root = this.driveRootChildren.find((i) => i.id === itemId);
+    if (root) return root;
+    for (const files of this.driveFolderChildren.values()) {
+      const match = files.find((f) => f.id === itemId);
+      if (match) return match;
+    }
+    return undefined;
+  }
+
+  /** Find the folder ID that contains the given file (returns null if not found). */
+  findParentFolderId(itemId: string): string | null {
+    for (const [folderId, files] of this.driveFolderChildren.entries()) {
+      if (files.some((f) => f.id === itemId)) return folderId;
+    }
+    return null;
   }
 }
 
@@ -262,6 +293,12 @@ async function handleRequest(
           }
         }
       }
+    }
+
+    // OneDrive / drive routes -------------------------------------------
+    if (segments[0] === "me" && segments[1] === "drive") {
+      const handled = await handleDriveRequest(state, req, res, method, segments, parsed);
+      if (handled) return;
     }
 
     errorResponse(res, 404, "NotFound", `no route for ${method} ${parsed.pathname}`);
@@ -510,4 +547,193 @@ function handleDeleteChecklistItem(
 
   res.writeHead(204);
   res.end();
+}
+
+// ---------------------------------------------------------------------------
+// OneDrive / drive handlers
+// ---------------------------------------------------------------------------
+
+function readRawBody(req: http.IncomingMessage): Promise<string> {
+  // Same as readBody but kept separate for clarity — content uploads for the
+  // markdown tools send raw text, not JSON.
+  return readBody(req);
+}
+
+/**
+ * Handle requests under `/me/drive/...`.
+ * Returns `true` when the request was routed (a response has been sent);
+ * `false` when no route matched and the caller should fall through to 404.
+ */
+async function handleDriveRequest(
+  state: MockState,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  method: string,
+  segments: string[],
+  parsed: URL,
+): Promise<boolean> {
+  // GET /me/drive/root/children
+  if (
+    method === "GET" &&
+    segments.length === 4 &&
+    segments[2] === "root" &&
+    segments[3] === "children"
+  ) {
+    jsonResponse(res, 200, { value: state.driveRootChildren });
+    return true;
+  }
+
+  if (segments[2] !== "items" || segments.length < 4) {
+    return false;
+  }
+
+  // Upload: PUT /me/drive/items/{folderId}:/{fileName}:/content
+  // Segments look like: ["me","drive","items","{folderId}:","{fileName}:","content"]
+  if (
+    method === "PUT" &&
+    segments.length === 6 &&
+    segments[3]?.endsWith(":") &&
+    segments[4]?.endsWith(":") &&
+    segments[5] === "content"
+  ) {
+    const folderId = decodeURIComponent(segments[3].slice(0, -1));
+    const fileName = decodeURIComponent(segments[4].slice(0, -1));
+    await handleUploadMarkdown(state, req, res, folderId, fileName, parsed);
+    return true;
+  }
+
+  // {itemId} path segment may contain no colon (plain ID lookup).
+  const itemSegment = segments[3] ?? "";
+  const itemId = decodeURIComponent(itemSegment);
+
+  // GET /me/drive/items/{id}
+  if (method === "GET" && segments.length === 4) {
+    const item = state.findDriveItem(itemId);
+    if (!item) {
+      errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+      return true;
+    }
+    jsonResponse(res, 200, item);
+    return true;
+  }
+
+  // GET /me/drive/items/{id}/content
+  if (method === "GET" && segments.length === 5 && segments[4] === "content") {
+    const file = findMockFile(state, itemId);
+    if (!file) {
+      errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+      return true;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Length": String(Buffer.byteLength(file.content, "utf-8")),
+    });
+    res.end(file.content);
+    return true;
+  }
+
+  // GET /me/drive/items/{id}/children
+  if (method === "GET" && segments.length === 5 && segments[4] === "children") {
+    const children = state.driveFolderChildren.get(itemId) ?? [];
+    // Strip in-memory content from responses so the wire shape matches Graph's DriveItem.
+    const value = children.map((f) => driveItemView(f));
+    jsonResponse(res, 200, { value });
+    return true;
+  }
+
+  // DELETE /me/drive/items/{id}
+  if (method === "DELETE" && segments.length === 4) {
+    const parentId = state.findParentFolderId(itemId);
+    if (parentId !== null) {
+      const files = state.driveFolderChildren.get(parentId) ?? [];
+      const idx = files.findIndex((f) => f.id === itemId);
+      if (idx !== -1) {
+        files.splice(idx, 1);
+        state.driveFolderChildren.set(parentId, files);
+        res.writeHead(204);
+        res.end();
+        return true;
+      }
+    }
+    // Also allow deleting top-level root items
+    const rootIdx = state.driveRootChildren.findIndex((i) => i.id === itemId);
+    if (rootIdx !== -1) {
+      state.driveRootChildren.splice(rootIdx, 1);
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+    errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+    return true;
+  }
+
+  return false;
+}
+
+function findMockFile(state: MockState, itemId: string): MockDriveFile | undefined {
+  for (const files of state.driveFolderChildren.values()) {
+    const match = files.find((f) => f.id === itemId);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+function driveItemView(file: MockDriveFile): DriveItem {
+  return {
+    id: file.id,
+    name: file.name,
+    size: file.size,
+    lastModifiedDateTime: file.lastModifiedDateTime,
+    file: file.file,
+    folder: file.folder,
+  };
+}
+
+async function handleUploadMarkdown(
+  state: MockState,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  folderId: string,
+  fileName: string,
+  _parsed: URL,
+): Promise<void> {
+  // Require folder to exist (either as a root child or as a registered folder).
+  const folderExists =
+    state.driveFolderChildren.has(folderId) ||
+    state.driveRootChildren.some((i) => i.id === folderId);
+  if (!folderExists) {
+    errorResponse(res, 404, "itemNotFound", `folder ${folderId} not found`);
+    return;
+  }
+
+  const content = await readRawBody(req);
+  const bytes = Buffer.byteLength(content, "utf-8");
+  const now = new Date().toISOString();
+
+  const existing = state.driveFolderChildren.get(folderId) ?? [];
+  const existingFile = existing.find((f) => f.name.toLowerCase() === fileName.toLowerCase());
+
+  let file: MockDriveFile;
+  let status: number;
+  if (existingFile) {
+    existingFile.content = content;
+    existingFile.size = bytes;
+    existingFile.lastModifiedDateTime = now;
+    file = existingFile;
+    status = 200;
+  } else {
+    file = {
+      id: state.genId(),
+      name: fileName,
+      size: bytes,
+      lastModifiedDateTime: now,
+      file: { mimeType: "text/markdown" },
+      content,
+    };
+    existing.push(file);
+    state.driveFolderChildren.set(folderId, existing);
+    status = 201;
+  }
+
+  jsonResponse(res, status, driveItemView(file));
 }

@@ -1,0 +1,413 @@
+// Integration tests for OneDrive-backed markdown tools.
+
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+
+import {
+  setupIntegrationEnv,
+  teardownIntegrationEnv,
+  createTestClient,
+  firstText,
+  MockAuthenticator,
+  createMcpServer,
+  InMemoryTransport,
+  Client,
+  testSignal,
+  saveConfig,
+  loadConfig,
+  type IntegrationEnv,
+  type ToolResult,
+} from "./helpers.js";
+
+function seedDrive(env: IntegrationEnv): void {
+  env.graphState.driveRootChildren = [
+    { id: "folder-1", name: "Notes", folder: {}, lastModifiedDateTime: "2026-04-10T10:00:00Z" },
+    { id: "folder-2", name: "Work", folder: {}, lastModifiedDateTime: "2026-04-11T10:00:00Z" },
+  ];
+  env.graphState.driveFolderChildren.set("folder-1", [
+    {
+      id: "file-md-1",
+      name: "hello.md",
+      size: 5,
+      lastModifiedDateTime: "2026-04-10T11:00:00Z",
+      file: { mimeType: "text/markdown" },
+      content: "hello",
+    },
+    {
+      id: "file-txt",
+      name: "readme.txt",
+      size: 5,
+      lastModifiedDateTime: "2026-04-10T11:00:00Z",
+      file: { mimeType: "text/plain" },
+      content: "plain",
+    },
+  ]);
+  env.graphState.driveFolderChildren.set("folder-2", []);
+}
+
+let env: IntegrationEnv;
+
+describe("integration: markdown", () => {
+  beforeAll(async () => {
+    env = await setupIntegrationEnv();
+  });
+
+  afterAll(async () => {
+    await teardownIntegrationEnv(env);
+  });
+
+  beforeEach(() => {
+    seedDrive(env);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scope gating
+  // -------------------------------------------------------------------------
+
+  it("markdown tools are hidden when Files.ReadWrite not granted", async () => {
+    const noAuth = new MockAuthenticator();
+    const c = await createTestClient(env, noAuth);
+    const { tools } = await c.listTools();
+    const names = tools.map((t: { name: string }) => t.name);
+    for (const n of [
+      "markdown_select_root_folder",
+      "markdown_list_files",
+      "markdown_get_file",
+      "markdown_upload_file",
+      "markdown_delete_file",
+    ]) {
+      expect(names).not.toContain(n);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // "Not configured" errors
+  // -------------------------------------------------------------------------
+
+  it("markdown_list_files returns an error when root folder not configured", async () => {
+    const auth = new MockAuthenticator({ token: "md-token" });
+    const c = await createTestClient(env, auth);
+    const result = (await c.callTool({
+      name: "markdown_list_files",
+      arguments: {},
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(firstText(result)).toContain("markdown root folder not configured");
+  });
+
+  it("markdown_get_file, markdown_upload_file, markdown_delete_file all require configuration", async () => {
+    const auth = new MockAuthenticator({ token: "md-token" });
+    const c = await createTestClient(env, auth);
+
+    for (const call of [
+      { name: "markdown_get_file", arguments: { fileName: "x.md" } },
+      { name: "markdown_upload_file", arguments: { fileName: "x.md", content: "x" } },
+      { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
+    ]) {
+      const r = (await c.callTool(call)) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("markdown root folder not configured");
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Browser-picker root folder selection
+  // -------------------------------------------------------------------------
+
+  it("markdown_select_root_folder configures root via browser picker (full e2e)", async () => {
+    const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-e2e-"));
+
+    try {
+      let capturedUrl = "";
+      const browserSpy = (url: string): Promise<void> => {
+        capturedUrl = url;
+        setTimeout(() => {
+          void fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "folder-2", label: "/Work" }),
+          });
+        }, 150);
+        return Promise.resolve();
+      };
+
+      const auth = new MockAuthenticator({ token: "md-select-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const c = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await c.connect(ct);
+
+      const result = (await c.callTool({
+        name: "markdown_select_root_folder",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      const text = firstText(result);
+      expect(text).toContain("browser window has been opened");
+      expect(text).toContain("folder-2");
+      expect(capturedUrl).toContain("http://127.0.0.1:");
+
+      const cfg = await loadConfig(tempConfigDir, testSignal());
+      expect(cfg?.markdown?.rootFolderId).toBe("folder-2");
+      expect(cfg?.markdown?.rootFolderName).toBe("Work");
+    } finally {
+      await rm(tempConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it("markdown_select_root_folder preserves existing todo_config fields", async () => {
+    const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-merge-"));
+    try {
+      await saveConfig(
+        { todoListId: "keep-me", todoListName: "Keep Me" },
+        tempConfigDir,
+        testSignal(),
+      );
+
+      const browserSpy = (url: string): Promise<void> => {
+        setTimeout(() => {
+          void fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
+          });
+        }, 150);
+        return Promise.resolve();
+      };
+
+      const auth = new MockAuthenticator({ token: "md-merge-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir: tempConfigDir,
+          openBrowser: browserSpy,
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      const c = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await c.connect(ct);
+
+      const r = (await c.callTool({
+        name: "markdown_select_root_folder",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+
+      const cfg = await loadConfig(tempConfigDir, testSignal());
+      expect(cfg?.todoListId).toBe("keep-me");
+      expect(cfg?.markdown?.rootFolderId).toBe("folder-1");
+    } finally {
+      await rm(tempConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it("markdown_select_root_folder reports no folders when OneDrive root is empty", async () => {
+    const originalRoot = env.graphState.driveRootChildren;
+    env.graphState.driveRootChildren = [];
+
+    try {
+      const auth = new MockAuthenticator({ token: "md-empty-token" });
+      const c = await createTestClient(env, auth);
+      const r = (await c.callTool({
+        name: "markdown_select_root_folder",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      expect(firstText(r)).toContain("No folders found");
+    } finally {
+      env.graphState.driveRootChildren = originalRoot;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // File operations with configured root
+  // -------------------------------------------------------------------------
+
+  describe("with configured root folder", () => {
+    let configDir: string;
+    let c: Client;
+
+    beforeEach(async () => {
+      configDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-"));
+      await saveConfig(
+        {
+          markdown: {
+            rootFolderId: "folder-1",
+            rootFolderName: "Notes",
+            rootFolderPath: "/Notes",
+          },
+        },
+        configDir,
+        testSignal(),
+      );
+
+      const auth = new MockAuthenticator({ token: "md-ops-token" });
+      const server = await createMcpServer(
+        {
+          authenticator: auth,
+          graphBaseUrl: env.graphUrl,
+          configDir,
+          openBrowser: () => Promise.reject(new Error("no browser in tests")),
+        },
+        testSignal(),
+      );
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      c = new Client({ name: "test", version: "1.0" });
+      await server.connect(st);
+      await c.connect(ct);
+    });
+
+    afterEach(async () => {
+      await rm(configDir, { recursive: true, force: true });
+    });
+
+    it("markdown_list_files returns only .md files with required fields", async () => {
+      const r = (await c.callTool({
+        name: "markdown_list_files",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      const text = firstText(r);
+      expect(text).toContain("hello.md");
+      expect(text).not.toContain("readme.txt");
+      expect(text).toContain("file-md-1");
+      expect(text).toMatch(/\d+ bytes/);
+      expect(text).toContain("2026-04-10T11:00:00Z");
+    });
+
+    it("markdown_get_file by itemId returns content", async () => {
+      const r = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { itemId: "file-md-1" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      const text = firstText(r);
+      expect(text).toContain("hello.md");
+      expect(text).toContain("hello");
+    });
+
+    it("markdown_get_file by fileName works and is case-insensitive", async () => {
+      const r = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { fileName: "HELLO.MD" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      expect(firstText(r)).toContain("hello");
+    });
+
+    it("markdown_get_file requires itemId or fileName", async () => {
+      const r = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("Either itemId or fileName must be provided");
+    });
+
+    it("markdown_get_file returns a clear error for a missing file", async () => {
+      const r = (await c.callTool({
+        name: "markdown_get_file",
+        arguments: { fileName: "missing.md" },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("not found");
+    });
+
+    it("markdown_upload_file creates a new .md file", async () => {
+      const r = (await c.callTool({
+        name: "markdown_upload_file",
+        arguments: { fileName: "brand-new.md", content: "# New\n" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      expect(firstText(r)).toContain("brand-new.md");
+
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      const created = files.find((f) => f.name === "brand-new.md");
+      expect(created).toBeDefined();
+      expect(created!.content).toBe("# New\n");
+    });
+
+    it("markdown_upload_file overwrites an existing file", async () => {
+      const r = (await c.callTool({
+        name: "markdown_upload_file",
+        arguments: { fileName: "hello.md", content: "overwritten" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      const updated = files.find((f) => f.id === "file-md-1");
+      expect(updated?.content).toBe("overwritten");
+      // No duplicate file entry was created
+      expect(files.filter((f) => f.name.toLowerCase() === "hello.md")).toHaveLength(1);
+    });
+
+    it("markdown_upload_file rejects non-.md file names via schema validation", async () => {
+      const r = (await c.callTool({
+        name: "markdown_upload_file",
+        arguments: { fileName: "readme.txt", content: "x" },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain(".md");
+    });
+
+    it("markdown_upload_file rejects payloads larger than 4 MB", async () => {
+      const oversized = "a".repeat(1024 * 1024).repeat(5); // 5 MiB
+      const r = (await c.callTool({
+        name: "markdown_upload_file",
+        arguments: { fileName: "big.md", content: oversized },
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      const text = firstText(r);
+      expect(text).toContain("4");
+      expect(text.toLowerCase()).toContain("limit");
+    });
+
+    it("markdown_delete_file by fileName deletes the file", async () => {
+      const r = (await c.callTool({
+        name: "markdown_delete_file",
+        arguments: { fileName: "hello.md" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+      expect(firstText(r)).toContain("Deleted");
+
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      expect(files.find((f) => f.id === "file-md-1")).toBeUndefined();
+    });
+
+    it("markdown_delete_file by itemId deletes the file", async () => {
+      const r = (await c.callTool({
+        name: "markdown_delete_file",
+        arguments: { itemId: "file-md-1" },
+      })) as ToolResult;
+      expect(r.isError).toBeFalsy();
+
+      const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
+      expect(files.find((f) => f.id === "file-md-1")).toBeUndefined();
+    });
+
+    it("markdown_delete_file requires itemId or fileName", async () => {
+      const r = (await c.callTool({
+        name: "markdown_delete_file",
+        arguments: {},
+      })) as ToolResult;
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("Either itemId or fileName must be provided");
+    });
+  });
+});

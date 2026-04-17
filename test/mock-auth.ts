@@ -30,6 +30,7 @@ export class MockAuthenticator implements Authenticator {
     this._grantedScopes = opts?.grantedScopes ?? [
       GS.MailSend,
       GS.TasksReadWrite,
+      GS.FilesReadWrite,
       GS.UserRead,
       GS.OfflineAccess,
     ];

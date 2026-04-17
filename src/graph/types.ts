@@ -179,6 +179,37 @@ export function GraphListResponseSchema<T extends z.ZodType>(itemSchema: T) {
   return z.object({ value: z.array(itemSchema) }).loose();
 }
 
+// ---------------------------------------------------------------------------
+// OneDrive / Drive items
+// ---------------------------------------------------------------------------
+
+/**
+ * A OneDrive drive item (file or folder).
+ *
+ * Only the fields graphdo consumes are modelled. Either `file` or `folder` is
+ * populated for any real item; the `name` field is always present on persisted
+ * drive items returned by the Graph API.
+ */
+export interface DriveItem {
+  id: string;
+  name: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  file?: { mimeType?: string };
+  folder?: { childCount?: number };
+}
+
+export const DriveItemSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    size: z.number().optional(),
+    lastModifiedDateTime: z.string().optional(),
+    file: z.object({ mimeType: z.string().optional() }).loose().optional(),
+    folder: z.object({ childCount: z.number().optional() }).loose().optional(),
+  })
+  .loose();
+
 /** Graph API error response envelope. */
 export interface GraphErrorEnvelope {
   error: {

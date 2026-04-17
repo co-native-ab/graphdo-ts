@@ -64,7 +64,12 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("todo_update_step");
     expect(names).toContain("todo_delete_step");
     expect(names).toContain("todo_config");
-    expect(names).toHaveLength(15);
+    expect(names).toContain("markdown_select_root_folder");
+    expect(names).toContain("markdown_list_files");
+    expect(names).toContain("markdown_get_file");
+    expect(names).toContain("markdown_upload_file");
+    expect(names).toContain("markdown_delete_file");
+    expect(names).toHaveLength(20);
   });
 
   // -------------------------------------------------------------------------

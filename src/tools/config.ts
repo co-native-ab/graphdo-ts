@@ -6,7 +6,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { saveConfig } from "../config.js";
+import { updateConfig } from "../config.js";
 import { listTodoLists } from "../graph/todo.js";
 import type { ServerConfig } from "../index.js";
 import { UserCancelledError } from "../errors.js";
@@ -68,7 +68,7 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
               subtitle: "Select which Microsoft To Do list graphdo should use:",
               options: lists.map((l) => ({ id: l.id, label: l.displayName })),
               onSelect: async (option, signal) => {
-                await saveConfig(
+                await updateConfig(
                   { todoListId: option.id, todoListName: option.label },
                   config.configDir,
                   signal,

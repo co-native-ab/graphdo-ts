@@ -8,25 +8,30 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 ## Features
 
-graphdo-ts currently exposes **15 MCP tools**:
+graphdo-ts currently exposes **20 MCP tools**:
 
-| Tool               | Description                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `login`            | Authenticate via browser login                                                       |
-| `logout`           | Clear cached tokens and sign out                                                     |
-| `auth_status`      | Check authentication status, current user, and configuration                         |
-| `mail_send`        | Send an email to yourself (from and to your Microsoft account)                       |
-| `todo_config`      | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
-| `todo_list`        | List todos with pagination, filtering, and sorting                                   |
-| `todo_show`        | Show a single todo with full details including checklist steps                       |
-| `todo_create`      | Create a new todo with optional due date, importance, reminder, and recurrence       |
-| `todo_update`      | Update an existing todo (title, body, importance, due date, reminder, recurrence)    |
-| `todo_complete`    | Mark a todo as completed                                                             |
-| `todo_delete`      | Delete a todo                                                                        |
-| `todo_steps`       | List all checklist steps (sub-items) within a todo                                   |
-| `todo_add_step`    | Add a new checklist step to a todo                                                   |
-| `todo_update_step` | Update a checklist step — rename it, check it off, or uncheck it                     |
-| `todo_delete_step` | Delete a checklist step from a todo                                                  |
+| Tool                          | Description                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `login`                       | Authenticate via browser login                                                       |
+| `logout`                      | Clear cached tokens and sign out                                                     |
+| `auth_status`                 | Check authentication status, current user, and configuration                         |
+| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                       |
+| `todo_config`                 | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
+| `todo_list`                   | List todos with pagination, filtering, and sorting                                   |
+| `todo_show`                   | Show a single todo with full details including checklist steps                       |
+| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence       |
+| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)    |
+| `todo_complete`               | Mark a todo as completed                                                             |
+| `todo_delete`                 | Delete a todo                                                                        |
+| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                   |
+| `todo_add_step`               | Add a new checklist step to a todo                                                   |
+| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                     |
+| `todo_delete_step`            | Delete a checklist step from a todo                                                  |
+| `markdown_select_root_folder` | Configure which OneDrive folder to use for markdown files (human-only selection)     |
+| `markdown_list_files`         | List `.md` files in the configured OneDrive folder                                   |
+| `markdown_get_file`           | Read a markdown file's content (by drive item ID or file name, max 4 MB)             |
+| `markdown_upload_file`        | Create or overwrite a markdown file in the configured folder (max 4 MB)              |
+| `markdown_delete_file`        | Delete a markdown file from the configured folder                                    |
 
 ---
 
@@ -93,12 +98,13 @@ The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into th
 
 These scopes reflect the current set of capabilities. Additional scopes may be required as new Graph surfaces are added.
 
-| Scope             | Purpose                                         |
-| ----------------- | ----------------------------------------------- |
-| `Mail.Send`       | Send emails as the signed-in user               |
-| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks |
-| `User.Read`       | Read the signed-in user's basic profile         |
-| `offline_access`  | Enable refresh tokens for persistent sessions   |
+| Scope             | Purpose                                            |
+| ----------------- | -------------------------------------------------- |
+| `Mail.Send`       | Send emails as the signed-in user                  |
+| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks    |
+| `Files.ReadWrite` | Read and write markdown files in a OneDrive folder |
+| `User.Read`       | Read the signed-in user's basic profile            |
+| `offline_access`  | Enable refresh tokens for persistent sessions      |
 
 ### Todo List Selection
 
@@ -114,6 +120,23 @@ The configuration is stored in the OS config directory:
 - **macOS:** `~/Library/Application Support/graphdo-ts/config.json`
 - **Windows:** `%APPDATA%/graphdo-ts/config.json`
 
+### Markdown Files (OneDrive)
+
+Before using the markdown tools, select which OneDrive folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders in your OneDrive. Click the one you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection.
+
+**Security:** This is a human-only action. The AI agent cannot programmatically change which folder it operates on — only you can make this selection via the browser. All markdown tools are confined to the children of that one folder.
+
+Once a root folder is set, four tools operate on `.md` files directly inside it:
+
+- `markdown_list_files` — list the `.md` files, including name, drive item ID, last modified timestamp, and size in bytes.
+- `markdown_get_file` — read a file by drive item ID **or** by file name (case-insensitive, must end in `.md`) and return its UTF-8 content.
+- `markdown_upload_file` — create or overwrite a file by name using a direct `PUT` to `/content`.
+- `markdown_delete_file` — permanently delete a file by drive item ID or name.
+
+**4 MB limit.** `markdown_get_file` and `markdown_upload_file` enforce a hard 4 MB (4,194,304 bytes) limit per request. This is the Microsoft Graph limit for direct content transfers. graphdo-ts deliberately does not support resumable upload sessions — markdown notes are expected to be well under this limit, and avoiding the complexity of session-based uploads keeps the tool surface small. Files over 4 MB return a clear error.
+
+See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MB limit, the folder picker approach, and the Graph API constraints.
+
 ---
 
 ## Organization Setup
@@ -126,7 +149,7 @@ When you first use the `login` tool, Microsoft may tell you that you need admin 
 
 **What to tell your IT admin:**
 
-> "I'd like to use an AI tool called graphdo-ts that helps me send emails to myself and manage my todo list. It needs admin consent for the following **delegated** permissions: User.Read, Mail.Send, Tasks.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
+> "I'd like to use an AI tool called graphdo-ts that helps me send emails to myself, manage my todo list, and manage markdown notes in OneDrive. It needs admin consent for the following **delegated** permissions: User.Read, Mail.Send, Tasks.ReadWrite, Files.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
 
 ### For IT administrators
 
@@ -143,6 +166,7 @@ graphdo-ts uses a multi-tenant application published by Co-native AB. To grant c
    | `User.Read`       | Delegated | Read the signed-in user's basic profile                                      |
    | `Mail.Send`       | Delegated | Send mail as the signed-in user                                              |
    | `Tasks.ReadWrite` | Delegated | Read and write the signed-in user's tasks                                    |
+   | `Files.ReadWrite` | Delegated | Read and write the signed-in user's OneDrive files                           |
    | `offline_access`  | Delegated | Maintain access to data you have given it access to (enables refresh tokens) |
 
 6. Once consent is granted, all users in your organization can use the `login` tool without further approval.
@@ -151,10 +175,11 @@ graphdo-ts uses a multi-tenant application published by Co-native AB. To grant c
 
 graphdo-ts is designed to keep AI agent access as limited as possible while still being useful. Using an AI agent with access to your Microsoft account is never risk-free, but the following measures minimize the exposure:
 
-- **Scoped permissions** — only delegated permissions are used (User.Read, Mail.Send, Tasks.ReadWrite, offline_access). The agent acts as the signed-in user, never as an application with broader access.
+- **Scoped permissions** — only delegated permissions are used (User.Read, Mail.Send, Tasks.ReadWrite, Files.ReadWrite, offline_access). The agent acts as the signed-in user, never as an application with broader access.
 - **Email to self only** — the agent can only send emails to the signed-in user themselves, not to other recipients.
 - **Single todo list** — the agent can only access tasks in one specific list, chosen by you.
-- **Human-in-the-loop for critical decisions** — signing in and selecting which todo list to use both require human interaction via the browser. The AI agent cannot perform these actions programmatically.
+- **Single markdown folder** — the agent can only read and write `.md` files in one OneDrive folder, chosen by you.
+- **Human-in-the-loop for critical decisions** — signing in, selecting which todo list to use, and selecting which OneDrive folder to use all require human interaction via the browser. The AI agent cannot perform these actions programmatically.
 - **Open source** — the source code is available at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) for review.
 
 As new Graph surfaces are added, the same principle applies: minimize blast radius, require human confirmation for sensitive operations, and request only the scopes that are strictly needed.
@@ -181,7 +206,8 @@ graphdo-ts is designed around the principle of **minimizing blast radius** — k
 - 🔒 **Scoped access** — graphdo-ts only accesses **your own** email and tasks. It cannot access anyone else's data.
 - 📧 **Email to self only** — the agent can **only send emails to yourself**. It cannot send to other recipients.
 - 📋 **Single todo list** — the agent operates on **one specific list** that you choose via the browser. It cannot switch lists on its own.
-- 🧑 **Human-in-the-loop** — signing in and selecting which todo list to use both require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
+- 📝 **Single markdown folder** — the agent operates on **one OneDrive folder** that you choose via the browser. It cannot switch folders on its own.
+- 🧑 **Human-in-the-loop** — signing in, selecting which todo list to use, and selecting which OneDrive folder to use all require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
 - 💻 **Local credentials** — your login credentials are cached **locally on your computer** and nowhere else.
 - 🌐 **Microsoft only** — no data is sent anywhere except to **Microsoft's official servers** (the same ones Outlook and To Do use).
 - 📖 **Open source** — the source code is **fully open** at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) — anyone can review exactly what it does.

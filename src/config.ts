@@ -8,15 +8,29 @@ import { z } from "zod";
 import { isNodeError } from "./errors.js";
 import { logger } from "./logger.js";
 
+export interface MarkdownConfig {
+  rootFolderId?: string;
+  rootFolderName?: string;
+  rootFolderPath?: string;
+}
+
 export interface Config {
   todoListId?: string;
   todoListName?: string;
+  markdown?: MarkdownConfig;
 }
 
 /** Zod schema for runtime validation of config.json content. */
 const ConfigSchema = z.object({
   todoListId: z.string().min(1).optional(),
   todoListName: z.string().min(1).optional(),
+  markdown: z
+    .object({
+      rootFolderId: z.string().min(1).optional(),
+      rootFolderName: z.string().min(1).optional(),
+      rootFolderPath: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -135,6 +149,19 @@ export function hasTodoConfig(
   );
 }
 
+/**
+ * Type guard that checks whether a loaded config has a markdown root folder set.
+ */
+export function hasMarkdownConfig(
+  config: Config | null,
+): config is Config & { markdown: { rootFolderId: string } & MarkdownConfig } {
+  return (
+    config !== null &&
+    typeof config.markdown?.rootFolderId === "string" &&
+    config.markdown.rootFolderId.length > 0
+  );
+}
+
 /** Loads config from disk and validates it has todo list fields. Throws a user-friendly error if missing or invalid. */
 export async function loadAndValidateConfig(
   dir: string,
@@ -145,4 +172,43 @@ export async function loadAndValidateConfig(
     throw new Error("todo list not configured - use the todo_config tool to select one");
   }
   return config;
+}
+
+/**
+ * Loads config from disk and validates that a markdown root folder is configured.
+ * Throws a user-friendly error if missing.
+ */
+export async function loadAndValidateMarkdownConfig(
+  dir: string,
+  signal: AbortSignal,
+): Promise<Config & { markdown: { rootFolderId: string } & MarkdownConfig }> {
+  const config = await loadConfig(dir, signal);
+  if (!hasMarkdownConfig(config)) {
+    throw new Error(
+      "markdown root folder not configured - use the markdown_select_root_folder tool to choose one",
+    );
+  }
+  return config;
+}
+
+/**
+ * Load the current config, apply a partial update, and save. Preserves fields
+ * for other subsystems (e.g. saving markdown config does not wipe todo config).
+ */
+export async function updateConfig(
+  partial: Partial<Config>,
+  dir: string,
+  signal: AbortSignal,
+): Promise<Config> {
+  const existing = (await loadConfig(dir, signal)) ?? {};
+  const merged: Config = {
+    ...existing,
+    ...partial,
+    markdown:
+      partial.markdown !== undefined
+        ? { ...(existing.markdown ?? {}), ...partial.markdown }
+        : existing.markdown,
+  };
+  await saveConfig(merged, dir, signal);
+  return merged;
 }

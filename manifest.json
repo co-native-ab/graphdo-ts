@@ -3,8 +3,8 @@
   "name": "graphdo",
   "display_name": "graphdo - Microsoft Graph for AI",
   "version": "0.0.0",
-  "description": "Give your AI assistant access to Microsoft To Do and Outlook mail via Microsoft Graph.",
-  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks and send emails through Outlook - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
+  "description": "Give your AI assistant access to Microsoft To Do, Outlook mail, and markdown notes in OneDrive via Microsoft Graph.",
+  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks, send emails through Outlook, and read/write markdown files in a OneDrive folder you choose - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Markdown Notes (OneDrive)** - Read, write, and delete .md files in a single OneDrive folder you choose via the browser. The AI operates on one folder only - it cannot switch folders on its own. A 4 MB per-file limit keeps the tool focused on notes, not bulk uploads.\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, Files.ReadWrite, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
   "author": {
     "name": "Co-native AB",
     "url": "https://co-native.com"
@@ -90,9 +90,39 @@
     {
       "name": "mail_send",
       "description": "Send an email to yourself via Outlook. The email is sent from and to your Microsoft account. Useful for notes, reminders, and forwarding information to your inbox."
+    },
+    {
+      "name": "markdown_select_root_folder",
+      "description": "Select which OneDrive folder graphdo should use for markdown files. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves."
+    },
+    {
+      "name": "markdown_list_files",
+      "description": "List .md files in the configured OneDrive root folder, including name, drive item ID, last modified timestamp, and size in bytes."
+    },
+    {
+      "name": "markdown_get_file",
+      "description": "Read a markdown file's UTF-8 content. Accepts either a drive item ID or a file name (case-insensitive, must end in .md). Files larger than 4 MB are not supported."
+    },
+    {
+      "name": "markdown_upload_file",
+      "description": "Create or overwrite a markdown file in the configured OneDrive root folder. Accepts a file name (must end in .md) and UTF-8 content. Payloads larger than 4 MB are rejected."
+    },
+    {
+      "name": "markdown_delete_file",
+      "description": "Permanently delete a markdown file from the configured OneDrive root folder. Accepts either a drive item ID or a file name."
     }
   ],
-  "keywords": ["microsoft", "graph", "todo", "tasks", "mail", "outlook", "productivity"],
+  "keywords": [
+    "microsoft",
+    "graph",
+    "todo",
+    "tasks",
+    "mail",
+    "outlook",
+    "markdown",
+    "onedrive",
+    "productivity"
+  ],
   "license": "MIT",
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],

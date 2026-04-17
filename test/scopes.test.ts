@@ -14,6 +14,7 @@ describe("GraphScope enum", () => {
   it("has expected values matching Microsoft identifiers", () => {
     expect(GraphScope.MailSend).toBe("Mail.Send");
     expect(GraphScope.TasksReadWrite).toBe("Tasks.ReadWrite");
+    expect(GraphScope.FilesReadWrite).toBe("Files.ReadWrite");
     expect(GraphScope.UserRead).toBe("User.Read");
     expect(GraphScope.OfflineAccess).toBe("offline_access");
   });
@@ -44,6 +45,7 @@ describe("AVAILABLE_SCOPES", () => {
     const optional = AVAILABLE_SCOPES.filter((s) => !s.required).map((s) => s.scope);
     expect(optional).toContain(GraphScope.MailSend);
     expect(optional).toContain(GraphScope.TasksReadWrite);
+    expect(optional).toContain(GraphScope.FilesReadWrite);
   });
 });
 
@@ -56,6 +58,7 @@ describe("ALWAYS_REQUIRED_SCOPES", () => {
   it("does not contain optional scopes", () => {
     expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.MailSend);
     expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.TasksReadWrite);
+    expect(ALWAYS_REQUIRED_SCOPES).not.toContain(GraphScope.FilesReadWrite);
   });
 });
 
@@ -79,6 +82,7 @@ describe("isGraphScope", () => {
   it("returns true for valid scope strings", () => {
     expect(isGraphScope("Mail.Send")).toBe(true);
     expect(isGraphScope("Tasks.ReadWrite")).toBe(true);
+    expect(isGraphScope("Files.ReadWrite")).toBe(true);
     expect(isGraphScope("User.Read")).toBe(true);
     expect(isGraphScope("offline_access")).toBe(true);
   });
