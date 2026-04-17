@@ -245,8 +245,11 @@ function handleGetOptions(
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("picker refresh failed", { error: message });
+      // Intentionally do not forward the internal error message to the browser
+      // response (stack-trace / internals exposure). The client shows a
+      // generic "Refresh failed" message; detailed context is in the logs.
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: message }));
+      res.end(JSON.stringify({ error: "refresh failed" }));
     }
   })();
 }

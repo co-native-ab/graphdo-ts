@@ -525,7 +525,9 @@ describe("browser picker: enhanced features", () => {
       const res = await fetch(`${handle.url}/options`);
       expect(res.status).toBe(500);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("graph exploded");
+      // Generic message — internal error details must not leak to the browser.
+      expect(body.error).toBe("refresh failed");
+      expect(body.error).not.toContain("graph exploded");
     } finally {
       await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
       await cleanup;
