@@ -323,6 +323,92 @@ export async function getMyDrive(client: GraphClient, signal: AbortSignal): Prom
 }
 
 // ---------------------------------------------------------------------------
+// Preview URL construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a SharePoint OneDrive web preview URL for a markdown file.
+ *
+ * The returned URL uses SharePoint's `/my?id=<server-relative path>&parent=<parent path>`
+ * deep-link, which renders the file in the browser-based viewer rather than
+ * triggering a download. The plain `DriveItem.webUrl` returned by Graph
+ * frequently points at the download endpoint instead, which is why we
+ * construct the URL manually.
+ *
+ * Algorithm:
+ *   - origin     = scheme://host of the drive's `webUrl`
+ *   - drivePath  = pathname of the drive's `webUrl` (e.g. /personal/.../Documents)
+ *   - relFolder  = item.parentReference.path with the `/drive/root:` prefix removed
+ *   - parentPath = drivePath + relFolder
+ *   - itemPath   = parentPath + "/" + item.name
+ *   - url        = `${origin}/my?id=${enc(itemPath)}&parent=${enc(parentPath)}`
+ *
+ * Throws when `drive.webUrl` is missing or unparseable, when
+ * `item.parentReference.path` is missing or in an unexpected shape, or when
+ * the drive is hosted on consumer OneDrive (`onedrive.live.com`), which uses
+ * a different URL scheme that this helper does not implement.
+ */
+export function buildMarkdownPreviewUrl(drive: Drive, item: DriveItem): string {
+  const driveWebUrl = drive.webUrl;
+  if (typeof driveWebUrl !== "string" || driveWebUrl.length === 0) {
+    throw new Error(
+      "Cannot build preview URL: the drive has no webUrl. " +
+        "This typically means /me/drive returned no webUrl (rare for OneDrive for Business / SharePoint).",
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(driveWebUrl);
+  } catch {
+    throw new Error(`Cannot build preview URL: drive webUrl is not a valid URL (${driveWebUrl}).`);
+  }
+
+  if (parsed.hostname === "onedrive.live.com" || parsed.hostname.endsWith(".onedrive.live.com")) {
+    throw new Error(
+      "Cannot build preview URL: consumer OneDrive (onedrive.live.com) uses a different " +
+        "URL scheme that the markdown_preview_file tool does not implement. " +
+        "Open the file from onedrive.live.com directly.",
+    );
+  }
+
+  const parentRefPath = item.parentReference?.path;
+  if (typeof parentRefPath !== "string" || parentRefPath.length === 0) {
+    throw new Error(
+      `Cannot build preview URL: item "${item.name}" has no parentReference.path from Graph.`,
+    );
+  }
+
+  // parentReference.path looks like `/drive/root:/Folder Name` or
+  // `/drives/{driveId}/root:/Folder Name`. Strip everything up to and
+  // including `root:`. After stripping, an item directly inside the drive
+  // root yields the empty string, which is fine — we just join with the
+  // drive's pathname.
+  const rootMarker = "root:";
+  const idx = parentRefPath.indexOf(rootMarker);
+  if (idx === -1) {
+    throw new Error(
+      `Cannot build preview URL: item "${item.name}" has an unexpected parentReference.path ` +
+        `(${parentRefPath}); expected it to contain "root:".`,
+    );
+  }
+  const relFolder = parentRefPath.slice(idx + rootMarker.length);
+
+  const drivePath = parsed.pathname.replace(/\/+$/u, "");
+  const parentPath = `${drivePath}${relFolder}`.replace(/\/+$/u, "");
+  const itemPath = `${parentPath}/${item.name}`;
+
+  const url = new URL("/my", parsed.origin);
+  // Use encodeURIComponent + manual query construction (rather than
+  // URLSearchParams) so spaces are encoded as `%20` — SharePoint's web
+  // viewer expects RFC 3986 percent-encoding here, not the
+  // application/x-www-form-urlencoded `+` substitution that URLSearchParams
+  // would emit.
+  url.search = `?id=${encodeURIComponent(itemPath)}&parent=${encodeURIComponent(parentPath)}`;
+  return url.toString();
+}
+
+// ---------------------------------------------------------------------------
 // File listing / lookup under the configured root folder
 // ---------------------------------------------------------------------------
 

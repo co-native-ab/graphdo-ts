@@ -23,6 +23,13 @@ import {
 } from "./helpers.js";
 
 function seedDrive(env: IntegrationEnv): void {
+  // Reset drive metadata too — some earlier tests overwrite drive.webUrl
+  // (e.g. to test the empty-webUrl fallback) and leave it that way.
+  env.graphState.drive = {
+    id: "mock-drive-1",
+    driveType: "business",
+    webUrl: "https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents",
+  };
   env.graphState.driveRootChildren = [
     { id: "folder-1", name: "Notes", folder: {}, lastModifiedDateTime: "2026-04-10T10:00:00Z" },
     { id: "folder-2", name: "Work", folder: {}, lastModifiedDateTime: "2026-04-11T10:00:00Z" },
@@ -83,6 +90,7 @@ describe("integration: markdown", () => {
       "markdown_create_file",
       "markdown_update_file",
       "markdown_delete_file",
+      "markdown_preview_file",
     ]) {
       expect(names).not.toContain(n);
     }
@@ -1229,6 +1237,104 @@ describe("integration: markdown", () => {
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("subdirectory");
       });
+    });
+
+    describe("markdown_preview_file", () => {
+      it("returns isError when the browser cannot be opened, but still surfaces the URL", async () => {
+        // The shared `c` in this describe is wired with an openBrowser that
+        // always rejects. Verify the tool degrades gracefully: no isError,
+        // returns the SharePoint /my?id=... URL as text.
+        const r = (await c.callTool({
+          name: "markdown_preview_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const text = firstText(r);
+        expect(text).toContain("Could not open a browser automatically");
+        expect(text).toContain("/my?id=");
+        expect(text).toContain("%2FNotes%2Fhello.md");
+        expect(text).toContain("parent=");
+      });
+
+      it("returns an error for an unknown file name", async () => {
+        const r = (await c.callTool({
+          name: "markdown_preview_file",
+          arguments: { fileName: "missing.md" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r)).toContain("not found");
+      });
+
+      it("rejects unsafe names at the schema layer", async () => {
+        const r = (await c.callTool({
+          name: "markdown_preview_file",
+          arguments: { fileName: "../escape.md" },
+        })) as ToolResult;
+        expect(r.isError).toBe(true);
+        expect(firstText(r).toLowerCase()).toContain("path separator");
+      });
+    });
+  });
+
+  describe("markdown_preview_file (browser open succeeds)", () => {
+    it("opens the SharePoint preview URL in the browser and returns it as text", async () => {
+      const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-preview-"));
+      try {
+        await saveConfig(
+          {
+            markdown: {
+              rootFolderId: "folder-1",
+              rootFolderName: "Notes",
+              rootFolderPath: "/Notes",
+            },
+          },
+          tempConfigDir,
+          testSignal(),
+        );
+
+        const opened: string[] = [];
+        const browserSpy = (url: string): Promise<void> => {
+          opened.push(url);
+          return Promise.resolve();
+        };
+
+        const auth = new MockAuthenticator({ token: "md-preview-token" });
+        const server = await createMcpServer(
+          {
+            authenticator: auth,
+            graphBaseUrl: env.graphUrl,
+            configDir: tempConfigDir,
+            openBrowser: browserSpy,
+          },
+          testSignal(),
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await client.connect(ct);
+
+        const r = (await client.callTool({
+          name: "markdown_preview_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+
+        // Mock drive.webUrl =
+        //   https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents
+        // Item is hello.md inside the "Notes" folder (folder-1's name).
+        const expectedUrl =
+          "https://contoso-my.sharepoint.com/my" +
+          "?id=%2Fpersonal%2Fuser_contoso_com%2FDocuments%2FNotes%2Fhello.md" +
+          "&parent=%2Fpersonal%2Fuser_contoso_com%2FDocuments%2FNotes";
+        expect(opened).toEqual([expectedUrl]);
+
+        const text = firstText(r);
+        expect(text).toContain("Opened");
+        expect(text).toContain("hello.md");
+        expect(text).toContain(expectedUrl);
+      } finally {
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
     });
   });
 });

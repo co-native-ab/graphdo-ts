@@ -33,11 +33,21 @@ export function openBrowser(url: string): Promise<void> {
     return Promise.reject(new Error(`Unsupported URL protocol: ${parsed.protocol}`));
   }
 
-  // All URLs opened by this app are local server pages (loopback login page or
-  // picker page). Reject anything that is not localhost to prevent accidentally
-  // opening arbitrary remote URLs.
-  if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
-    return Promise.reject(new Error(`URL must be a localhost address, got: ${parsed.hostname}`));
+  // Two callers open URLs through this helper:
+  //   1. The loopback / picker / logout pages on a local 127.0.0.1 server
+  //      (always plain http://localhost or http://127.0.0.1 with a random port).
+  //   2. Tools that deep-link the user into an external site (e.g. the
+  //      markdown preview tool opening a SharePoint URL). These are always
+  //      https.
+  //
+  // Plain http to a non-local host is never something this app emits — and
+  // letting it through would risk silently opening a cleartext page to an
+  // attacker-controlled URL — so we reject that combination.
+  const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol === "http:" && !isLocal) {
+    return Promise.reject(
+      new Error(`Plain http:// URLs must be a localhost address, got: ${parsed.hostname}`),
+    );
   }
 
   const os = platform();

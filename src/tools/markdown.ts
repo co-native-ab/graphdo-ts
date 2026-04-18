@@ -27,6 +27,7 @@ import {
   MarkdownFileTooLargeError,
   MarkdownUnknownVersionError,
   MARKDOWN_FILE_NAME_RULES,
+  buildMarkdownPreviewUrl,
   updateMarkdownFile,
   validateMarkdownFileName,
 } from "../graph/markdown.js";
@@ -193,6 +194,22 @@ const DIFF_VERSIONS_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+const PREVIEW_FILE_DEF: ToolDef = {
+  name: "markdown_preview_file",
+  title: "Preview Markdown File in Browser",
+  description:
+    "Open a markdown file from the configured root folder in the user's " +
+    "browser using the SharePoint OneDrive web preview, which renders the " +
+    "markdown nicely instead of triggering a download. Accepts the file " +
+    "name only (the preview URL is human-facing, so the agent should look " +
+    "the file up by name the same way a user would refer to it). The tool " +
+    "opens the URL in the default browser via the configured browser " +
+    "launcher and also returns the URL as text so it can be shared. " +
+    "Consumer OneDrive (onedrive.live.com) is not supported. " +
+    MARKDOWN_FILE_NAME_RULES,
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
   SELECT_ROOT_DEF,
   LIST_FILES_DEF,
@@ -203,6 +220,7 @@ export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
   LIST_VERSIONS_DEF,
   GET_VERSION_DEF,
   DIFF_VERSIONS_DEF,
+  PREVIEW_FILE_DEF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1192,80 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             return { content: [{ type: "text", text: err.message }], isError: true };
           }
           return formatError("markdown_diff_file_versions", err);
+        }
+      },
+    ),
+  );
+
+  // -------- markdown_preview_file --------
+  entries.push(
+    defineTool(
+      server,
+      PREVIEW_FILE_DEF,
+      {
+        inputSchema: {
+          fileName: markdownNameSchema.describe(
+            "Markdown file name. Must follow the strict naming rules: " + MARKDOWN_FILE_NAME_RULES,
+          ),
+        },
+        annotations: {
+          title: PREVIEW_FILE_DEF.title,
+          readOnlyHint: true,
+          openWorldHint: true,
+        },
+      },
+      async (args, { signal }) => {
+        try {
+          const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+          const client = config.graphClient;
+
+          const item = await resolveDriveItem(
+            client,
+            cfg.markdown.rootFolderId,
+            { fileName: args.fileName },
+            signal,
+          );
+
+          if (item.folder !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `"${item.name}" is a subdirectory and cannot be previewed by the markdown tools. ` +
+                    "The markdown tools only operate on files directly in the configured root folder.",
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          // Fetch the drive metadata so we can build the human-friendly
+          // SharePoint preview URL. Unlike the picker, this is _not_
+          // best-effort — without `webUrl` we cannot build a correct
+          // preview URL, so failures here surface as a tool error.
+          const drive = await getMyDrive(client, signal);
+          const previewUrl = buildMarkdownPreviewUrl(drive, item);
+
+          let browserOpened = false;
+          try {
+            await config.openBrowser(previewUrl);
+            browserOpened = true;
+            logger.info("markdown preview opened", { fileName: item.name, url: previewUrl });
+          } catch (err: unknown) {
+            logger.warn("could not open browser for markdown preview", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+
+          const text = browserOpened
+            ? `Opened "${item.name}" in your default browser.\n\nPreview URL:\n${previewUrl}`
+            : "Could not open a browser automatically. " +
+              `Please open this URL to preview "${item.name}":\n\n${previewUrl}`;
+
+          return { content: [{ type: "text", text }] };
+        } catch (err: unknown) {
+          return formatError("markdown_preview_file", err);
         }
       },
     ),

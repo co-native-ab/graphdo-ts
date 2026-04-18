@@ -126,6 +126,10 @@
     {
       "name": "markdown_diff_file_versions",
       "description": "Return a unified diff between two revisions of a markdown file, computed server-side using jsdiff so you do not have to diff the content yourself. Accepts the file by id (preferred) or name, plus a fromVersionId and a toVersionId. Each ID may be either a historical version ID returned by markdown_list_file_versions, or the current Revision surfaced by markdown_get_file / markdown_create_file / markdown_update_file (including the Current Revision reported in an etag-mismatch error). This is the preferred way to reconcile a stale update: pass the revision you originally read as fromVersionId and the current revision as toVersionId."
+    },
+    {
+      "name": "markdown_preview_file",
+      "description": "Open a markdown file from the configured root folder in the user's browser using the SharePoint OneDrive web preview, which renders the markdown nicely instead of triggering a download. Accepts the file name only (the preview URL is human-facing, so the agent should look the file up by name the same way a user would refer to it). The tool opens the URL in the default browser and also returns the URL as text so it can be shared. Consumer OneDrive (onedrive.live.com) is not supported."
     }
   ],
   "keywords": [

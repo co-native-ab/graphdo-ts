@@ -870,6 +870,25 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
   if (file.version === undefined && file.file !== undefined && state !== undefined) {
     file.version = state.genVersionId();
   }
+  // Compute parentReference.path the same way real Graph does: locate the
+  // folder this item belongs to and emit `/drive/root:/<folder name>`. Items
+  // that exist directly at the drive root yield `/drive/root:`.
+  let parentReference: { path: string } | undefined;
+  if (state !== undefined) {
+    if (state.driveRootChildren.some((c) => c.id === file.id)) {
+      parentReference = { path: "/drive/root:" };
+    } else {
+      for (const [folderId, children] of state.driveFolderChildren) {
+        if (children.some((c) => c.id === file.id)) {
+          const folder = state.driveRootChildren.find((c) => c.id === folderId);
+          if (folder !== undefined) {
+            parentReference = { path: `/drive/root:/${folder.name}` };
+          }
+          break;
+        }
+      }
+    }
+  }
   return {
     id: file.id,
     name: file.name,
@@ -879,6 +898,8 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
     lastModifiedDateTime: file.lastModifiedDateTime,
     file: file.file,
     folder: file.folder,
+    webUrl: file.webUrl,
+    parentReference: parentReference ?? file.parentReference,
   };
 }
 
