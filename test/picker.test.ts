@@ -325,3 +325,212 @@ describe("browser picker", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Filter / Refresh / Create-link enhancements
+// ---------------------------------------------------------------------------
+
+describe("browser picker: enhanced features", () => {
+  it("renders a filter input and create-link when configured", async () => {
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        filterPlaceholder: "Type to filter...",
+        createLink: {
+          url: "https://example.com/new",
+          label: "Create a new thing",
+          description: "Opens the service in a new tab.",
+        },
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const res = await fetch(handle.url);
+      const html = await res.text();
+      expect(html).toContain('id="filter-input"');
+      expect(html).toContain("Type to filter...");
+      expect(html).toContain("https://example.com/new");
+      expect(html).toContain("Create a new thing");
+      expect(html).toContain("Opens the service in a new tab.");
+      // Refresh button is hidden unless refreshOptions is provided
+      expect(html).not.toContain('id="refresh-btn"');
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+
+  it("escapes HTML special characters in filter placeholder, create link, and options", async () => {
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: [{ id: "x<y>", label: "<script>alert(1)</script>" }],
+        filterPlaceholder: 'evil" placeholder',
+        createLink: {
+          url: "https://example.com/?a=1&b=2",
+          label: "<b>bold</b>",
+          description: "desc <with> chars",
+        },
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const html = await (await fetch(handle.url)).text();
+      expect(html).not.toContain("<script>alert(1)</script>");
+      expect(html).toContain("&lt;script&gt;");
+      expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;");
+      expect(html).toContain("https://example.com/?a=1&amp;b=2");
+      expect(html).toContain('placeholder="evil&quot; placeholder"');
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+
+  it("renders a refresh button only when refreshOptions is provided", async () => {
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        refreshOptions: () => Promise.resolve(sampleOptions),
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const html = await (await fetch(handle.url)).text();
+      expect(html).toContain('id="refresh-btn"');
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+
+  it("GET /options calls the refresh provider and returns fresh options", async () => {
+    const provider = vi
+      .fn<(signal: AbortSignal) => Promise<PickerOption[]>>()
+      .mockResolvedValueOnce([{ id: "refreshed-1", label: "Refreshed A" }]);
+
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        refreshOptions: provider,
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const res = await fetch(`${handle.url}/options`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { options: PickerOption[] };
+      expect(body.options).toEqual([{ id: "refreshed-1", label: "Refreshed A" }]);
+      expect(provider).toHaveBeenCalledTimes(1);
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+
+  it("after a refresh, only options from the refreshed set are selectable", async () => {
+    // Initial set offers opt-1 and opt-2. Refresh replaces them.
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        refreshOptions: () => Promise.resolve([{ id: "new-1", label: "New A" }]),
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+
+    // Refresh first
+    await fetch(`${handle.url}/options`);
+
+    // Now try selecting the old ID — must be rejected
+    const stale = await fetch(`${handle.url}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "opt-1", label: "Option A" }),
+    });
+    expect(stale.status).toBe(400);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // The new ID works
+    const ok = await fetch(`${handle.url}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "new-1", label: "New A" }),
+    });
+    expect(ok.status).toBe(200);
+    await handle.waitForSelection;
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("GET /options returns 405 when no refresh provider is configured", async () => {
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const res = await fetch(`${handle.url}/options`);
+      expect(res.status).toBe(405);
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+
+  it("GET /options returns 500 with JSON error when the provider throws", async () => {
+    const handle = await startBrowserPicker(
+      {
+        title: "Pick",
+        subtitle: "Choose:",
+        options: sampleOptions,
+        refreshOptions: () => Promise.reject(new Error("graph exploded")),
+        onSelect: vi.fn().mockResolvedValue(undefined),
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+    const cleanup = handle.waitForSelection.catch(() => undefined);
+    try {
+      const res = await fetch(`${handle.url}/options`);
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      // Generic message — internal error details must not leak to the browser.
+      expect(body.error).toBe("refresh failed");
+      expect(body.error).not.toContain("graph exploded");
+    } finally {
+      await fetch(`${handle.url}/cancel`, { method: "POST" }).catch(() => undefined);
+      await cleanup;
+    }
+  });
+});

@@ -148,6 +148,40 @@ export class GraphClient {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       signal = signalArg!;
     }
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const rawBody = body !== undefined ? JSON.stringify(body) : undefined;
+    return this.performRequest(method, path, headers, rawBody, signal);
+  }
+
+  /**
+   * Send a request with a raw body and caller-specified Content-Type.
+   *
+   * Unlike {@link request}, the body is sent as-is (not JSON-stringified).
+   * Used for OneDrive content uploads where the payload is raw text/bytes.
+   *
+   * Optional `extraHeaders` are merged on top of the Content-Type header. Use
+   * this for conditional requests like `If-Match` / `If-None-Match`.
+   */
+  async requestRaw(
+    method: HttpMethod,
+    path: string,
+    body: string | Uint8Array,
+    contentType: string,
+    signal: AbortSignal,
+    extraHeaders?: Readonly<Record<string, string>>,
+  ): Promise<Response> {
+    const headers: Record<string, string> = { "Content-Type": contentType, ...extraHeaders };
+    return this.performRequest(method, path, headers, body, signal);
+  }
+
+  private async performRequest(
+    method: HttpMethod,
+    path: string,
+    extraHeaders: Record<string, string>,
+    body: string | Uint8Array | undefined,
+    signal: AbortSignal,
+  ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
 
     // Acquire a fresh (or silently-refreshed) token for this request.
@@ -156,14 +190,14 @@ export class GraphClient {
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+      ...extraHeaders,
     };
 
     logger.debug("graph request", { method, url });
 
     const baseInit: RequestInit = { method, headers };
     if (body !== undefined) {
-      baseInit.body = JSON.stringify(body);
+      baseInit.body = body;
     }
 
     let lastError: GraphRequestError | undefined;

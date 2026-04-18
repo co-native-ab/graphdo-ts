@@ -34,7 +34,7 @@ src/
     login.ts             login and logout MCP tools (browser-only)
     mail.ts              mail_send MCP tool registration
     todo.ts              todo_list, todo_show, todo_create, todo_update, todo_complete, todo_delete + step tools
-    config.ts            todo_config MCP tool (human-only list selection via browser picker)
+    config.ts            todo_select_list MCP tool (human-only list selection via browser picker)
     status.ts            auth_status MCP tool (authentication state + config info)
 test/
   helpers.ts             createTestEnv() - standardized test setup
@@ -94,7 +94,7 @@ The server uses `StdioServerTransport` from the MCP SDK, communicating via stdin
 
 ### Config via Browser (Human-Only)
 
-The `todo_config` tool uses the generic browser picker (`src/picker.ts`) to let the user select a todo list. This is a deliberate security design: the AI agent **cannot** programmatically change which list it operates on - only a human can make this selection via the browser UI.
+The `todo_select_list` tool uses the generic browser picker (`src/picker.ts`) to let the user select a todo list. This is a deliberate security design: the AI agent **cannot** programmatically change which list it operates on - only a human can make this selection via the browser UI.
 
 The picker (`startBrowserPicker()`) is a reusable component:
 
@@ -151,7 +151,7 @@ The `MockAuthenticator` (`test/mock-auth.ts`) implements `Authenticator` with co
 ```bash
 npm run test                          # All tests via vitest
 npm run test -- --reporter verbose    # Verbose output
-npm run test -- -t "todo_config"      # Filter by test name
+npm run test -- -t "todo_select_list"      # Filter by test name
 ```
 
 ### Linting & Type Checking

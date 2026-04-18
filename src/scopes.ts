@@ -7,6 +7,7 @@
 export enum GraphScope {
   MailSend = "Mail.Send",
   TasksReadWrite = "Tasks.ReadWrite",
+  FilesReadWrite = "Files.ReadWrite",
   UserRead = "User.Read",
   OfflineAccess = "offline_access",
 }
@@ -44,6 +45,12 @@ export const AVAILABLE_SCOPES: readonly ScopeDefinition[] = [
     scope: GraphScope.TasksReadWrite,
     label: "Manage Tasks",
     description: "Create, update, and delete your Microsoft To Do tasks",
+    required: false,
+  },
+  {
+    scope: GraphScope.FilesReadWrite,
+    label: "Manage Markdown Files",
+    description: "Read and write markdown files in a OneDrive folder you choose",
     required: false,
   },
 ];

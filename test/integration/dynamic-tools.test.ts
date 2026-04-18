@@ -63,8 +63,17 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("todo_add_step");
     expect(names).toContain("todo_update_step");
     expect(names).toContain("todo_delete_step");
-    expect(names).toContain("todo_config");
-    expect(names).toHaveLength(15);
+    expect(names).toContain("todo_select_list");
+    expect(names).toContain("markdown_select_root_folder");
+    expect(names).toContain("markdown_list_files");
+    expect(names).toContain("markdown_get_file");
+    expect(names).toContain("markdown_create_file");
+    expect(names).toContain("markdown_update_file");
+    expect(names).toContain("markdown_delete_file");
+    expect(names).toContain("markdown_list_file_versions");
+    expect(names).toContain("markdown_get_file_version");
+    expect(names).toContain("markdown_diff_file_versions");
+    expect(names).toHaveLength(24);
   });
 
   // -------------------------------------------------------------------------
@@ -100,7 +109,7 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("todo_add_step");
     expect(names).toContain("todo_update_step");
     expect(names).toContain("todo_delete_step");
-    expect(names).toContain("todo_config");
+    expect(names).toContain("todo_select_list");
     expect(names).not.toContain("mail_send");
   });
 

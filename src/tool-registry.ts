@@ -170,7 +170,7 @@ export function buildInstructions(defs: readonly ToolDef[]): string {
       "do not ask the user whether they want to log in.",
   );
   lines.push(
-    "- When a tool returns a 'todo list not configured' error, call the todo_config " +
+    "- When a tool returns a 'todo list not configured' error, call the todo_select_list " +
       "tool immediately - do not ask the user which list to use, the tool opens a " +
       "browser picker where the user selects the list themselves.",
   );
@@ -178,7 +178,7 @@ export function buildInstructions(defs: readonly ToolDef[]): string {
   lines.push("");
   lines.push(
     "WORKFLOW: On first use, call login (automatic browser sign-in), then " +
-      "todo_config (browser-based list selection), then the user's requested action.",
+      "todo_select_list (browser-based list selection), then the user's requested action.",
   );
 
   return lines.join("\n");

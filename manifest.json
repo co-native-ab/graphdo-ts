@@ -3,8 +3,8 @@
   "name": "graphdo",
   "display_name": "graphdo - Microsoft Graph for AI",
   "version": "0.0.0",
-  "description": "Give your AI assistant access to Microsoft To Do and Outlook mail via Microsoft Graph.",
-  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks and send emails through Outlook - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
+  "description": "Give your AI assistant access to Microsoft To Do, Outlook mail, and markdown notes in OneDrive via Microsoft Graph.",
+  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks, send emails through Outlook, and read/write markdown files in a OneDrive folder you choose - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Markdown Notes (OneDrive)** - Read, write, and delete .md files in a single OneDrive folder you choose via the browser. The AI operates on one folder only - it cannot switch folders on its own. A 4 MB per-file limit keeps the tool focused on notes, not bulk uploads.\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, Files.ReadWrite, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
   "author": {
     "name": "Co-native AB",
     "url": "https://co-native.com"
@@ -44,8 +44,8 @@
       "description": "Check authentication status, current user, configured todo list, and server version. Use this as a first step to diagnose issues or understand current state."
     },
     {
-      "name": "todo_config",
-      "description": "Select which Microsoft To Do list to use. Call this directly when no todo list is configured - do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
+      "name": "todo_select_list",
+      "description": "Select which Microsoft To Do list graphdo should use. Call this directly when no todo list is configured - do not ask the user which list they want, the tool opens a browser picker where the user makes the selection themselves."
     },
     {
       "name": "todo_list",
@@ -90,9 +90,55 @@
     {
       "name": "mail_send",
       "description": "Send an email to yourself via Outlook. The email is sent from and to your Microsoft account. Useful for notes, reminders, and forwarding information to your inbox."
+    },
+    {
+      "name": "markdown_select_root_folder",
+      "description": "Select the root folder graphdo should use for markdown files in the signed-in user's OneDrive. Call this directly when no markdown root folder is configured - do not ask the user which folder they want, the tool opens a browser picker where the user makes the selection themselves."
+    },
+    {
+      "name": "markdown_list_files",
+      "description": "List markdown files in the configured root folder of the signed-in user's OneDrive, including name, file ID, last modified timestamp, and size in bytes. Subdirectories and files whose names violate the strict naming rules are reported as UNSUPPORTED so they are visible but cannot be acted on."
+    },
+    {
+      "name": "markdown_get_file",
+      "description": "Read the current UTF-8 content of a markdown file in the configured root folder, along with its eTag (required by markdown_update_file for safe optimistic concurrency) and a Revision identifier (which lines up with the IDs returned by markdown_list_file_versions so it can be passed to markdown_diff_file_versions). Accepts either a file ID or a file name. File names must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Files larger than 4 MB are not supported. Use markdown_get_file_version to read a previous version."
+    },
+    {
+      "name": "markdown_create_file",
+      "description": "Create a new markdown file in the configured root folder. Fails with a clear error when a file with the same name already exists - in that case, call markdown_get_file to fetch the existing content and eTag, then call markdown_update_file. The file name must follow the strict naming rules (letters, digits, space, dot, underscore, hyphen only; must end in .md; no path separators or subdirectories; no Windows reserved names; max 255 chars). Payloads larger than 4 MB are rejected."
+    },
+    {
+      "name": "markdown_update_file",
+      "description": "Overwrite an existing markdown file using If-Match eTag for safe optimistic concurrency. Requires the eTag previously returned by markdown_get_file (or markdown_create_file / markdown_update_file). If the file has changed since you last read it the call fails with the current eTag, the current Revision, and reconcile guidance: use markdown_diff_file_versions (fromVersionId=<the revision you originally read>, toVersionId=<the current revision>) to see exactly what changed, decide whether your update still applies, reconcile your changes, and retry - or ask the user how to proceed. Accepts the file by ID (preferred) or name. Payloads larger than 4 MB are rejected."
+    },
+    {
+      "name": "markdown_delete_file",
+      "description": "Permanently delete a markdown file from the configured root folder. Accepts either a file ID or a file name. File names must follow the strict naming rules."
+    },
+    {
+      "name": "markdown_list_file_versions",
+      "description": "List historical versions OneDrive retained for a markdown file (newest first). Returns each version's opaque version ID, last modified timestamp, size, and - when available - the user who last modified it. Use the version ID with markdown_get_file_version to read the prior content."
+    },
+    {
+      "name": "markdown_get_file_version",
+      "description": "Read the UTF-8 content of a specific historical version of a markdown file. Requires the file (by ID or name) plus a version ID from markdown_list_file_versions. This is read-only and does not restore the file; re-upload with markdown_update_file to promote an old version back to current. Files larger than 4 MB cannot be downloaded."
+    },
+    {
+      "name": "markdown_diff_file_versions",
+      "description": "Return a unified diff between two revisions of a markdown file, computed server-side using jsdiff so you do not have to diff the content yourself. Accepts the file by id (preferred) or name, plus a fromVersionId and a toVersionId. Each ID may be either a historical version ID returned by markdown_list_file_versions, or the current Revision surfaced by markdown_get_file / markdown_create_file / markdown_update_file (including the Current Revision reported in an etag-mismatch error). This is the preferred way to reconcile a stale update: pass the revision you originally read as fromVersionId and the current revision as toVersionId."
     }
   ],
-  "keywords": ["microsoft", "graph", "todo", "tasks", "mail", "outlook", "productivity"],
+  "keywords": [
+    "microsoft",
+    "graph",
+    "todo",
+    "tasks",
+    "mail",
+    "outlook",
+    "markdown",
+    "onedrive",
+    "productivity"
+  ],
   "license": "MIT",
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],

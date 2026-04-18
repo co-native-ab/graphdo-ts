@@ -13,6 +13,7 @@ import { logger, setLogLevel } from "./logger.js";
 import type { GraphScope } from "./scopes.js";
 import { LOGIN_TOOL_DEFS, registerLoginTools } from "./tools/login.js";
 import { MAIL_TOOL_DEFS, registerMailTools } from "./tools/mail.js";
+import { MARKDOWN_TOOL_DEFS, registerMarkdownTools } from "./tools/markdown.js";
 import { TODO_TOOL_DEFS, STEP_TOOL_DEFS, registerTodoTools } from "./tools/todo.js";
 import { CONFIG_TOOL_DEFS, registerConfigTools } from "./tools/config.js";
 import { STATUS_TOOL_DEFS, registerStatusTool } from "./tools/status.js";
@@ -68,6 +69,7 @@ export async function createMcpServer(
     ...TODO_TOOL_DEFS,
     ...STEP_TOOL_DEFS,
     ...CONFIG_TOOL_DEFS,
+    ...MARKDOWN_TOOL_DEFS,
   ];
 
   const mcpServer = new McpServer(
@@ -91,6 +93,7 @@ export async function createMcpServer(
     ...registerMailTools(mcpServer, config),
     ...registerTodoTools(mcpServer, config),
     ...registerConfigTools(mcpServer, config),
+    ...registerMarkdownTools(mcpServer, config),
     ...registerStatusTool(mcpServer, config),
   ];
 

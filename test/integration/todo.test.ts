@@ -37,13 +37,13 @@ describe("integration: todo", () => {
   // -------------------------------------------------------------------------
 
   describe("todo config", () => {
-    it("todo_config disabled when not logged in", async () => {
+    it("todo_select_list disabled when not logged in", async () => {
       const noAuth = new MockAuthenticator();
       const c = await createTestClient(env, noAuth);
 
       const { tools } = await c.listTools();
       const names = tools.map((t: { name: string }) => t.name);
-      expect(names).not.toContain("todo_config");
+      expect(names).not.toContain("todo_select_list");
     });
 
     it("returns message when no todo lists exist", async () => {
@@ -55,7 +55,7 @@ describe("integration: todo", () => {
         const client = await createTestClient(env, auth);
 
         const result = (await client.callTool({
-          name: "todo_config",
+          name: "todo_select_list",
           arguments: {},
         })) as ToolResult;
 
@@ -105,7 +105,7 @@ describe("integration: todo", () => {
         await c.connect(ct);
 
         const result = (await c.callTool({
-          name: "todo_config",
+          name: "todo_select_list",
           arguments: {},
         })) as ToolResult;
 
@@ -163,7 +163,7 @@ describe("integration: todo", () => {
         await c.connect(ct);
 
         const result = (await c.callTool({
-          name: "todo_config",
+          name: "todo_select_list",
           arguments: {},
         })) as ToolResult;
 
@@ -198,7 +198,7 @@ describe("integration: todo", () => {
 
         const { tools } = await c.listTools();
         const names = tools.map((t: { name: string }) => t.name);
-        expect(names).toContain("todo_config");
+        expect(names).toContain("todo_select_list");
       } finally {
         env.graphState.todoLists = originalLists;
       }

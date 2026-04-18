@@ -8,25 +8,34 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 ## Features
 
-graphdo-ts currently exposes **15 MCP tools**:
+graphdo-ts currently exposes **24 MCP tools**:
 
-| Tool               | Description                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `login`            | Authenticate via browser login                                                       |
-| `logout`           | Clear cached tokens and sign out                                                     |
-| `auth_status`      | Check authentication status, current user, and configuration                         |
-| `mail_send`        | Send an email to yourself (from and to your Microsoft account)                       |
-| `todo_config`      | Configure which Microsoft To Do list to use (opens browser for human-only selection) |
-| `todo_list`        | List todos with pagination, filtering, and sorting                                   |
-| `todo_show`        | Show a single todo with full details including checklist steps                       |
-| `todo_create`      | Create a new todo with optional due date, importance, reminder, and recurrence       |
-| `todo_update`      | Update an existing todo (title, body, importance, due date, reminder, recurrence)    |
-| `todo_complete`    | Mark a todo as completed                                                             |
-| `todo_delete`      | Delete a todo                                                                        |
-| `todo_steps`       | List all checklist steps (sub-items) within a todo                                   |
-| `todo_add_step`    | Add a new checklist step to a todo                                                   |
-| `todo_update_step` | Update a checklist step — rename it, check it off, or uncheck it                     |
-| `todo_delete_step` | Delete a checklist step from a todo                                                  |
+| Tool                          | Description                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `login`                       | Authenticate via browser login                                                                        |
+| `logout`                      | Clear cached tokens and sign out                                                                      |
+| `auth_status`                 | Check authentication status, current user, and configuration                                          |
+| `mail_send`                   | Send an email to yourself (from and to your Microsoft account)                                        |
+| `todo_select_list`            | Select which Microsoft To Do list to use (opens browser for human-only selection)                     |
+| `todo_list`                   | List todos with pagination, filtering, and sorting                                                    |
+| `todo_show`                   | Show a single todo with full details including checklist steps                                        |
+| `todo_create`                 | Create a new todo with optional due date, importance, reminder, and recurrence                        |
+| `todo_update`                 | Update an existing todo (title, body, importance, due date, reminder, recurrence)                     |
+| `todo_complete`               | Mark a todo as completed                                                                              |
+| `todo_delete`                 | Delete a todo                                                                                         |
+| `todo_steps`                  | List all checklist steps (sub-items) within a todo                                                    |
+| `todo_add_step`               | Add a new checklist step to a todo                                                                    |
+| `todo_update_step`            | Update a checklist step — rename it, check it off, or uncheck it                                      |
+| `todo_delete_step`            | Delete a checklist step from a todo                                                                   |
+| `markdown_select_root_folder` | Select which folder to use for markdown files in the signed-in user's OneDrive (human-only selection) |
+| `markdown_list_files`         | List `.md` files in the configured folder; subdirectories and bad-name files appear as UNSUPPORTED    |
+| `markdown_get_file`           | Read a markdown file's current content, eTag, and Revision (by file ID or strict-validated name)      |
+| `markdown_create_file`        | Create a new markdown file — fails with a clear error if a file with that name already exists         |
+| `markdown_update_file`        | Overwrite an existing markdown file using `If-Match` eTag for safe optimistic concurrency             |
+| `markdown_delete_file`        | Delete a markdown file from the configured folder                                                     |
+| `markdown_list_file_versions` | List historical versions that OneDrive retained for a markdown file (newest first)                    |
+| `markdown_get_file_version`   | Read the UTF-8 content of a specific prior version of a markdown file                                 |
+| `markdown_diff_file_versions` | Compute a unified diff between two revisions of a markdown file server-side (via jsdiff)              |
 
 ---
 
@@ -93,16 +102,17 @@ The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into th
 
 These scopes reflect the current set of capabilities. Additional scopes may be required as new Graph surfaces are added.
 
-| Scope             | Purpose                                         |
-| ----------------- | ----------------------------------------------- |
-| `Mail.Send`       | Send emails as the signed-in user               |
-| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks |
-| `User.Read`       | Read the signed-in user's basic profile         |
-| `offline_access`  | Enable refresh tokens for persistent sessions   |
+| Scope             | Purpose                                            |
+| ----------------- | -------------------------------------------------- |
+| `Mail.Send`       | Send emails as the signed-in user                  |
+| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks    |
+| `Files.ReadWrite` | Read and write markdown files in a OneDrive folder |
+| `User.Read`       | Read the signed-in user's basic profile            |
+| `offline_access`  | Enable refresh tokens for persistent sessions      |
 
 ### Todo List Selection
 
-Before using todo tools, select which Microsoft To Do list to use. Call the `todo_config` tool - it opens a browser window with your available lists. Click the one you want, and the configuration is saved.
+Before using todo tools, select which Microsoft To Do list to use. Call the `todo_select_list` tool - it opens a browser window with your available lists. The picker provides a filter/search box, a refresh button (useful after you create a new list), and a link to open Microsoft To Do in a new tab so you can create a new list without leaving the flow. Click the one you want, and the configuration is saved.
 
 **Security:** This is a human-only action. The AI agent cannot programmatically change which list it operates on - only you can make this selection through the browser.
 
@@ -113,6 +123,50 @@ The configuration is stored in the OS config directory:
 - **Linux:** `~/.config/graphdo-ts/config.json`
 - **macOS:** `~/Library/Application Support/graphdo-ts/config.json`
 - **Windows:** `%APPDATA%/graphdo-ts/config.json`
+
+### Markdown Files
+
+Before using the markdown tools, select which folder graphdo should use as the root for markdown files. Call the `markdown_select_root_folder` tool — it opens a browser window listing the top-level folders available. The picker supports:
+
+- a filter/search box so you can narrow large folder lists quickly,
+- a refresh button that re-fetches the list (useful after you create a new folder),
+- a link to open OneDrive in a new tab so you can create a new top-level folder without leaving the flow.
+
+Click the folder you want, and the configuration is saved to `markdown.rootFolderId` in `config.json`. Calling the tool again overwrites the selection. (Under the hood, the storage is a OneDrive folder accessed via Microsoft Graph — see [ADR-0004](./docs/adr/0004-markdown-file-support.md).)
+
+**Security:** This is a human-only action. The AI agent cannot programmatically change which folder it operates on — only you can make this selection via the browser. All markdown tools are confined to the children of that one folder. If `markdown.rootFolderId` is missing, empty, `/`, or contains any path separator or whitespace (e.g. someone edits `config.json` by hand), every markdown tool refuses to run and directs you back to `markdown_select_root_folder`. The root is always a single top-level folder — never the drive root, never a subdirectory.
+
+Once a root folder is set, the markdown tools operate on `.md` files directly inside it:
+
+- `markdown_list_files` — list the supported `.md` files (name, file ID, last modified timestamp, size in bytes). Subdirectories and `.md` files whose names violate the strict naming rules are reported alongside as `UNSUPPORTED`, so the agent knows they exist but cannot operate on them.
+- `markdown_get_file` — read a file by file ID **or** by file name (strict naming rules apply) and return its UTF-8 content along with the current `eTag` and a `Revision` ID. The eTag is what `markdown_update_file` uses for safe concurrency; the Revision ID is an opaque identifier that lines up with the IDs returned by `markdown_list_file_versions` so the same value can be passed to `markdown_diff_file_versions`.
+- `markdown_create_file` — create a new file by name. Fails with a clear error if a file with the same name already exists in the folder. Uses OneDrive's `@microsoft.graph.conflictBehavior=fail` so the distinction from update is server-enforced, not just a client-side check.
+- `markdown_update_file` — overwrite an existing file. Requires the `eTag` previously returned by `markdown_get_file` (or `markdown_create_file` / `markdown_update_file`). The update is sent with an `If-Match` header and succeeds only when the supplied eTag matches the file's current eTag. If the file has changed since you last read it, the call fails with structured reconcile guidance: the error includes the new `Current Revision` and points the agent straight at `markdown_diff_file_versions` (so the agent does not have to diff by hand) to compute a unified diff between the revision originally read and the current revision. The agent then re-reads, reconciles, and calls update again — or asks the user how to proceed when the intent no longer fits.
+- `markdown_delete_file` — permanently delete a file by file ID or name.
+- `markdown_list_file_versions` — list the historical versions OneDrive retained for a file (newest first). OneDrive automatically snapshots prior content whenever a file is overwritten; this tool surfaces that history with each version's opaque ID, timestamp, size, and — when available — the name of the user who last modified it.
+- `markdown_get_file_version` — read the UTF-8 content of a specific prior version returned by `markdown_list_file_versions`. This is read-only; it does _not_ restore the file. To promote an older version back to current, pass its content to `markdown_update_file`.
+- `markdown_diff_file_versions` — return a unified diff between any two revisions of a file, computed server-side using `jsdiff`. Each of `fromVersionId` / `toVersionId` can be either a historical version ID from `markdown_list_file_versions` or the current Revision from `markdown_get_file` / `markdown_create_file` / `markdown_update_file` (including the `Current Revision` reported in an etag-mismatch error).
+
+#### Strict file-name rules
+
+All markdown tool calls that accept a file name enforce a strict, cross-OS-safe naming rule. The goal is to make sure the agent can never create subdirectories, never use characters that only work on some operating systems, and never overwrite files whose names only _look_ like markdown files.
+
+A file name is accepted **only when all of the following hold:**
+
+- Ends in `.md` (case-insensitive).
+- Contains only letters (A–Z, a–z), digits, space, dot (`.`), underscore (`_`), and hyphen (`-`).
+- Starts with a letter or digit (no leading dot, space, or hyphen).
+- Does not contain path separators (`/`, `\`) or any subdirectory segments.
+- Does not contain control characters.
+- Is not a Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`).
+- Has no leading or trailing whitespace, and no trailing dot before `.md`.
+- Is no longer than 255 characters.
+
+Requests with invalid names are rejected with a clear error that states which rule was violated. This enforcement applies to every markdown tool that accepts a file name (`markdown_create_file`, `markdown_update_file`, `markdown_get_file`, `markdown_delete_file`, `markdown_list_file_versions`, `markdown_get_file_version`, `markdown_diff_file_versions`) — both at the MCP schema layer (before the handler runs) and again after resolving drive item IDs, so a file whose stored remote name is unsupported also cannot be operated on.
+
+**4 MB limit.** `markdown_get_file`, `markdown_create_file`, and `markdown_update_file` enforce a hard 4 MB (4,194,304 bytes) limit per request. This is the Microsoft Graph limit for direct content transfers. graphdo-ts deliberately does not support resumable upload sessions — markdown notes are expected to be well under this limit, and avoiding the complexity of session-based uploads keeps the tool surface small. Files over 4 MB return a clear error.
+
+See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MB limit, the folder picker approach, the Graph API constraints, and the strict file-name rules.
 
 ---
 
@@ -126,7 +180,7 @@ When you first use the `login` tool, Microsoft may tell you that you need admin 
 
 **What to tell your IT admin:**
 
-> "I'd like to use an AI tool called graphdo-ts that helps me send emails to myself and manage my todo list. It needs admin consent for the following **delegated** permissions: User.Read, Mail.Send, Tasks.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
+> "I'd like to use an AI tool called graphdo-ts that helps me send emails to myself, manage my todo list, and manage markdown notes in OneDrive. It needs admin consent for the following **delegated** permissions: User.Read, Mail.Send, Tasks.ReadWrite, Files.ReadWrite, and offline_access. The application ID is `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` and it's published by Co-native AB."
 
 ### For IT administrators
 
@@ -143,6 +197,7 @@ graphdo-ts uses a multi-tenant application published by Co-native AB. To grant c
    | `User.Read`       | Delegated | Read the signed-in user's basic profile                                      |
    | `Mail.Send`       | Delegated | Send mail as the signed-in user                                              |
    | `Tasks.ReadWrite` | Delegated | Read and write the signed-in user's tasks                                    |
+   | `Files.ReadWrite` | Delegated | Read and write the signed-in user's OneDrive files                           |
    | `offline_access`  | Delegated | Maintain access to data you have given it access to (enables refresh tokens) |
 
 6. Once consent is granted, all users in your organization can use the `login` tool without further approval.
@@ -151,10 +206,11 @@ graphdo-ts uses a multi-tenant application published by Co-native AB. To grant c
 
 graphdo-ts is designed to keep AI agent access as limited as possible while still being useful. Using an AI agent with access to your Microsoft account is never risk-free, but the following measures minimize the exposure:
 
-- **Scoped permissions** — only delegated permissions are used (User.Read, Mail.Send, Tasks.ReadWrite, offline_access). The agent acts as the signed-in user, never as an application with broader access.
+- **Scoped permissions** — only delegated permissions are used (User.Read, Mail.Send, Tasks.ReadWrite, Files.ReadWrite, offline_access). The agent acts as the signed-in user, never as an application with broader access.
 - **Email to self only** — the agent can only send emails to the signed-in user themselves, not to other recipients.
 - **Single todo list** — the agent can only access tasks in one specific list, chosen by you.
-- **Human-in-the-loop for critical decisions** — signing in and selecting which todo list to use both require human interaction via the browser. The AI agent cannot perform these actions programmatically.
+- **Single markdown folder** — the agent can only read and write `.md` files in one OneDrive folder, chosen by you.
+- **Human-in-the-loop for critical decisions** — signing in, selecting which todo list to use, and selecting which OneDrive folder to use all require human interaction via the browser. The AI agent cannot perform these actions programmatically.
 - **Open source** — the source code is available at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) for review.
 
 As new Graph surfaces are added, the same principle applies: minimize blast radius, require human confirmation for sensitive operations, and request only the scopes that are strictly needed.
@@ -167,7 +223,7 @@ As new Graph surfaces are added, the same principle applies: minimize blast radi
 Your organization's IT administrator needs to approve graphdo-ts. See [Organization Setup](#organization-setup) for what to tell them.
 
 **"No todo lists found"**
-Create a list in Microsoft To Do first. Open [to-do.office.com](https://to-do.office.com), create a list, then call `todo_config` again.
+Create a list in Microsoft To Do first. Open [to-do.office.com/tasks/](https://to-do.office.com/tasks/), create a list, then call `todo_select_list` again.
 
 **"The browser didn't open"**
 The `login` tool will return the login URL in its error message. Copy and paste the URL into your browser to complete authentication.
@@ -181,7 +237,8 @@ graphdo-ts is designed around the principle of **minimizing blast radius** — k
 - 🔒 **Scoped access** — graphdo-ts only accesses **your own** email and tasks. It cannot access anyone else's data.
 - 📧 **Email to self only** — the agent can **only send emails to yourself**. It cannot send to other recipients.
 - 📋 **Single todo list** — the agent operates on **one specific list** that you choose via the browser. It cannot switch lists on its own.
-- 🧑 **Human-in-the-loop** — signing in and selecting which todo list to use both require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
+- 📝 **Single markdown folder** — the agent operates on **one OneDrive folder** that you choose via the browser. It cannot switch folders on its own.
+- 🧑 **Human-in-the-loop** — signing in, selecting which todo list to use, and selecting which OneDrive folder to use all require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
 - 💻 **Local credentials** — your login credentials are cached **locally on your computer** and nowhere else.
 - 🌐 **Microsoft only** — no data is sent anywhere except to **Microsoft's official servers** (the same ones Outlook and To Do use).
 - 📖 **Open source** — the source code is **fully open** at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) — anyone can review exactly what it does.

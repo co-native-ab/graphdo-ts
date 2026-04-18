@@ -174,10 +174,123 @@ export const TodoItemSchema = z
 /** Wrapper for Graph API collection responses. */
 export interface GraphListResponse<T> {
   value: T[];
+  "@odata.nextLink"?: string;
 }
 export function GraphListResponseSchema<T extends z.ZodType>(itemSchema: T) {
-  return z.object({ value: z.array(itemSchema) }).loose();
+  return z
+    .object({
+      value: z.array(itemSchema),
+      "@odata.nextLink": z.string().optional(),
+    })
+    .loose();
 }
+
+// ---------------------------------------------------------------------------
+// OneDrive / Drive items
+// ---------------------------------------------------------------------------
+
+/**
+ * A OneDrive drive item (file or folder).
+ *
+ * Only the fields graphdo consumes are modelled. Either `file` or `folder` is
+ * populated for any real item; the `name` field is always present on persisted
+ * drive items returned by the Graph API.
+ */
+export interface DriveItem {
+  id: string;
+  name: string;
+  size?: number;
+  eTag?: string;
+  /**
+   * Opaque identifier of the file's current revision. Synthesised by
+   * graphdo-ts so the agent can reference the live state the same way it
+   * references historical versions returned by `/versions`. Lines up with
+   * the version IDs in that list: when a new version is created (on create
+   * or update), it becomes the file's `version`, and the prior value moves
+   * to the version history. Optional because folders and pre-existing
+   * third-party items may not carry one.
+   */
+  version?: string;
+  lastModifiedDateTime?: string;
+  file?: { mimeType?: string };
+  folder?: { childCount?: number };
+}
+
+export const DriveItemSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    size: z.number().optional(),
+    eTag: z.string().optional(),
+    version: z.string().optional(),
+    lastModifiedDateTime: z.string().optional(),
+    file: z.object({ mimeType: z.string().optional() }).loose().optional(),
+    folder: z.object({ childCount: z.number().optional() }).loose().optional(),
+  })
+  .loose();
+
+/**
+ * A OneDrive `drive` resource as returned by `GET /me/drive`.
+ *
+ * Only the fields graphdo consumes are modelled. `webUrl` is the user-facing
+ * URL of the drive in OneDrive (e.g. the root folder in the OneDrive web UI).
+ * See https://learn.microsoft.com/en-us/graph/api/drive-get.
+ */
+export interface Drive {
+  id: string;
+  driveType?: string;
+  webUrl?: string;
+}
+
+export const DriveSchema = z
+  .object({
+    id: z.string(),
+    driveType: z.string().optional(),
+    webUrl: z.string().optional(),
+  })
+  .loose();
+
+/**
+ * A single historical version of a OneDrive drive item, as returned by
+ * `GET /me/drive/items/{id}/versions`. See
+ * https://learn.microsoft.com/en-us/graph/api/driveitem-list-versions.
+ *
+ * The ID is an opaque string assigned by OneDrive (for SharePoint-backed
+ * drives it looks like "1.0", "2.0", etc., but code must treat it as opaque).
+ * `lastModifiedBy.user.displayName` is populated on SharePoint/business drives
+ * but may be absent on personal OneDrive.
+ */
+export interface DriveItemVersion {
+  id: string;
+  lastModifiedDateTime?: string;
+  size?: number;
+  lastModifiedBy?: {
+    user?: {
+      displayName?: string;
+      email?: string;
+    };
+  };
+}
+
+export const DriveItemVersionSchema = z
+  .object({
+    id: z.string(),
+    lastModifiedDateTime: z.string().optional(),
+    size: z.number().optional(),
+    lastModifiedBy: z
+      .object({
+        user: z
+          .object({
+            displayName: z.string().optional(),
+            email: z.string().optional(),
+          })
+          .loose()
+          .optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();
 
 /** Graph API error response envelope. */
 export interface GraphErrorEnvelope {

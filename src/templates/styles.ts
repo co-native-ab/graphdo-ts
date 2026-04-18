@@ -305,6 +305,101 @@ export const PICKER_STYLE = `
         background: ${dark.surfaceHover};
       }
       #manual-close { color: ${dark.text}; }
+    }
+    .toolbar {
+      display: flex;
+      gap: ${spacing.sm};
+      align-items: center;
+      margin-bottom: ${spacing.sm};
+    }
+    .filter-input {
+      flex: 1;
+      padding: 10px 12px;
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      border: 1.5px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      background: ${grey.white};
+      color: inherit;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .filter-input:focus { border-color: ${purple.brand}; }
+    .refresh-btn {
+      padding: 10px 14px;
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      background: ${grey.white};
+      border: 1.5px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .refresh-btn:hover { border-color: ${purple.brand}; background: ${purple.minus3}; }
+    .refresh-btn:disabled { opacity: 0.5; cursor: wait; }
+    .no-match {
+      text-align: center;
+      color: ${grey.grey4};
+      padding: 12px 0;
+      font-size: ${fontSize.base};
+    }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: ${spacing.sm};
+      margin-top: ${spacing.sm};
+      padding-top: ${spacing.sm};
+      border-top: 1px solid ${grey.grey2};
+    }
+    .page-btn {
+      padding: 6px 12px;
+      background: ${purple.minus3};
+      border: 1px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      color: ${purple.brand};
+      font-size: ${fontSize.sm};
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${purple.minus3}; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .page-status {
+      color: ${grey.grey4};
+      font-size: ${fontSize.sm};
+      min-width: 140px;
+      text-align: center;
+    }
+    .create-link-box {
+      margin-top: ${spacing.md};
+      padding: ${spacing.sm} 12px;
+      border: 1px dashed ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      font-size: ${fontSize.base};
+      color: ${grey.grey4};
+    }
+    .create-link-box a {
+      color: ${purple.brand};
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .create-link-box a:hover { text-decoration: underline; }
+    .create-link-desc { margin: 4px 0 0; color: ${grey.grey4}; }
+    @media (prefers-color-scheme: dark) {
+      .filter-input, .refresh-btn {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .filter-input:focus, .refresh-btn:hover { border-color: ${purple.brand}; }
+      .refresh-btn:hover { background: ${dark.surfaceHover}; }
+      .no-match, .create-link-desc { color: ${dark.text}; }
+      .create-link-box { border-color: ${dark.border}; color: ${dark.text}; }
+      .pagination { border-top-color: ${dark.border}; }
+      .page-btn { background: ${dark.surface}; border-color: ${dark.border}; color: ${dark.text}; }
+      .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
+      .page-status { color: ${dark.text}; }
     }`;
 
 // ---------------------------------------------------------------------------

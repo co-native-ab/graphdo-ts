@@ -69,7 +69,17 @@ export function registerStatusTool(server: McpServer, config: ServerConfig): Too
             lines.push(`Todo list: ${cfg.todoListName} (${cfg.todoListId})`);
           } else {
             lines.push("Todo list: Not configured");
-            lines.push('Use the "todo_config" tool to select a todo list.');
+            lines.push('Use the "todo_select_list" tool to select a todo list.');
+          }
+
+          if (cfg?.markdown?.rootFolderId) {
+            const folderLabel = cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "";
+            lines.push(
+              `Markdown root folder: ${folderLabel ? `${folderLabel} ` : ""}(${cfg.markdown.rootFolderId})`,
+            );
+          } else {
+            lines.push("Markdown root folder: Not configured");
+            lines.push('Use the "markdown_select_root_folder" tool to choose one.');
           }
 
           return {

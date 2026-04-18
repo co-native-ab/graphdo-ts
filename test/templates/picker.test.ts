@@ -84,6 +84,40 @@ describe("picker template", () => {
     expect(html.toLowerCase()).not.toContain("co-native");
   });
 
+  describe("pagination", () => {
+    it("includes pagination controls in the markup", () => {
+      expect(html).toContain('id="pagination"');
+      expect(html).toContain('id="prev-btn"');
+      expect(html).toContain('id="next-btn"');
+      expect(html).toContain('id="page-status"');
+    });
+
+    it("pagination is hidden by default (toggled by JS)", () => {
+      // The server renders the bar with style="display:none"; the client
+      // script reveals it once it knows how many matches exist.
+      expect(html).toMatch(/id="pagination"[^>]*style="display:none"/);
+    });
+
+    it("script defines a page size of 10 and resets to page 0 on filter change", () => {
+      expect(html).toContain("PAGE_SIZE = 10");
+      // Filter input handler must reset currentPage so matches on later
+      // pages don't stay hidden when the user types.
+      expect(html).toContain("currentPage = 0");
+    });
+
+    it("script still filters across the full option set", () => {
+      // Guard: filter must evaluate label.indexOf(q) over every
+      // .option-btn, not just the ones currently visible.
+      expect(html).toContain("list.querySelectorAll('.option-btn')");
+      expect(html).toContain("label.indexOf(q)");
+    });
+
+    it("script wires prev and next buttons", () => {
+      expect(html).toContain("prevBtn.addEventListener('click'");
+      expect(html).toContain("nextBtn.addEventListener('click'");
+    });
+  });
+
   describe("XSS escaping", () => {
     it("escapes HTML in option labels", () => {
       const xssConfig = {
