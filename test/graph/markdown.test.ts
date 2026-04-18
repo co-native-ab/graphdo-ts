@@ -24,6 +24,7 @@ import {
   listMarkdownFiles,
   listMarkdownFolderEntries,
   listRootFolders,
+  resolveCurrentRevision,
   updateMarkdownFile,
 } from "../../src/graph/markdown.js";
 
@@ -621,6 +622,70 @@ describe("markdown current revision tracking", () => {
     const history = await listDriveItemVersions(client, "file-md-1", testSignal());
     // The first overwrite promotes the prior current revision into history.
     expect(history.map((v) => v.id)).toContain(priorRevision);
+  });
+});
+
+describe("resolveCurrentRevision", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    seedOneDrive(env);
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("returns item.version verbatim when present (no /versions call needed)", async () => {
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    expect(item.version).toBeTruthy();
+    const resolved = await resolveCurrentRevision(client, item, testSignal());
+    expect(resolved).toBe(item.version);
+  });
+
+  it("falls back to the newest /versions entry when item.version is absent", async () => {
+    // Simulate production: GET /me/drive/items/{id} returns no `version` field
+    // even though /versions returns proper IDs.
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    const itemWithoutVersion = { ...item, version: undefined };
+    const history = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const expected = history[0]?.id;
+    expect(expected).toBeTruthy();
+
+    const resolved = await resolveCurrentRevision(client, itemWithoutVersion, testSignal());
+    expect(resolved).toBe(expected);
+  });
+
+  it("returns undefined when item.version is absent and /versions yields nothing", async () => {
+    // Build an item whose ID has no /versions entries (the mock only seeds
+    // versions lazily on first view of a file; an item the mock has never
+    // seen returns an empty list rather than 404 here because we never call
+    // GET /items/{id} on it - we go straight to /versions, which is empty
+    // in MockState for an unknown ID).
+    env.state.driveItemVersions.set("ghost-item", []);
+    const ghost = {
+      id: "ghost-item",
+      name: "ghost.md",
+      file: { mimeType: "text/markdown" },
+    };
+    const resolved = await resolveCurrentRevision(client, ghost, testSignal());
+    expect(resolved).toBeUndefined();
+  });
+
+  it("returns undefined (does not throw) when /versions errors out", async () => {
+    // Use a bogus item ID that the mock will 404 on its /versions endpoint;
+    // the resolver must swallow the error and return undefined so the
+    // caller's primary operation isn't poisoned by a best-effort lookup.
+    const ghost = {
+      id: "definitely-not-a-real-item-id",
+      name: "ghost.md",
+      file: { mimeType: "text/markdown" },
+    };
+    const resolved = await resolveCurrentRevision(client, ghost, testSignal());
+    expect(resolved).toBeUndefined();
   });
 });
 

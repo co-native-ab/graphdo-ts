@@ -817,6 +817,42 @@ export async function listDriveItemVersions(
 }
 
 /**
+ * Resolve the current revision ID of a drive item.
+ *
+ * Real OneDrive does not always populate `version` on the drive item returned
+ * from `GET /me/drive/items/{id}` (or from a content upload), even though the
+ * `/versions` sub-resource lists proper IDs. This helper prefers the inline
+ * `version` field when present, and otherwise falls back to the newest entry
+ * of `/versions` so the caller can always surface a usable Revision to the
+ * agent (matching the IDs accepted by `markdown_diff_file_versions` and
+ * `markdown_get_file_version`).
+ *
+ * Returns `undefined` only when neither source yields a version (an empty
+ * `/versions` response or a transient absence). Errors from the fallback call
+ * are swallowed so the primary operation isn't failed by a best-effort
+ * lookup; callers should treat `undefined` as "not currently known" and may
+ * direct the agent to `markdown_list_file_versions`.
+ */
+export async function resolveCurrentRevision(
+  client: GraphClient,
+  item: DriveItem,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  if (item.version !== undefined) return item.version;
+  try {
+    const history = await listDriveItemVersions(client, item.id, signal);
+    return history[0]?.id;
+  } catch (err: unknown) {
+    if (signal.aborted) throw err;
+    logger.debug("resolveCurrentRevision: /versions fallback failed", {
+      itemId: item.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+/**
  * Download the UTF-8 content of a specific historical version of a drive
  * item. Enforces the same 4 MiB graphdo-ts markdown cap as
  * {@link downloadMarkdownContent} (a tool-side policy, not a Graph API

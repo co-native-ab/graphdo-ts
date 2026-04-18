@@ -28,6 +28,7 @@ import {
   MarkdownUnknownVersionError,
   MARKDOWN_FILE_NAME_RULES,
   buildMarkdownPreviewUrl,
+  resolveCurrentRevision,
   updateMarkdownFile,
   validateMarkdownFileName,
 } from "../graph/markdown.js";
@@ -308,6 +309,18 @@ function formatSize(bytes: number | undefined): string {
   return `${String(bytes)} bytes`;
 }
 
+/**
+ * Format the Revision field for tool output. When the current revision is
+ * known (either from the drive item's `version` field or backfilled from
+ * `/versions`), report it verbatim. Otherwise direct the agent to
+ * `markdown_list_file_versions`, which is the only other path to a usable
+ * revision ID.
+ */
+function formatRevision(revision: string | undefined): string {
+  if (revision !== undefined) return revision;
+  return "(unknown - call markdown_list_file_versions to discover)";
+}
+
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
@@ -562,12 +575,13 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           }
 
           const content = await downloadMarkdownContent(client, item.id, signal);
+          const revision = await resolveCurrentRevision(client, item, signal);
 
           const header =
             `${item.name} (${item.id})\n` +
             `Size: ${formatSize(item.size)}\n` +
             `Modified: ${item.lastModifiedDateTime ?? "unknown"}\n` +
-            `Revision: ${item.version ?? "(none)"}\n` +
+            `Revision: ${formatRevision(revision)}\n` +
             `cTag: ${item.cTag ?? "(none)"}\n` +
             "(supply the cTag verbatim to markdown_update_file for safe optimistic concurrency; " +
             "use the Revision with markdown_list_file_versions / markdown_diff_file_versions " +
@@ -617,6 +631,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             args.content,
             signal,
           );
+          const revision = await resolveCurrentRevision(client, item, signal);
           const bytes = Buffer.byteLength(args.content, "utf-8");
           return {
             content: [
@@ -625,7 +640,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                 text:
                   `Created "${item.name}" (${item.id})\n` +
                   `Size: ${String(bytes)} bytes\n` +
-                  `Revision: ${item.version ?? "(none)"}\n` +
+                  `Revision: ${formatRevision(revision)}\n` +
                   `cTag: ${item.cTag ?? "(none)"}\n` +
                   "(supply the cTag verbatim to markdown_update_file for safe optimistic concurrency)",
               },
@@ -734,6 +749,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             args.content,
             signal,
           );
+          const revision = await resolveCurrentRevision(client, updated, signal);
           const bytes = Buffer.byteLength(args.content, "utf-8");
           return {
             content: [
@@ -742,7 +758,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                 text:
                   `Updated "${updated.name}" (${updated.id})\n` +
                   `Size: ${String(bytes)} bytes\n` +
-                  `Revision: ${updated.version ?? "(none)"}\n` +
+                  `Revision: ${formatRevision(revision)}\n` +
                   `cTag: ${updated.cTag ?? "(none)"}\n` +
                   "(supply the new cTag verbatim to the next markdown_update_file call)",
               },
@@ -751,6 +767,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
         } catch (err: unknown) {
           if (err instanceof MarkdownCTagMismatchError) {
             const cur = err.currentItem;
+            const currentRevision = await resolveCurrentRevision(config.graphClient, cur, signal);
             return {
               content: [
                 {
@@ -760,7 +777,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                     `modified since you last read it.\n` +
                     `Supplied cTag:    ${err.suppliedCTag}\n` +
                     `Current cTag:     ${cur.cTag ?? "(unknown)"}\n` +
-                    `Current Revision: ${cur.version ?? "(unknown)"}\n` +
+                    `Current Revision: ${formatRevision(currentRevision)}\n` +
                     `Modified:         ${cur.lastModifiedDateTime ?? "unknown"}\n` +
                     `Size:             ${formatSize(cur.size)}\n\n` +
                     `Required next steps:\n` +
@@ -769,9 +786,11 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                     `that is the revision you'll be reconciling against.\n` +
                     `2. Use markdown_diff_file_versions (with itemId="${cur.id}", ` +
                     `fromVersionId=<the revision you originally read>, ` +
-                    `toVersionId="${cur.version ?? "<current revision>"}") to see exactly ` +
+                    `toVersionId="${currentRevision ?? "<current revision>"}") to see exactly ` +
                     `what changed as a unified diff - you do NOT need to compute the diff ` +
-                    `yourself.\n` +
+                    `yourself. If you no longer have the revision you originally read, ` +
+                    `call markdown_list_file_versions (with itemId="${cur.id}") to ` +
+                    `discover the available revision IDs.\n` +
                     `3. Decide whether your intended update still applies. If it does, ` +
                     `reconcile your changes against the new content and call ` +
                     `markdown_update_file again with the new cTag. If your update no ` +
