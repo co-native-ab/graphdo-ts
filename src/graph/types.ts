@@ -214,6 +214,22 @@ export interface DriveItem {
   lastModifiedDateTime?: string;
   file?: { mimeType?: string };
   folder?: { childCount?: number };
+  /**
+   * User-facing URL of the item in OneDrive / SharePoint. For markdown files
+   * this typically points to a download endpoint; the human-friendly preview
+   * URL is constructed separately from the drive's `webUrl` and the parent
+   * path. Always present in real Graph responses for items in the user's
+   * own drive but modelled as optional for defensive parsing.
+   */
+  webUrl?: string;
+  /**
+   * Reference to the item's parent folder. Only `path` is consumed by
+   * graphdo-ts (used to build the human-friendly SharePoint preview URL).
+   * The path is the drive-relative path of the parent, prefixed with
+   * `/drive/root:` (e.g. `/drive/root:/markdown` for an item in the
+   * top-level "markdown" folder).
+   */
+  parentReference?: { path?: string };
 }
 
 export const DriveItemSchema = z
@@ -226,6 +242,8 @@ export const DriveItemSchema = z
     lastModifiedDateTime: z.string().optional(),
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),
     folder: z.object({ childCount: z.number().optional() }).loose().optional(),
+    webUrl: z.string().optional(),
+    parentReference: z.object({ path: z.string().optional() }).loose().optional(),
   })
   .loose();
 

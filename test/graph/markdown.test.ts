@@ -11,6 +11,7 @@ import {
   MarkdownFileTooLargeError,
   MarkdownFolderEntryKind,
   MarkdownUnknownVersionError,
+  buildMarkdownPreviewUrl,
   createMarkdownFile,
   deleteDriveItem,
   downloadDriveItemVersionContent,
@@ -838,5 +839,95 @@ describe("assertValidGraphId", () => {
     } finally {
       await env2.cleanup();
     }
+  });
+});
+
+describe("buildMarkdownPreviewUrl", () => {
+  const drive = {
+    id: "drive-1",
+    driveType: "business",
+    webUrl: "https://conativeab-my.sharepoint.com/personal/simon_co-native_com/Documents",
+  };
+
+  it("matches the user-provided example URL exactly", () => {
+    // From the user: previewing "Dresden Files.md" inside the "markdown" folder
+    // should yield this exact /my?id=...&parent=... URL.
+    const url = buildMarkdownPreviewUrl(drive, {
+      id: "x",
+      name: "Dresden Files.md",
+      parentReference: { path: "/drive/root:/markdown" },
+    });
+    expect(url).toBe(
+      "https://conativeab-my.sharepoint.com/my" +
+        "?id=%2Fpersonal%2Fsimon_co-native_com%2FDocuments%2Fmarkdown%2FDresden%20Files.md" +
+        "&parent=%2Fpersonal%2Fsimon_co-native_com%2FDocuments%2Fmarkdown",
+    );
+  });
+
+  it("encodes spaces as %20 (not +)", () => {
+    const url = buildMarkdownPreviewUrl(
+      { id: "d", webUrl: "https://contoso-my.sharepoint.com/personal/u_contoso_com/Documents" },
+      {
+        id: "x",
+        name: "My Notes.md",
+        parentReference: { path: "/drive/root:/My Folder" },
+      },
+    );
+    expect(url).toContain("%20");
+    expect(url).not.toContain("+");
+    expect(url).toContain("%2FMy%20Folder%2FMy%20Notes.md");
+  });
+
+  it("supports the /drives/{driveId}/root: parentReference shape", () => {
+    const url = buildMarkdownPreviewUrl(drive, {
+      id: "x",
+      name: "a.md",
+      parentReference: { path: "/drives/drive-1/root:/markdown" },
+    });
+    expect(url).toContain("%2Fmarkdown%2Fa.md");
+    expect(url).toContain("parent=%2Fpersonal%2Fsimon_co-native_com%2FDocuments%2Fmarkdown");
+  });
+
+  it("throws when drive.webUrl is missing", () => {
+    expect(() =>
+      buildMarkdownPreviewUrl(
+        { id: "d" },
+        { id: "x", name: "a.md", parentReference: { path: "/drive/root:/m" } },
+      ),
+    ).toThrow(/no webUrl/);
+  });
+
+  it("throws when drive.webUrl is unparseable", () => {
+    expect(() =>
+      buildMarkdownPreviewUrl(
+        { id: "d", webUrl: "not a url" },
+        { id: "x", name: "a.md", parentReference: { path: "/drive/root:/m" } },
+      ),
+    ).toThrow(/not a valid URL/);
+  });
+
+  it("throws when parentReference.path is missing", () => {
+    expect(() => buildMarkdownPreviewUrl(drive, { id: "x", name: "a.md" })).toThrow(
+      /no parentReference\.path/,
+    );
+  });
+
+  it("throws when parentReference.path lacks the root: marker", () => {
+    expect(() =>
+      buildMarkdownPreviewUrl(drive, {
+        id: "x",
+        name: "a.md",
+        parentReference: { path: "/something/else" },
+      }),
+    ).toThrow(/unexpected parentReference\.path/);
+  });
+
+  it("rejects consumer OneDrive (onedrive.live.com)", () => {
+    expect(() =>
+      buildMarkdownPreviewUrl(
+        { id: "d", driveType: "personal", webUrl: "https://onedrive.live.com/?id=root" },
+        { id: "x", name: "a.md", parentReference: { path: "/drive/root:/m" } },
+      ),
+    ).toThrow(/onedrive\.live\.com/);
   });
 });

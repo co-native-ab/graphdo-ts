@@ -36,6 +36,7 @@ graphdo-ts currently exposes **24 MCP tools**:
 | `markdown_list_file_versions` | List historical versions that OneDrive retained for a markdown file (newest first)                    |
 | `markdown_get_file_version`   | Read the UTF-8 content of a specific prior version of a markdown file                                 |
 | `markdown_diff_file_versions` | Compute a unified diff between two revisions of a markdown file server-side (via jsdiff)              |
+| `markdown_preview_file`       | Open a markdown file in the user's browser using the SharePoint OneDrive web preview                  |
 
 ---
 
@@ -146,6 +147,7 @@ Once a root folder is set, the markdown tools operate on `.md` files directly in
 - `markdown_list_file_versions` — list the historical versions OneDrive retained for a file (newest first). OneDrive automatically snapshots prior content whenever a file is overwritten; this tool surfaces that history with each version's opaque ID, timestamp, size, and — when available — the name of the user who last modified it.
 - `markdown_get_file_version` — read the UTF-8 content of a specific prior version returned by `markdown_list_file_versions`. This is read-only; it does _not_ restore the file. To promote an older version back to current, pass its content to `markdown_update_file`.
 - `markdown_diff_file_versions` — return a unified diff between any two revisions of a file, computed server-side using `jsdiff`. Each of `fromVersionId` / `toVersionId` can be either a historical version ID from `markdown_list_file_versions` or the current Revision from `markdown_get_file` / `markdown_create_file` / `markdown_update_file` (including the `Current Revision` reported in an etag-mismatch error).
+- `markdown_preview_file` — open a markdown file in the user's default browser using SharePoint's web preview (the `/my?id=…&parent=…` deep-link), which renders the markdown nicely instead of triggering a download. The preview URL is constructed from the drive's `webUrl` plus the file's parent path, so it always lands on the user's own OneDrive (work / school / sovereign) — no hardcoded host. The URL is also returned as text so the agent can re-share it. Consumer OneDrive (`onedrive.live.com`) uses a different URL scheme that this tool does not implement and is rejected with a clear error.
 
 #### Strict file-name rules
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `markdown_preview_file` tool — opens a markdown file from the configured root folder in the user's browser using the SharePoint OneDrive web preview deep-link (renders the markdown nicely instead of triggering a download)
 - `$filter` and `$orderby` support for `todo_list` tool ([TD-020])
 - Dependabot configuration for automated npm and GitHub Actions dependency updates ([TD-013])
 - Test coverage reporting in CI with configurable thresholds ([TD-019])
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `openBrowser` now accepts `https://` URLs to any host (still rejects plain `http://` to non-localhost) so deep-link tools like `markdown_preview_file` can launch external URLs
 - Standardized Node.js version to >=22 across `manifest.json`, `README.md`, `build.mjs`, and `package.json` ([TD-012])
 - Split 1,249-line integration test file into focused test modules with shared helpers ([TD-022])
 

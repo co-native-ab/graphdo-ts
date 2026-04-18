@@ -36,16 +36,25 @@ describe("openBrowser", () => {
     );
   });
 
-  it("rejects a remote hostname", async () => {
+  it("rejects plain http:// to a non-localhost hostname", async () => {
     await expect(openBrowser("http://example.com/anything")).rejects.toThrow(
-      "URL must be a localhost address, got: example.com",
+      "Plain http:// URLs must be a localhost address, got: example.com",
     );
   });
 
-  it("rejects a remote IP address", async () => {
+  it("rejects plain http:// to a remote IP address", async () => {
     await expect(openBrowser("http://192.168.1.1:8080/")).rejects.toThrow(
-      "URL must be a localhost address, got: 192.168.1.1",
+      "Plain http:// URLs must be a localhost address, got: 192.168.1.1",
     );
+  });
+
+  it("accepts https:// to a remote hostname (e.g. SharePoint preview links)", async () => {
+    // Validation passes — the mocked execFile rejects, confirming we reached
+    // the actual browser-open step.
+    const result = openBrowser(
+      "https://contoso-my.sharepoint.com/my?id=%2Fpersonal%2Fu%2FDocuments%2Fmd%2Ffile.md",
+    );
+    await expect(result).rejects.toThrow("Failed to open browser:");
   });
 
   it("accepts http://localhost with a port", async () => {
