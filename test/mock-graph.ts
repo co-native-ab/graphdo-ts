@@ -144,7 +144,7 @@ function errorResponse(
   jsonResponse(res, status, envelope);
 }
 
-const MAX_BODY_SIZE = 1_048_576; // 1 MB
+const MAX_BODY_SIZE = 8 * 1024 * 1024; // 8 MiB — must exceed our 4 MiB markdown limit so boundary tests can exercise it
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -765,8 +765,24 @@ async function handleDriveRequest(
 
   // GET /me/drive/items/{id}/versions
   if (method === "GET" && segments.length === 5 && segments[4] === "versions") {
-    const versions = state.driveItemVersions.get(itemId) ?? [];
-    const value = versions.map((v) => driveItemVersionView(v));
+    const file = findMockFile(state, itemId);
+    // Trigger lazy version assignment so the current version ID is populated.
+    if (file) driveItemView(file, state);
+    const historical = state.driveItemVersions.get(itemId) ?? [];
+    // Real OneDrive includes the current version as the first (newest) entry.
+    const currentEntry: MockDriveItemVersion[] =
+      file?.version !== undefined
+        ? [
+            {
+              id: file.version,
+              lastModifiedDateTime: file.lastModifiedDateTime,
+              size: file.size,
+              lastModifiedBy: { user: { displayName: "Mock User" } },
+              content: "",
+            },
+          ]
+        : [];
+    const value = [...currentEntry, ...historical].map((v) => driveItemVersionView(v));
     jsonResponse(res, 200, { value });
     return true;
   }
@@ -779,6 +795,20 @@ async function handleDriveRequest(
     segments[6] === "content"
   ) {
     const versionId = decodeURIComponent(segments[5] ?? "");
+    const file = findMockFile(state, itemId);
+    // Trigger lazy version assignment so we can compare the current version ID.
+    if (file) driveItemView(file, state);
+    // Real OneDrive rejects content downloads for the current version via this
+    // endpoint (HTTP 400 "invalidRequest").
+    if (file?.version !== undefined && file.version === versionId) {
+      errorResponse(
+        res,
+        400,
+        "invalidRequest",
+        "You cannot get the content of the current version.",
+      );
+      return true;
+    }
     const versions = state.driveItemVersions.get(itemId) ?? [];
     const match = versions.find((v) => v.id === versionId);
     if (!match) {

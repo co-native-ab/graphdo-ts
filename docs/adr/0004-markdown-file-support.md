@@ -20,7 +20,7 @@ AI agents frequently need to read and write short-to-medium-length text document
 
 Microsoft Graph exposes a file system via OneDrive (`/me/drive`). Extending graphdo-ts with markdown-file tools is a natural next Graph surface to cover, but it introduces new forces that do not apply to mail or To Do:
 
-- **Arbitrary content**: unlike a todo title or mail subject, a markdown document can be of arbitrary length. Graph places a hard 4 MB limit on single-request transfers to the `/content` endpoint. Larger files require a **resumable upload session**, which is a multi-request protocol: create a session, stream chunks of up to 60 MiB with precise Content-Range headers, retry partial failures, and finalise the session. Implementing this well requires byte-accurate streaming, chunk-level retry logic, progress reporting, and session teardown on abort.
+- **Arbitrary content**: unlike a todo title or mail subject, a markdown document can be of arbitrary length. Microsoft Graph's `/content` endpoint accepts simple `PUT` uploads up to 250 MB ([driveItem: PUT content](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0&tabs=http)); even larger files require a **resumable upload session**, which is a multi-request protocol: create a session, stream chunks of up to 60 MiB with precise Content-Range headers, retry partial failures, and finalise the session. Implementing this well requires byte-accurate streaming, chunk-level retry logic, progress reporting, and session teardown on abort. graphdo-ts intentionally caps payloads well below the Graph limit (see "4 MiB Tool-Side Cap" below) — markdown notes do not need either path's headroom.
 - **Scope of access**: OneDrive access ranges from `Files.Read` (read-only, all files) down to `Files.ReadWrite.AppFolder` (read/write in a single app-owned folder). The scope choice sets both the capability and the blast radius: an agent with `Files.ReadWrite` can — absent further constraints — reach every file in the user's drive, which is a meaningfully larger blast radius than mail-to-self or a single todo list (see [ADR-0001](./0001-minimize-blast-radius.md)).
 - **"Which file?" ambiguity**: for mail and todo items, an ID-based API is enough. For files the agent frequently knows the human-readable name ("open my `ideas.md`") before it knows any ID, so the tool surface must support name-based addressing while keeping IDs as the canonical reference.
 - **Consistency with existing design**: graphdo-ts already has a well-worn pattern for "scope agent access to a single container chosen by the human via the browser" — the To Do list picker. Reusing that pattern is strongly preferred to inventing a new one.
@@ -59,20 +59,23 @@ The markdown picker and its subtitle explicitly mention OneDrive — this is the
 
 Filtering is primarily client-side: Graph's `$filter` on drive items does not reliably support the string functions needed to test a file extension. `$top=200` bounds the request; pagination is not exposed because the design is scoped to a user's own notes folder where a single page is expected to cover the common case.
 
-### 4. Hard 4 MB Limit on Content Transfers
+### 4. 4 MiB Tool-Side Cap on Content Transfers
 
-`markdown_get_file`, `markdown_create_file`, and `markdown_update_file` use direct `GET` / `PUT` against `/content`. The Microsoft Graph documented limit for a single request is 4 MiB = 4,194,304 bytes; larger payloads require an upload session. We deliberately do **not** implement upload sessions.
+`markdown_get_file`, `markdown_create_file`, `markdown_update_file`, `markdown_get_file_version`, and `markdown_diff_file_versions` use direct `GET` / `PUT` against `/content` and `/versions/{id}/content`. graphdo-ts caps payloads at 4 MiB = 4,194,304 bytes per file.
+
+**This is a graphdo-ts policy limit, not a Microsoft Graph API limit.** Microsoft Graph's `/content` endpoint accepts simple `PUT` uploads up to 250 MB ([driveItem: PUT content](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0&tabs=http)); resumable upload sessions extend that further. The cap exists in graphdo-ts to keep the markdown tool surface focused on its intended use case (hand-written notes and small documents), not to satisfy a Graph API constraint.
 
 Concretely:
 
 - `markdown_create_file` and `markdown_update_file` check `Buffer.byteLength(content, "utf-8")` **before** making any network call and return a structured `MarkdownFileTooLargeError` if over 4 MiB.
-- `markdown_get_file` reads the target's `size` via a metadata request first and refuses to download when it exceeds 4 MiB; it also re-checks the received body length as a defence-in-depth measure.
+- `markdown_get_file` and `markdown_get_file_version` read the target's `size` via a metadata request first and refuse to download when it exceeds 4 MiB; they also re-check the received body length as a defence-in-depth measure.
 
-Rationale for the hard limit:
+Rationale for the cap:
 
-- **Scope fit**: markdown documents above 4 MiB are extremely rare in practice. The 99th-percentile note, draft, or outline is well under 100 KiB.
-- **Complexity**: upload sessions require chunked streaming with precise Content-Range headers, chunk-level retries, progress reporting, and session lifecycle management (create / resume / cancel / complete). Every one of those adds code paths and error conditions.
-- **Matches the project philosophy**: graphdo-ts exists to give agents _scoped, low-risk_ Graph access, not to be a full document-management tool. A clear "this is for notes, not bulk uploads" ceiling is a feature, not a limitation.
+- **Scope fit**: markdown documents above 4 MiB are extremely rare in practice. The 99th-percentile note, draft, or outline is well under 100 KiB. The cap signals "this tool is for notes" and discourages agents from using it for bulk file storage.
+- **Bounded agent payloads**: every byte that flows through these tools also flows through an MCP client/agent context. Capping at 4 MiB keeps a single tool call from blowing up an agent's context budget.
+- **Avoided complexity**: not raising the cap means no upload sessions, no chunked streaming with precise Content-Range headers, no chunk-level retries, no progress reporting, no session lifecycle management. Every one of those would add code paths and error conditions.
+- **Easy to revisit**: the cap is a single constant (`MAX_DIRECT_CONTENT_BYTES` in `src/graph/markdown.ts`). Raising it later if a concrete need emerges is a one-line change plus updated documentation. Until then, the conservative value is the safer default.
 
 ### 5. ID-or-Name Addressing
 
@@ -109,7 +112,7 @@ Listings take a different tack: rather than hide things that fail validation, `m
 
 - **POS-001**: Adds a high-value Graph surface (markdown notes in OneDrive) without weakening the "minimize blast radius" principle — the agent can still only touch a single, user-chosen folder.
 - **POS-002**: Reuses the existing browser-picker pattern and config persistence model, keeping graphdo-ts conceptually coherent and keeping the user's mental model ("I pick a container, the agent lives in it") intact.
-- **POS-003**: The 4 MB hard limit keeps the codebase small. No session management, no chunked streaming, no progress reporting, no resume logic. Fewer code paths means fewer bugs and easier security review.
+- **POS-003**: The 4 MiB tool-side cap keeps the codebase small. No session management, no chunked streaming, no progress reporting, no resume logic. Fewer code paths means fewer bugs and easier security review. The cap is one constant and can be raised if a concrete need appears.
 - **POS-004**: ID-or-name addressing makes the tools ergonomic for agents without compromising correctness: internally operations always resolve to an ID before acting.
 - **POS-005**: The raw-body request path in `GraphClient` generalises cleanly to any future non-JSON Graph surface (e.g., images, ICS files) without requiring another rewrite.
 - **POS-006**: Strict, cross-OS-safe naming and the subdirectory ban make the blast radius of a compromised or misbehaving agent bounded _at the file-name layer_, not only at the folder layer. An agent cannot create `../../secrets.md`, `../archive/overwrite.md`, or `CON.md`; it also cannot address such a file even if it already exists on disk.
@@ -118,7 +121,7 @@ Listings take a different tack: rather than hide things that fail validation, `m
 ### Negative
 
 - **NEG-001**: Token scope is broader than the effective capability. `Files.ReadWrite` grants the agent access to the whole OneDrive at the token layer; the folder restriction lives in graphdo-ts code. A future bug, a tool-routing error, or a malicious fork could bypass it. The mitigation is: this codebase is open source, the restriction point is a single small module, and the picker is human-only.
-- **NEG-002**: Files larger than 4 MiB cannot be read or written. Users with that use case must use a different tool. We accept this on the grounds that markdown notes exceeding 4 MiB are well outside the intended use case.
+- **NEG-002**: Files larger than 4 MiB cannot be read or written by these tools, even though Microsoft Graph itself accepts much larger files. Users with that use case must use a different tool, or — if there is a real need — raise `MAX_DIRECT_CONTENT_BYTES`. We accept this on the grounds that markdown notes exceeding 4 MiB are well outside the intended use case.
 - **NEG-003**: Flat (non-recursive) listing means users who organise notes into nested folders see only one level. They can still re-point the root folder via `markdown_select_root_folder` to a different subtree.
 - **NEG-004**: Name-based lookups require a list request, so operating on a file by name costs one extra Graph call compared to operating by ID.
 - **NEG-005**: Files created outside graphdo with names that fail the naming rules are visible in listings (under `UNSUPPORTED`) but unreadable and undeletable by the tools. Users who need to manipulate such files must rename them in their storage provider first, or use a different tool. We accept this because the alternative — relaxing the rules — would undo the cross-OS and blast-radius guarantees.
@@ -128,7 +131,7 @@ Listings take a different tack: rather than hide things that fail validation, `m
 ### Full Upload Session Support
 
 - **ALT-001**: **Description**: Implement Graph's resumable upload session protocol so files of arbitrary size can be uploaded and downloaded.
-- **ALT-002**: **Rejection Reason**: Requires significant streaming and chunk-management code (session create, chunked PUT with Content-Range, partial-failure retry, session cancel on abort, session complete). Adds per-chunk error paths that must be tested and maintained. The benefit is real but serves an out-of-scope use case (bulk file transfer); the scoped "markdown notes" use case is already fully served by the 4 MiB direct path.
+- **ALT-002**: **Rejection Reason**: Requires significant streaming and chunk-management code (session create, chunked PUT with Content-Range, partial-failure retry, session cancel on abort, session complete). Adds per-chunk error paths that must be tested and maintained. The benefit is real but serves an out-of-scope use case (bulk file transfer); the scoped "markdown notes" use case is already fully served well below the Graph `/content` limit, and the graphdo-ts 4 MiB cap is intentionally conservative even within that.
 
 ### `Files.ReadWrite.AppFolder` Instead of `Files.ReadWrite`
 
@@ -164,7 +167,7 @@ Listings take a different tack: rather than hide things that fail validation, `m
 
 - **IMP-001**: New scope `Files.ReadWrite` is added to `GraphScope` and `AVAILABLE_SCOPES` with `required: false`, matching the design of `Mail.Send` and `Tasks.ReadWrite`. Tool registration uses the existing `requiredScopes` mechanism so markdown tools are hidden until the user consents to the scope.
 - **IMP-002**: Config is extended with an optional `markdown: { rootFolderId, rootFolderName, rootFolderPath }` object. A new `updateConfig` helper performs load-merge-save so writing the markdown config does not clobber the todo config and vice versa. `hasMarkdownConfig` and `loadAndValidateMarkdownConfig` mirror the existing todo helpers.
-- **IMP-003**: Graph operations live in `src/graph/markdown.ts` and cover folder listing, file listing with `.md` filter, metadata fetch, content download, conditional create and update, version history, and delete. The 4 MiB constant is exported as `MAX_DIRECT_CONTENT_BYTES`. Dedicated `MarkdownFileTooLargeError`, `MarkdownFileAlreadyExistsError`, and `MarkdownEtagMismatchError` classes surface size-limit, create-conflict, and update-etag-mismatch cases without being conflated with network or authorization errors.
+- **IMP-003**: Graph operations live in `src/graph/markdown.ts` and cover folder listing, file listing with `.md` filter, metadata fetch, content download, conditional create and update, version history, and delete. The 4 MiB tool-side cap is exported as `MAX_DIRECT_CONTENT_BYTES`. Dedicated `MarkdownFileTooLargeError`, `MarkdownFileAlreadyExistsError`, and `MarkdownEtagMismatchError` classes surface size-cap, create-conflict, and update-etag-mismatch cases without being conflated with network or authorization errors.
 - **IMP-004**: `GraphClient` gains a `requestRaw` method that sends a raw string / `Uint8Array` body with a caller-specified `Content-Type` and optional extra headers (used for `If-Match`). The retry / auth / timeout loop is extracted into a private `performRequest` helper reused by `request` and `requestRaw`.
 - **IMP-005**: Nine MCP tools live in `src/tools/markdown.ts`: `markdown_select_root_folder`, `markdown_list_files`, `markdown_get_file`, `markdown_create_file`, `markdown_update_file`, `markdown_delete_file`, `markdown_list_file_versions`, `markdown_get_file_version`, `markdown_diff_file_versions`. The picker tool reuses `startBrowserPicker` from `src/picker.ts`. All tools return a friendly "not configured — use `markdown_select_root_folder`" error when `markdown.rootFolderId` is missing.
 - **IMP-006**: Success criteria: (a) all tools are registered and scope-gated, (b) size-limit enforcement is exercised by unit tests on the download, create, and update paths, (c) the picker persists the selection without overwriting unrelated config, (d) the mock Graph server models the `/me/drive/...` endpoints sufficiently for full end-to-end integration tests against an in-process MCP client (including `?@microsoft.graph.conflictBehavior=fail` 409 conflicts on create and `If-Match` 412 etag mismatches on update), and (e) the strict file-name rules are enforced at every entry point and tested for all rejection classes.
@@ -172,7 +175,7 @@ Listings take a different tack: rather than hide things that fail validation, `m
 ## References
 
 - **REF-001**: [ADR-0001: Minimize Blast Radius for AI Agent Access](./0001-minimize-blast-radius.md) — the overarching security principle that motivates single-folder scoping and the narrow scope selection.
-- **REF-002**: [Microsoft Graph — Upload or replace the contents of a driveItem](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content) — the direct `PUT` endpoint used for uploads, including the 4 MiB documented limit.
+- **REF-002**: [Microsoft Graph — Upload or replace the contents of a driveItem](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0&tabs=http) — the direct `PUT` endpoint used for uploads. Microsoft documents support for files up to 250 MB via this path; graphdo-ts intentionally caps payloads well below that.
 - **REF-003**: [Microsoft Graph — Upload large files with an upload session](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession) — the session-based protocol deliberately not implemented in this ADR.
 - **REF-004**: [Microsoft Graph — driveItem resource type](https://learn.microsoft.com/en-us/graph/api/resources/driveitem) — the shape of the `DriveItem` entities consumed by this module.
 - **REF-005**: [Microsoft Graph permissions reference — Files](https://learn.microsoft.com/en-us/graph/permissions-reference#files-permissions) — the set of OneDrive permission variants considered when selecting `Files.ReadWrite`.

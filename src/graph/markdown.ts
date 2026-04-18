@@ -16,11 +16,20 @@ import { GraphRequestError, HttpMethod, parseResponse } from "./client.js";
 import { logger } from "../logger.js";
 
 /**
- * Maximum content size for a single direct GET/PUT to `/content`.
+ * Client-side cap on the size of a single markdown file payload.
  *
- * Microsoft Graph enforces a 4 MB limit per request on the `content` endpoint.
- * Larger files require a resumable upload session; we deliberately do not
- * support that — see ADR-0004.
+ * This is a graphdo-ts policy limit, NOT a Microsoft Graph API limit.
+ * Microsoft Graph's `/content` endpoint accepts simple PUT uploads up to
+ * 250 MB (see https://learn.microsoft.com/en-us/graph/api/driveitem-put-content);
+ * resumable upload sessions extend that further. We intentionally cap markdown
+ * tool payloads at 4 MiB to keep these tools focused on hand-written notes
+ * and small documents — the use case the markdown surface is designed for —
+ * and to discourage agents from using OneDrive as bulk file storage via this
+ * tool. The limit can be raised later if a concrete need appears; until then,
+ * comparison is `>` so exactly 4 MiB still succeeds.
+ *
+ * See ADR-0004 for the full rationale (no upload sessions, scope of the
+ * markdown surface).
  */
 export const MAX_DIRECT_CONTENT_BYTES = 4 * 1024 * 1024; // 4 MiB = 4_194_304
 
@@ -499,7 +508,7 @@ export async function getDriveItem(
 // Download / upload / delete
 // ---------------------------------------------------------------------------
 
-/** Error raised when a file exceeds the direct GET/PUT size limit. */
+/** Error raised when a file exceeds the client-side markdown size cap. */
 export class MarkdownFileTooLargeError extends Error {
   constructor(
     public readonly sizeBytes: number,
@@ -507,7 +516,7 @@ export class MarkdownFileTooLargeError extends Error {
   ) {
     super(
       `Markdown file is ${String(sizeBytes)} bytes, which exceeds the ${String(limitBytes)}-byte ` +
-        "direct transfer limit (4 MB). Upload sessions are not supported.",
+        "graphdo-ts markdown size cap (tool-side limit, not a Microsoft Graph API limit).",
     );
     this.name = "MarkdownFileTooLargeError";
   }
@@ -516,9 +525,11 @@ export class MarkdownFileTooLargeError extends Error {
 /**
  * Download a drive item's content as a UTF-8 string.
  *
- * Enforces the 4 MB limit by checking the reported item size first; if the
- * size is unknown it falls back to measuring the response body. Throws
- * {@link MarkdownFileTooLargeError} when the limit is exceeded.
+ * Enforces the 4 MiB graphdo-ts markdown cap by checking the reported item
+ * size first; if the size is unknown it falls back to measuring the response
+ * body. Throws {@link MarkdownFileTooLargeError} when the limit is exceeded.
+ * The cap is a tool-side policy, not a Graph API limit (see
+ * {@link MAX_DIRECT_CONTENT_BYTES}).
  */
 export async function downloadMarkdownContent(
   client: GraphClient,
@@ -715,9 +726,10 @@ export async function listDriveItemVersions(
 
 /**
  * Download the UTF-8 content of a specific historical version of a drive
- * item. Enforces the same 4 MB direct-transfer limit as
- * {@link downloadMarkdownContent}. Throws {@link MarkdownFileTooLargeError}
- * when the limit is exceeded.
+ * item. Enforces the same 4 MiB graphdo-ts markdown cap as
+ * {@link downloadMarkdownContent} (a tool-side policy, not a Graph API
+ * limit). Throws {@link MarkdownFileTooLargeError} when the limit is
+ * exceeded.
  *
  * See https://learn.microsoft.com/en-us/graph/api/driveitemversion-get-contents.
  */
@@ -763,11 +775,19 @@ export class MarkdownUnknownVersionError extends Error {
   }
 }
 
+export interface RevisionContent {
+  content: string;
+  isCurrent: boolean;
+}
+
 /**
  * Fetch the UTF-8 content of a specific revision — either the current
- * revision (matched by the drive item's `version` field) or any historical
- * version from `/versions`. Throws {@link MarkdownUnknownVersionError} when
- * the ID matches neither.
+ * revision (matched by the drive item's `version` field or by being the first
+ * entry in `/versions`) or any historical version. Throws
+ * {@link MarkdownUnknownVersionError} when the ID matches neither. Returns the
+ * content along with `isCurrent` so callers can label the result accurately
+ * even when `item.version` is absent (which is common in real OneDrive
+ * responses).
  *
  * Pre-fetches the item and version list once so the caller can diff two
  * revisions with a single pair of resolution calls, and so the error message
@@ -778,22 +798,39 @@ export async function getRevisionContent(
   item: DriveItem,
   versionId: string,
   signal: AbortSignal,
-): Promise<string> {
+): Promise<RevisionContent> {
   assertValidGraphId("versionId", versionId);
   assertValidGraphId("item.id", item.id);
 
+  // Fast path: item.version is populated (always present in the mock, and in
+  // Graph API responses when the field is returned).
   if (item.version === versionId) {
-    return downloadMarkdownContent(client, item.id, signal);
+    const content = await downloadMarkdownContent(client, item.id, signal);
+    return { content, isCurrent: true };
   }
 
   const history = await listDriveItemVersions(client, item.id, signal);
+
+  // The versions list is returned newest-first. OneDrive includes the current
+  // version as the first entry but rejects GET /versions/{id}/content for it
+  // (HTTP 400 "invalidRequest: You cannot get the content of the current
+  // version"). When item.version is unavailable (real OneDrive does not always
+  // surface it), detect the current version by its position at history[0].
+  if (history[0]?.id === versionId) {
+    const content = await downloadMarkdownContent(client, item.id, signal);
+    return { content, isCurrent: true };
+  }
+
   const match = history.find((v) => v.id === versionId);
   if (!match) {
-    const known = item.version
-      ? [item.version, ...history.map((v) => v.id)]
-      : history.map((v) => v.id);
+    const known = Array.from(
+      new Set(
+        item.version ? [item.version, ...history.map((v) => v.id)] : history.map((v) => v.id),
+      ),
+    );
     throw new MarkdownUnknownVersionError(item.id, versionId, known);
   }
 
-  return downloadDriveItemVersionContent(client, item.id, versionId, signal);
+  const content = await downloadDriveItemVersionContent(client, item.id, versionId, signal);
+  return { content, isCurrent: false };
 }

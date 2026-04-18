@@ -147,6 +147,22 @@ describe("markdown graph operations", () => {
     );
   });
 
+  it("downloadMarkdownContent allows a file whose reported size equals MAX_DIRECT_CONTENT_BYTES (boundary)", async () => {
+    const exact = "a".repeat(MAX_DIRECT_CONTENT_BYTES);
+    const existing = env.state.driveFolderChildren.get("folder-1") ?? [];
+    existing.push({
+      id: "exact-4mb",
+      name: "exact.md",
+      size: MAX_DIRECT_CONTENT_BYTES,
+      file: { mimeType: "text/markdown" },
+      content: exact,
+    });
+    env.state.driveFolderChildren.set("folder-1", existing);
+
+    const body = await downloadMarkdownContent(client, "exact-4mb", testSignal());
+    expect(body.length).toBe(MAX_DIRECT_CONTENT_BYTES);
+  });
+
   it("uploadMarkdownContent removed; createMarkdownFile and updateMarkdownFile are the supported API", async () => {
     // Sanity check that the new API is wired up (replaces the legacy upload tests).
     const created = await createMarkdownFile(
@@ -178,10 +194,25 @@ describe("markdown graph operations", () => {
     expect(stored).toBe("# Hello\n");
   });
 
-  it("createMarkdownFile rejects payloads over 4 MB without hitting the network", async () => {
+  it("createMarkdownFile rejects payloads over 4 MiB without hitting the network", async () => {
     const oversized = "a".repeat(1024 * 1024).repeat(5); // 5 MiB
     await expect(
       createMarkdownFile(client, "folder-1", "big.md", oversized, testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
+  });
+
+  it("createMarkdownFile accepts a payload of exactly MAX_DIRECT_CONTENT_BYTES (boundary)", async () => {
+    // The comparison must be `>` (not `>=`): exactly 4 MiB is allowed.
+    // Verified live against real OneDrive — Graph accepts simple PUT at 4 MiB.
+    const exact = "a".repeat(MAX_DIRECT_CONTENT_BYTES);
+    const item = await createMarkdownFile(client, "folder-1", "exact-4mb.md", exact, testSignal());
+    expect(item.size).toBe(MAX_DIRECT_CONTENT_BYTES);
+  });
+
+  it("createMarkdownFile rejects a payload of MAX_DIRECT_CONTENT_BYTES + 1 (boundary)", async () => {
+    const overByOne = "a".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
+    await expect(
+      createMarkdownFile(client, "folder-1", "over-by-one.md", overByOne, testSignal()),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -256,10 +287,30 @@ describe("markdown graph operations", () => {
     );
   });
 
-  it("updateMarkdownFile rejects payloads over 4 MB without hitting the network", async () => {
+  it("updateMarkdownFile rejects payloads over 4 MiB without hitting the network", async () => {
     const oversized = "a".repeat(1024 * 1024).repeat(5);
     await expect(
       updateMarkdownFile(client, "file-md-1", "any-etag", oversized, testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
+  });
+
+  it("updateMarkdownFile accepts a payload of exactly MAX_DIRECT_CONTENT_BYTES (boundary)", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const exact = "a".repeat(MAX_DIRECT_CONTENT_BYTES);
+    const updated = await updateMarkdownFile(
+      client,
+      "file-md-1",
+      before.eTag!,
+      exact,
+      testSignal(),
+    );
+    expect(updated.size).toBe(MAX_DIRECT_CONTENT_BYTES);
+  });
+
+  it("updateMarkdownFile rejects a payload of MAX_DIRECT_CONTENT_BYTES + 1 (boundary)", async () => {
+    const overByOne = "a".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
+    await expect(
+      updateMarkdownFile(client, "file-md-1", "any-etag", overByOne, testSignal()),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -452,9 +503,12 @@ describe("markdown version history graph operations", () => {
     await env.cleanup();
   });
 
-  it("listDriveItemVersions returns an empty array for a file with no prior versions", async () => {
+  it("listDriveItemVersions returns only the current version for a file with no prior writes", async () => {
+    // Real OneDrive includes the current version as the first (and only) entry
+    // when the file has never been overwritten.
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
-    expect(versions).toEqual([]);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]?.id).toBeTruthy();
   });
 
   it("overwriting a file via updateMarkdownFile snapshots the prior version", async () => {
@@ -463,33 +517,33 @@ describe("markdown version history graph operations", () => {
     await updateMarkdownFile(client, "file-md-1", after1.eTag!, "v3", testSignal());
 
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
-    // Two overwrites produce two historical snapshots (the original + the v2).
-    expect(versions).toHaveLength(2);
+    // Current version + two historical snapshots (the original + v2).
+    expect(versions).toHaveLength(3);
     // Every version carries a non-empty ID and a timestamp.
     for (const v of versions) {
       expect(v.id.length).toBeGreaterThan(0);
       expect(typeof v.lastModifiedDateTime).toBe("string");
     }
-    // Content is NOT part of the list response — only the /content sub-resource.
-    // Confirm we can still download the most recent snapshot (which is the v2
-    // payload, since v3 became current).
-    const [firstVersion] = versions;
-    if (!firstVersion) throw new Error("expected at least one version");
-    const firstContent = await downloadDriveItemVersionContent(
+    // versions[0] is the current version (not downloadable via the versions endpoint).
+    // versions[1] should be v2 — the snapshot created by the second overwrite.
+    const priorVersion = versions[1];
+    if (!priorVersion) throw new Error("expected at least two versions");
+    const priorContent = await downloadDriveItemVersionContent(
       client,
       "file-md-1",
-      firstVersion.id,
+      priorVersion.id,
       testSignal(),
     );
-    expect(["v2", "hello world!"]).toContain(firstContent);
+    expect(["v2", "hello world!"]).toContain(priorContent);
   });
 
   it("downloadDriveItemVersionContent returns the stored content", async () => {
     const start = await getDriveItem(client, "file-md-1", testSignal());
     await updateMarkdownFile(client, "file-md-1", start.eTag!, "updated", testSignal());
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
-    expect(versions).toHaveLength(1);
-    const [prior] = versions;
+    // versions[0] is the current version; versions[1] is the prior snapshot.
+    expect(versions).toHaveLength(2);
+    const prior = versions[1];
     if (!prior) throw new Error("expected prior version");
     const content = await downloadDriveItemVersionContent(
       client,
@@ -588,7 +642,28 @@ describe("getRevisionContent", () => {
     await updateMarkdownFile(client, "file-md-1", before.eTag!, "current-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     const body = await getRevisionContent(client, current, current.version!, testSignal());
-    expect(body).toBe("current-body");
+    expect(body).toEqual({ content: "current-body", isCurrent: true });
+  });
+
+  it("returns live content when the current version id is taken from the versions list (item.version absent)", async () => {
+    // Simulate production: Graph API does not always return item.version.
+    // The agent reads the current version ID from the /versions list instead.
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.eTag!, "current-body", testSignal());
+    const current = await getDriveItem(client, "file-md-1", testSignal());
+    // Strip version to simulate production where Graph API omits the field.
+    const itemWithoutVersion = { ...current, version: undefined };
+    // The /versions list now leads with the current version as its first entry.
+    const history = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const currentVersionId = history[0]?.id;
+    if (!currentVersionId) throw new Error("expected at least one version in the list");
+    const body = await getRevisionContent(
+      client,
+      itemWithoutVersion,
+      currentVersionId,
+      testSignal(),
+    );
+    expect(body).toEqual({ content: "current-body", isCurrent: true });
   });
 
   it("returns historical content when the revision id matches a /versions entry", async () => {
@@ -597,7 +672,7 @@ describe("getRevisionContent", () => {
     await updateMarkdownFile(client, "file-md-1", before.eTag!, "second-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     const body = await getRevisionContent(client, current, originalRevision, testSignal());
-    expect(body).toBe("hello world!");
+    expect(body).toEqual({ content: "hello world!", isCurrent: false });
   });
 
   it("throws MarkdownUnknownVersionError for a revision id that matches neither", async () => {

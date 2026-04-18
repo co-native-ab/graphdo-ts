@@ -13,7 +13,6 @@ import { UserCancelledError } from "../errors.js";
 import {
   createMarkdownFile,
   deleteDriveItem,
-  downloadDriveItemVersionContent,
   downloadMarkdownContent,
   findMarkdownFileByName,
   getDriveItem,
@@ -46,6 +45,11 @@ import { formatError } from "./shared.js";
 //
 // All markdown tools operate on the signed-in user's own OneDrive, scoped to a
 // single root folder selected via markdown_select_root_folder.
+
+// Standard parenthetical to make clear that the 4 MiB ceiling is a graphdo-ts
+// policy, not a Microsoft Graph API limit (Graph itself accepts up to 250 MB
+// via /content). Reused verbatim across tool descriptions and input schemas.
+const MARKDOWN_SIZE_CAP_NOTE = "graphdo-ts tool-side cap, not a Microsoft Graph API limit";
 
 const SELECT_ROOT_DEF: ToolDef = {
   name: "markdown_select_root_folder",
@@ -86,8 +90,9 @@ const GET_FILE_DEF: ToolDef = {
     "not portable across Linux, macOS, and Windows are not allowed. Returns " +
     "the current UTF-8 content of the file along with its etag, which " +
     "markdown_update_file requires for safe optimistic concurrency. Files " +
-    "larger than 4 MB cannot be downloaded and will return an error. To " +
-    "read a previous version, use markdown_get_file_version. " +
+    "larger than 4 MiB cannot be downloaded and will return an error " +
+    `(${MARKDOWN_SIZE_CAP_NOTE}). ` +
+    "To read a previous version, use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -102,7 +107,7 @@ const CREATE_FILE_DEF: ToolDef = {
     "then call markdown_update_file. The file name must follow the strict " +
     "naming rules - paths, subdirectories, and characters that are not " +
     "portable across Linux, macOS, and Windows are rejected. Payloads " +
-    "larger than 4 MB are rejected. " +
+    `larger than 4 MiB are rejected (${MARKDOWN_SIZE_CAP_NOTE}). ` +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -122,7 +127,7 @@ const UPDATE_FILE_DEF: ToolDef = {
     "against any new content, and call markdown_update_file again with the " +
     "new etag - or ask the user how to proceed if the meaning of your " +
     "update no longer fits. Accepts the file by id (preferred) or by name. " +
-    "Payloads larger than 4 MB are rejected. " +
+    `Payloads larger than 4 MiB are rejected (${MARKDOWN_SIZE_CAP_NOTE}). ` +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -165,7 +170,7 @@ const GET_VERSION_DEF: ToolDef = {
     "markdown_list_file_versions. This does not restore or modify the file " +
     "- it only reads the prior content. Use markdown_update_file to " +
     "re-upload that content if you want to make it current. Files larger " +
-    "than 4 MB cannot be downloaded. " +
+    `than 4 MiB cannot be downloaded (${MARKDOWN_SIZE_CAP_NOTE}). ` +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -567,7 +572,11 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           fileName: markdownNameSchema.describe(
             "File name, must end in .md. Must not already exist in the configured root folder.",
           ),
-          content: z.string().describe("UTF-8 markdown content (max 4 MB / 4,194,304 bytes)."),
+          content: z
+            .string()
+            .describe(
+              `UTF-8 markdown content (max 4 MiB / 4,194,304 bytes; ${MARKDOWN_SIZE_CAP_NOTE}).`,
+            ),
         },
         annotations: {
           title: CREATE_FILE_DEF.title,
@@ -642,7 +651,11 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
               "Opaque eTag previously returned by markdown_get_file, " +
                 "markdown_create_file, or markdown_update_file. Sent verbatim in If-Match.",
             ),
-          content: z.string().describe("New UTF-8 markdown content (max 4 MB / 4,194,304 bytes)."),
+          content: z
+            .string()
+            .describe(
+              `New UTF-8 markdown content (max 4 MiB / 4,194,304 bytes; ${MARKDOWN_SIZE_CAP_NOTE}).`,
+            ),
         },
         annotations: {
           title: UPDATE_FILE_DEF.title,
@@ -979,17 +992,20 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
-          const content = await downloadDriveItemVersionContent(
+          const { content, isCurrent } = await getRevisionContent(
             client,
-            item.id,
+            item,
             args.versionId,
             signal,
           );
 
+          const versionNote = isCurrent
+            ? "(current version content)"
+            : "(historical content, not the current version — use markdown_update_file to restore)";
           const header =
             `${item.name} (${item.id})\n` +
             `Version: ${args.versionId}\n` +
-            "(historical content, not the current version — use markdown_update_file to restore)\n" +
+            `${versionNote}\n` +
             "---";
           return {
             content: [{ type: "text", text: `${header}\n${content}` }],
@@ -1092,10 +1108,12 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
-          const [fromContent, toContent] = await Promise.all([
+          const [from, to] = await Promise.all([
             getRevisionContent(client, item, args.fromVersionId, signal),
             getRevisionContent(client, item, args.toVersionId, signal),
           ]);
+          const fromContent = from.content;
+          const toContent = to.content;
 
           if (fromContent === toContent) {
             return {
