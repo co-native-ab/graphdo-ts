@@ -664,7 +664,7 @@ describe("integration: markdown", () => {
       expect(firstText(r)).toContain(".md");
     });
 
-    it("markdown_create_file rejects payloads larger than 4 MB", async () => {
+    it("markdown_create_file rejects payloads larger than 4 MiB", async () => {
       const oversized = "a".repeat(1024 * 1024).repeat(5); // 5 MiB
       const r = (await c.callTool({
         name: "markdown_create_file",
@@ -676,7 +676,7 @@ describe("integration: markdown", () => {
       expect(text.toLowerCase()).toContain("limit");
     });
 
-    it("markdown_update_file rejects payloads larger than 4 MB", async () => {
+    it("markdown_update_file rejects payloads larger than 4 MiB", async () => {
       const get = (await c.callTool({
         name: "markdown_get_file",
         arguments: { fileName: "hello.md" },
@@ -885,7 +885,9 @@ describe("integration: markdown", () => {
     // -----------------------------------------------------------------------
 
     describe("version history", () => {
-      it("markdown_list_file_versions returns no-prior-versions text for an untouched file", async () => {
+      it("markdown_list_file_versions shows the current version for an untouched file", async () => {
+        // Real OneDrive includes the current version as the first entry even
+        // when the file has never been overwritten.
         const r = (await c.callTool({
           name: "markdown_list_file_versions",
           arguments: { fileName: "hello.md" },
@@ -893,11 +895,11 @@ describe("integration: markdown", () => {
         expect(r.isError).toBeFalsy();
         const text = firstText(r);
         expect(text).toContain("hello.md");
-        expect(text.toLowerCase()).toContain("no prior versions");
+        expect(text).toMatch(/Total: 1 version\(s\)/);
       });
 
-      it("markdown_list_file_versions lists snapshots created by overwriting updates", async () => {
-        // Two updates create two historical snapshots.
+      it("markdown_list_file_versions lists current and historical snapshots after overwriting updates", async () => {
+        // Two updates create two historical snapshots plus the current version.
         const get1 = (await c.callTool({
           name: "markdown_get_file",
           arguments: { fileName: "hello.md" },
@@ -920,7 +922,8 @@ describe("integration: markdown", () => {
         expect(r.isError).toBeFalsy();
         const text = firstText(r);
         expect(text).toContain("hello.md");
-        expect(text).toMatch(/Total: 2 version\(s\)/);
+        // Current version (v3) + two historical snapshots (v2 + original).
+        expect(text).toMatch(/Total: 3 version\(s\)/);
         expect(text).toContain("markdown_get_file_version");
       });
 
@@ -940,8 +943,9 @@ describe("integration: markdown", () => {
           arguments: { fileName: "hello.md" },
         })) as ToolResult;
         const listText = firstText(list);
-        // Extract the first "1. <versionId> — ..." entry.
-        const match = /^1\. (\S+) —/m.exec(listText);
+        // After one overwrite: line 1 = current version, line 2 = prior snapshot.
+        // Extract the second "2. <versionId> — ..." entry for the historical version.
+        const match = /^2\. (\S+) —/m.exec(listText);
         expect(match).not.toBeNull();
         const versionId = match?.[1];
         if (!versionId) throw new Error("expected to parse a versionId from list output");
@@ -964,6 +968,32 @@ describe("integration: markdown", () => {
           arguments: { fileName: "hello.md", versionId: "does-not-exist" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
+      });
+
+      it("markdown_get_file_version works when the current version id (from list) is supplied", async () => {
+        // An agent may pick up the current version ID from markdown_list_file_versions
+        // and then pass it to markdown_get_file_version. This should succeed by
+        // falling back to the /content endpoint (OneDrive rejects /versions/{id}/content
+        // for the current version).
+        const list = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        // Line 1 is the current version (newest first).
+        const match = /^1\. (\S+) —/m.exec(firstText(list));
+        const currentVersionId = match?.[1];
+        if (!currentVersionId) throw new Error("expected to parse a versionId from list output");
+
+        const r = (await c.callTool({
+          name: "markdown_get_file_version",
+          arguments: { fileName: "hello.md", versionId: currentVersionId },
+        })) as ToolResult;
+        expect(r.isError).toBeFalsy();
+        const body = firstText(r);
+        expect(body).toContain(`Version: ${currentVersionId}`);
+        expect(body).toContain("(current version content)");
+        expect(body).not.toContain("historical content");
+        expect(body).toContain("hello"); // seeded content
       });
 
       it("markdown_list_file_versions requires itemId or fileName", async () => {
