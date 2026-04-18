@@ -200,7 +200,15 @@ export interface DriveItem {
   id: string;
   name: string;
   size?: number;
-  eTag?: string;
+  /**
+   * OneDrive's content-only entity tag. Bumps **only** when the file's
+   * content changes, so it is the safe optimistic-concurrency token for
+   * `If-Match` on `PUT /me/drive/items/{id}/content`. Unlike `eTag`, it is
+   * unaffected by metadata-only events (rename, share, indexing, preview
+   * generation), which avoids spurious 412s. The drive item's `eTag` field
+   * is intentionally not modelled — graphdo-ts only consumes `cTag`.
+   */
+  cTag?: string;
   /**
    * Opaque identifier of the file's current revision. Synthesised by
    * graphdo-ts so the agent can reference the live state the same way it
@@ -237,7 +245,7 @@ export const DriveItemSchema = z
     id: z.string(),
     name: z.string(),
     size: z.number().optional(),
-    eTag: z.string().optional(),
+    cTag: z.string().optional(),
     version: z.string().optional(),
     lastModifiedDateTime: z.string().optional(),
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),

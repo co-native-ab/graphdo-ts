@@ -48,8 +48,8 @@ export class MockState {
   drive: { id: string; driveType: string; webUrl: string };
   private nextId: number;
   private nextVersionSeq: number;
-  /** Per-item eTag sequence so etags monotonically bump on every write. */
-  private eTagSeq: Map<string, number>;
+  /** Per-item cTag sequence so cTags monotonically bump on every content write. */
+  private cTagSeq: Map<string, number>;
 
   constructor() {
     this.user = { id: "", displayName: "", mail: "", userPrincipalName: "" };
@@ -67,7 +67,7 @@ export class MockState {
     };
     this.nextId = 1;
     this.nextVersionSeq = 1;
-    this.eTagSeq = new Map();
+    this.cTagSeq = new Map();
   }
 
   genId(): string {
@@ -77,13 +77,14 @@ export class MockState {
   }
 
   /**
-   * Generate an opaque eTag string for a drive item. Bumped on every write so
-   * conditional-update tests can exercise both matching and stale etags.
+   * Generate an opaque cTag for a drive item, mirroring OneDrive's
+   * `c:{GUID},N` shape. Bumped on every content write so conditional-update
+   * tests can exercise both matching and stale cTags.
    */
-  genETag(itemId: string): string {
-    const seq = (this.eTagSeq.get(itemId) ?? 0) + 1;
-    this.eTagSeq.set(itemId, seq);
-    return `"{${itemId}},${String(seq)}"`;
+  genCTag(itemId: string): string {
+    const seq = (this.cTagSeq.get(itemId) ?? 0) + 1;
+    this.cTagSeq.set(itemId, seq);
+    return `"c:{${itemId}},${String(seq)}"`;
   }
 
   /**
@@ -728,7 +729,7 @@ async function handleDriveRequest(
       return true;
     }
     // Route through driveItemView so the response matches the wire shape
-    // (no in-memory `content` field) and so any missing eTag is filled in.
+    // (no in-memory `content` field) and so any missing cTag is filled in.
     const view = "file" in item ? driveItemView(item as MockDriveFile, state) : item;
     jsonResponse(res, 200, view);
     return true;
@@ -861,11 +862,11 @@ function findMockFile(state: MockState, itemId: string): MockDriveFile | undefin
 }
 
 function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
-  // Lazily assign an eTag / version on first view if the seed didn't set one.
-  // Real Graph always returns an eTag for files; tests that don't care about
+  // Lazily assign a cTag / version on first view if the seed didn't set one.
+  // Real Graph always returns a cTag for files; tests that don't care about
   // specific values shouldn't have to set them explicitly.
-  if (file.eTag === undefined && file.file !== undefined && state !== undefined) {
-    file.eTag = state.genETag(file.id);
+  if (file.cTag === undefined && file.file !== undefined && state !== undefined) {
+    file.cTag = state.genCTag(file.id);
   }
   if (file.version === undefined && file.file !== undefined && state !== undefined) {
     file.version = state.genVersionId();
@@ -893,7 +894,7 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
     id: file.id,
     name: file.name,
     size: file.size,
-    eTag: file.eTag,
+    cTag: file.cTag,
     version: file.version,
     lastModifiedDateTime: file.lastModifiedDateTime,
     file: file.file,
@@ -977,7 +978,7 @@ async function handleUploadByPath(
     existingFile.content = content;
     existingFile.size = bytes;
     existingFile.lastModifiedDateTime = now;
-    existingFile.eTag = state.genETag(existingFile.id);
+    existingFile.cTag = state.genCTag(existingFile.id);
     existingFile.version = state.genVersionId();
     file = existingFile;
     status = 200;
@@ -988,7 +989,7 @@ async function handleUploadByPath(
       name: fileName,
       size: bytes,
       lastModifiedDateTime: now,
-      eTag: state.genETag(id),
+      cTag: state.genCTag(id),
       version: state.genVersionId(),
       file: { mimeType: "text/markdown" },
       content,
@@ -1002,9 +1003,10 @@ async function handleUploadByPath(
 }
 
 /**
- * Update by id: `PUT /me/drive/items/{id}/content` with `If-Match` for
- * optimistic concurrency. Returns 412 when the supplied etag doesn't match
- * the current one. Used by `markdown_update_file`.
+ * Update by id: `PUT /me/drive/items/{id}/content` with `If-Match` carrying
+ * the file's `cTag` for content-only optimistic concurrency. Returns 412
+ * when the supplied cTag doesn't match the current one. Used by
+ * `markdown_update_file`.
  */
 async function handleUpdateById(
   state: MockState,
@@ -1028,12 +1030,12 @@ async function handleUpdateById(
     );
     return;
   }
-  if (ifMatch !== file.eTag) {
+  if (ifMatch !== file.cTag) {
     errorResponse(
       res,
       412,
       "etagMismatch",
-      `If-Match etag ${ifMatch} does not match current ${file.eTag ?? "(none)"}`,
+      `If-Match cTag ${ifMatch} does not match current ${file.cTag ?? "(none)"}`,
     );
     return;
   }
@@ -1062,7 +1064,7 @@ async function handleUpdateById(
   file.content = content;
   file.size = bytes;
   file.lastModifiedDateTime = now;
-  file.eTag = state.genETag(file.id);
+  file.cTag = state.genCTag(file.id);
   file.version = state.genVersionId();
 
   jsonResponse(res, 200, driveItemView(file));

@@ -22,7 +22,7 @@ import {
   listMarkdownFolderEntries,
   MarkdownFolderEntryKind,
   listRootFolders,
-  MarkdownEtagMismatchError,
+  MarkdownCTagMismatchError,
   MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
   MarkdownUnknownVersionError,
@@ -89,9 +89,10 @@ const GET_FILE_DEF: ToolDef = {
     "file name. File names must follow the strict naming rules and are " +
     "rejected otherwise - paths, subdirectories, and characters that are " +
     "not portable across Linux, macOS, and Windows are not allowed. Returns " +
-    "the current UTF-8 content of the file along with its etag, which " +
-    "markdown_update_file requires for safe optimistic concurrency. Files " +
-    "larger than 4 MiB cannot be downloaded and will return an error " +
+    "the current UTF-8 content of the file along with its cTag (OneDrive's " +
+    "content-only entity tag), which markdown_update_file requires for safe " +
+    "optimistic concurrency. Files larger than 4 MiB cannot be downloaded " +
+    "and will return an error " +
     `(${MARKDOWN_SIZE_CAP_NOTE}). ` +
     "To read a previous version, use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
@@ -104,7 +105,7 @@ const CREATE_FILE_DEF: ToolDef = {
   description:
     "Create a new markdown file in the configured root folder. Fails with a " +
     "clear error when a file with the same name already exists - in that " +
-    "case, call markdown_get_file to fetch the existing content and etag, " +
+    "case, call markdown_get_file to fetch the existing content and cTag, " +
     "then call markdown_update_file. The file name must follow the strict " +
     "naming rules - paths, subdirectories, and characters that are not " +
     "portable across Linux, macOS, and Windows are rejected. Payloads " +
@@ -118,15 +119,17 @@ const UPDATE_FILE_DEF: ToolDef = {
   title: "Update Markdown File",
   description:
     "Overwrite the content of an existing markdown file in the configured " +
-    "root folder. Requires the etag previously returned by markdown_get_file " +
-    "(or markdown_create_file / markdown_update_file). The update succeeds " +
-    "only when the supplied etag matches the file's current etag - if the " +
-    "file has changed since you read it, the call fails with the current " +
-    "etag and modification time. When that happens you must call " +
-    "markdown_get_file again to retrieve the latest content + etag, decide " +
+    "root folder. Requires the cTag previously returned by markdown_get_file " +
+    "(or markdown_create_file / markdown_update_file). The cTag is OneDrive's " +
+    "content-only entity tag, so unrelated metadata changes (rename, share, " +
+    "indexing, preview generation) do not invalidate it. The update succeeds " +
+    "only when the supplied cTag matches the file's current cTag - if the " +
+    "file's content has changed since you read it, the call fails with the " +
+    "current cTag and modification time. When that happens you must call " +
+    "markdown_get_file again to retrieve the latest content + cTag, decide " +
     "whether your intended update still applies, reconcile your changes " +
     "against any new content, and call markdown_update_file again with the " +
-    "new etag - or ask the user how to proceed if the meaning of your " +
+    "new cTag - or ask the user how to proceed if the meaning of your " +
     "update no longer fits. Accepts the file by id (preferred) or by name. " +
     `Payloads larger than 4 MiB are rejected (${MARKDOWN_SIZE_CAP_NOTE}). ` +
     MARKDOWN_FILE_NAME_RULES,
@@ -186,8 +189,8 @@ const DIFF_VERSIONS_DEF: ToolDef = {
     "plus a fromVersionId and a toVersionId. Each ID may be either a " +
     "historical version ID returned by markdown_list_file_versions, or the " +
     "current Revision surfaced by markdown_get_file / markdown_create_file / " +
-    "markdown_update_file (including the Current Revision reported in an " +
-    "etag-mismatch error). This is the preferred way to reconcile a stale " +
+    "markdown_update_file (including the Current Revision reported in a " +
+    "cTag-mismatch error). This is the preferred way to reconcile a stale " +
     "update: pass the revision you originally read as fromVersionId and the " +
     "current revision as toVersionId. Returns a text/x-diff unified patch. " +
     MARKDOWN_FILE_NAME_RULES,
@@ -565,8 +568,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             `Size: ${formatSize(item.size)}\n` +
             `Modified: ${item.lastModifiedDateTime ?? "unknown"}\n` +
             `Revision: ${item.version ?? "(none)"}\n` +
-            `eTag: ${item.eTag ?? "(none)"}\n` +
-            "(supply the eTag verbatim to markdown_update_file for safe optimistic concurrency; " +
+            `cTag: ${item.cTag ?? "(none)"}\n` +
+            "(supply the cTag verbatim to markdown_update_file for safe optimistic concurrency; " +
             "use the Revision with markdown_list_file_versions / markdown_diff_file_versions " +
             "to trace or diff changes)\n" +
             "---";
@@ -623,8 +626,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                   `Created "${item.name}" (${item.id})\n` +
                   `Size: ${String(bytes)} bytes\n` +
                   `Revision: ${item.version ?? "(none)"}\n` +
-                  `eTag: ${item.eTag ?? "(none)"}\n` +
-                  "(supply the eTag verbatim to markdown_update_file for safe optimistic concurrency)",
+                  `cTag: ${item.cTag ?? "(none)"}\n` +
+                  "(supply the cTag verbatim to markdown_update_file for safe optimistic concurrency)",
               },
             ],
           };
@@ -638,8 +641,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                     `A file named "${err.fileName}" already exists in the configured ` +
                     `root folder. Either choose a different name, or - if you intended ` +
                     `to overwrite - call markdown_get_file to fetch the existing ` +
-                    `content and eTag, decide whether your update still applies, then ` +
-                    `call markdown_update_file with the eTag.`,
+                    `content and cTag, decide whether your update still applies, then ` +
+                    `call markdown_update_file with the cTag.`,
                 },
               ],
               isError: true,
@@ -662,12 +665,14 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
       {
         inputSchema: {
           ...idOrNameShape,
-          etag: z
+          cTag: z
             .string()
             .min(1)
             .describe(
-              "Opaque eTag previously returned by markdown_get_file, " +
-                "markdown_create_file, or markdown_update_file. Sent verbatim in If-Match.",
+              "Opaque cTag previously returned by markdown_get_file, " +
+                "markdown_create_file, or markdown_update_file. Sent verbatim in If-Match. " +
+                "cTag is OneDrive's content-only entity tag, so unrelated metadata changes " +
+                "(rename, share, indexing, preview generation) do not invalidate it.",
             ),
           content: z
             .string()
@@ -725,7 +730,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const updated = await updateMarkdownFile(
             client,
             item.id,
-            args.etag,
+            args.cTag,
             args.content,
             signal,
           );
@@ -738,13 +743,13 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                   `Updated "${updated.name}" (${updated.id})\n` +
                   `Size: ${String(bytes)} bytes\n` +
                   `Revision: ${updated.version ?? "(none)"}\n` +
-                  `eTag: ${updated.eTag ?? "(none)"}\n` +
-                  "(supply the new eTag verbatim to the next markdown_update_file call)",
+                  `cTag: ${updated.cTag ?? "(none)"}\n` +
+                  "(supply the new cTag verbatim to the next markdown_update_file call)",
               },
             ],
           };
         } catch (err: unknown) {
-          if (err instanceof MarkdownEtagMismatchError) {
+          if (err instanceof MarkdownCTagMismatchError) {
             const cur = err.currentItem;
             return {
               content: [
@@ -753,14 +758,14 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                   text:
                     `Update rejected: the file "${cur.name}" (${cur.id}) has been ` +
                     `modified since you last read it.\n` +
-                    `Supplied eTag:    ${err.suppliedEtag}\n` +
-                    `Current eTag:     ${cur.eTag ?? "(unknown)"}\n` +
+                    `Supplied cTag:    ${err.suppliedCTag}\n` +
+                    `Current cTag:     ${cur.cTag ?? "(unknown)"}\n` +
                     `Current Revision: ${cur.version ?? "(unknown)"}\n` +
                     `Modified:         ${cur.lastModifiedDateTime ?? "unknown"}\n` +
                     `Size:             ${formatSize(cur.size)}\n\n` +
                     `Required next steps:\n` +
                     `1. Call markdown_get_file (with itemId="${cur.id}") to fetch the ` +
-                    `current content and the new eTag. Note the Revision returned - ` +
+                    `current content and the new cTag. Note the Revision returned - ` +
                     `that is the revision you'll be reconciling against.\n` +
                     `2. Use markdown_diff_file_versions (with itemId="${cur.id}", ` +
                     `fromVersionId=<the revision you originally read>, ` +
@@ -769,7 +774,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
                     `yourself.\n` +
                     `3. Decide whether your intended update still applies. If it does, ` +
                     `reconcile your changes against the new content and call ` +
-                    `markdown_update_file again with the new eTag. If your update no ` +
+                    `markdown_update_file again with the new cTag. If your update no ` +
                     `longer fits the new content, ask the user how to proceed - do not ` +
                     `silently discard the user's intent or overwrite the newer version.`,
                 },
@@ -1062,8 +1067,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
               "Revision to diff to (the 'new' side). Either a historical " +
                 "version ID returned by markdown_list_file_versions, or the current " +
                 "Revision surfaced by markdown_get_file / markdown_create_file / " +
-                "markdown_update_file (e.g. the 'Current Revision' reported in an " +
-                "etag-mismatch error).",
+                "markdown_update_file (e.g. the 'Current Revision' reported in a " +
+                "cTag-mismatch error).",
             ),
         },
         annotations: {

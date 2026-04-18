@@ -120,7 +120,7 @@ describe("integration: markdown", () => {
       { name: "markdown_create_file", arguments: { fileName: "x.md", content: "x" } },
       {
         name: "markdown_update_file",
-        arguments: { fileName: "x.md", etag: "any", content: "x" },
+        arguments: { fileName: "x.md", cTag: "any", content: "x" },
       },
       { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
       {
@@ -168,7 +168,7 @@ describe("integration: markdown", () => {
         { name: "markdown_create_file", arguments: { fileName: "x.md", content: "x" } },
         {
           name: "markdown_update_file",
-          arguments: { fileName: "x.md", etag: "any", content: "x" },
+          arguments: { fileName: "x.md", cTag: "any", content: "x" },
         },
         { name: "markdown_delete_file", arguments: { fileName: "x.md" } },
       ]) {
@@ -536,7 +536,7 @@ describe("integration: markdown", () => {
       expect(firstText(r)).toContain("not found");
     });
 
-    it("markdown_create_file creates a new .md file and returns an etag", async () => {
+    it("markdown_create_file creates a new .md file and returns a cTag", async () => {
       const r = (await c.callTool({
         name: "markdown_create_file",
         arguments: { fileName: "brand-new.md", content: "# New\n" },
@@ -544,13 +544,13 @@ describe("integration: markdown", () => {
       expect(r.isError).toBeFalsy();
       const text = firstText(r);
       expect(text).toContain("brand-new.md");
-      expect(text).toContain("eTag:");
+      expect(text).toContain("cTag:");
 
       const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
       const created = files.find((f) => f.name === "brand-new.md");
       expect(created).toBeDefined();
       expect(created!.content).toBe("# New\n");
-      expect(created!.eTag).toBeTruthy();
+      expect(created!.cTag).toBeTruthy();
     });
 
     it("markdown_create_file fails with a clear conflict error when the file already exists", async () => {
@@ -570,62 +570,62 @@ describe("integration: markdown", () => {
       expect(existing?.content).toBe("hello");
     });
 
-    it("markdown_update_file overwrites an existing file when the etag matches", async () => {
-      // Read first to learn the current etag.
+    it("markdown_update_file overwrites an existing file when the cTag matches", async () => {
+      // Read first to learn the current cTag.
       const get = (await c.callTool({
         name: "markdown_get_file",
         arguments: { fileName: "hello.md" },
       })) as ToolResult;
       const getText = firstText(get);
-      const etagMatch = /eTag: (".+?")/.exec(getText);
-      expect(etagMatch).not.toBeNull();
-      const etag = etagMatch![1]!;
+      const cTagMatch = /cTag: (".+?")/.exec(getText);
+      expect(cTagMatch).not.toBeNull();
+      const cTag = cTagMatch![1]!;
 
       const r = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { fileName: "hello.md", etag, content: "overwritten" },
+        arguments: { fileName: "hello.md", cTag, content: "overwritten" },
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
       const text = firstText(r);
       expect(text).toContain("Updated");
       expect(text).toContain("hello.md");
-      expect(text).toContain("eTag:");
+      expect(text).toContain("cTag:");
 
       const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
       const updated = files.find((f) => f.id === "file-md-1");
       expect(updated?.content).toBe("overwritten");
-      // eTag was bumped — no longer equal to the one we supplied.
-      expect(updated?.eTag).toBeTruthy();
-      expect(updated?.eTag).not.toBe(etag);
+      // cTag was bumped — no longer equal to the one we supplied.
+      expect(updated?.cTag).toBeTruthy();
+      expect(updated?.cTag).not.toBe(cTag);
       // No duplicate file entry was created
       expect(files.filter((f) => f.name.toLowerCase() === "hello.md")).toHaveLength(1);
     });
 
-    it("markdown_update_file fails with reconcile guidance when the etag is stale", async () => {
-      // Snapshot the current etag, then have something else update the file
-      // (we'll do an in-test update that bumps the etag).
+    it("markdown_update_file fails with reconcile guidance when the cTag is stale", async () => {
+      // Snapshot the current cTag, then have something else update the file
+      // (we'll do an in-test update that bumps the cTag).
       const get1 = (await c.callTool({
         name: "markdown_get_file",
         arguments: { fileName: "hello.md" },
       })) as ToolResult;
-      const oldEtag = /eTag: (".+?")/.exec(firstText(get1))![1]!;
+      const oldCTag = /cTag: (".+?")/.exec(firstText(get1))![1]!;
 
       const goodUpdate = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { fileName: "hello.md", etag: oldEtag, content: "concurrent change" },
+        arguments: { fileName: "hello.md", cTag: oldCTag, content: "concurrent change" },
       })) as ToolResult;
       expect(goodUpdate.isError).toBeFalsy();
 
-      // Now retry with the OLD etag — should fail with structured reconcile guidance.
+      // Now retry with the OLD cTag — should fail with structured reconcile guidance.
       const stale = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { fileName: "hello.md", etag: oldEtag, content: "my stale write" },
+        arguments: { fileName: "hello.md", cTag: oldCTag, content: "my stale write" },
       })) as ToolResult;
       expect(stale.isError).toBe(true);
       const text = firstText(stale);
       expect(text).toContain("modified since you last read it");
-      expect(text).toContain("Supplied eTag:");
-      expect(text).toContain("Current eTag:");
+      expect(text).toContain("Supplied cTag:");
+      expect(text).toContain("Current cTag:");
       expect(text).toContain("markdown_get_file");
       expect(text).toContain("reconcile");
       expect(text).toContain("ask the user");
@@ -642,11 +642,11 @@ describe("integration: markdown", () => {
         name: "markdown_get_file",
         arguments: { itemId: "file-md-1" },
       })) as ToolResult;
-      const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
+      const cTag = /cTag: (".+?")/.exec(firstText(get))![1]!;
 
       const r = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { itemId: "file-md-1", etag, content: "by-id update" },
+        arguments: { itemId: "file-md-1", cTag, content: "by-id update" },
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
       const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];
@@ -657,7 +657,7 @@ describe("integration: markdown", () => {
     it("markdown_update_file requires itemId or fileName", async () => {
       const r = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { etag: "any", content: "x" },
+        arguments: { cTag: "any", content: "x" },
       })) as ToolResult;
       expect(r.isError).toBe(true);
       expect(firstText(r)).toContain("Either itemId or fileName must be provided");
@@ -689,11 +689,11 @@ describe("integration: markdown", () => {
         name: "markdown_get_file",
         arguments: { fileName: "hello.md" },
       })) as ToolResult;
-      const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
+      const cTag = /cTag: (".+?")/.exec(firstText(get))![1]!;
       const oversized = "a".repeat(1024 * 1024).repeat(5);
       const r = (await c.callTool({
         name: "markdown_update_file",
-        arguments: { fileName: "hello.md", etag, content: oversized },
+        arguments: { fileName: "hello.md", cTag, content: oversized },
       })) as ToolResult;
       expect(r.isError).toBe(true);
       const text = firstText(r);
@@ -778,7 +778,7 @@ describe("integration: markdown", () => {
       it("markdown_update_file rejects unsafe names at the schema layer too", async () => {
         const r = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "sub/note.md", etag: "any", content: "x" },
+          arguments: { fileName: "sub/note.md", cTag: "any", content: "x" },
         })) as ToolResult;
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("path separator");
@@ -912,15 +912,15 @@ describe("integration: markdown", () => {
           name: "markdown_get_file",
           arguments: { fileName: "hello.md" },
         })) as ToolResult;
-        const etag1 = /eTag: (".+?")/.exec(firstText(get1))![1]!;
+        const cTag1 = /cTag: (".+?")/.exec(firstText(get1))![1]!;
         const upd1 = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: etag1, content: "v2" },
+          arguments: { fileName: "hello.md", cTag: cTag1, content: "v2" },
         })) as ToolResult;
-        const etag2 = /eTag: (".+?")/.exec(firstText(upd1))![1]!;
+        const cTag2 = /cTag: (".+?")/.exec(firstText(upd1))![1]!;
         await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: etag2, content: "v3" },
+          arguments: { fileName: "hello.md", cTag: cTag2, content: "v3" },
         });
 
         const r = (await c.callTool({
@@ -940,10 +940,10 @@ describe("integration: markdown", () => {
           name: "markdown_get_file",
           arguments: { fileName: "hello.md" },
         })) as ToolResult;
-        const etag = /eTag: (".+?")/.exec(firstText(get))![1]!;
+        const cTag = /cTag: (".+?")/.exec(firstText(get))![1]!;
         await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag, content: "updated" },
+          arguments: { fileName: "hello.md", cTag, content: "updated" },
         });
 
         const list = (await c.callTool({
@@ -1065,35 +1065,35 @@ describe("integration: markdown", () => {
         })) as ToolResult;
         const get1Text = firstText(get1);
         const origRev = extract("Revision", get1Text);
-        const etag = extract("eTag", get1Text);
+        const cTag = extract("cTag", get1Text);
 
         const upd = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag, content: "body-v2" },
+          arguments: { fileName: "hello.md", cTag, content: "body-v2" },
         })) as ToolResult;
         expect(upd.isError).toBeFalsy();
         const newRev = extract("Revision", firstText(upd));
         expect(newRev).not.toBe(origRev);
       });
 
-      it("etag-mismatch error surfaces the Current Revision and points at the diff tool", async () => {
+      it("cTag-mismatch error surfaces the Current Revision and points at the diff tool", async () => {
         const get1 = (await c.callTool({
           name: "markdown_get_file",
           arguments: { fileName: "hello.md" },
         })) as ToolResult;
         const t1 = firstText(get1);
-        const staleEtag = extract("eTag", t1);
+        const staleCTag = extract("cTag", t1);
 
         // Make a successful update to bump the revision.
         await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: staleEtag, content: "someone-elses-write" },
+          arguments: { fileName: "hello.md", cTag: staleCTag, content: "someone-elses-write" },
         });
 
-        // Retry with the OLD eTag → 412 surfaced as agent-facing reconcile guidance.
+        // Retry with the OLD cTag → 412 surfaced as agent-facing reconcile guidance.
         const stale = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: staleEtag, content: "my-intended-write" },
+          arguments: { fileName: "hello.md", cTag: staleCTag, content: "my-intended-write" },
         })) as ToolResult;
         expect(stale.isError).toBe(true);
         const body = firstText(stale);
@@ -1111,14 +1111,14 @@ describe("integration: markdown", () => {
         })) as ToolResult;
         const t1 = firstText(get1);
         const origRev = extract("Revision", t1);
-        const etag = extract("eTag", t1);
+        const cTag = extract("cTag", t1);
 
         // Overwrite it.
         const upd = (await c.callTool({
           name: "markdown_update_file",
           arguments: {
             fileName: "hello.md",
-            etag,
+            cTag,
             content: "hello world, with additions!",
           },
         })) as ToolResult;
@@ -1152,18 +1152,18 @@ describe("integration: markdown", () => {
           name: "markdown_get_file",
           arguments: { fileName: "hello.md" },
         })) as ToolResult;
-        const etag1 = extract("eTag", firstText(get1));
+        const cTag1 = extract("cTag", firstText(get1));
 
         const upd1 = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: etag1, content: "identical" },
+          arguments: { fileName: "hello.md", cTag: cTag1, content: "identical" },
         })) as ToolResult;
         const rev1 = extract("Revision", firstText(upd1));
-        const etag2 = extract("eTag", firstText(upd1));
+        const cTag2 = extract("cTag", firstText(upd1));
 
         const upd2 = (await c.callTool({
           name: "markdown_update_file",
-          arguments: { fileName: "hello.md", etag: etag2, content: "identical" },
+          arguments: { fileName: "hello.md", cTag: cTag2, content: "identical" },
         })) as ToolResult;
         const rev2 = extract("Revision", firstText(upd2));
 
