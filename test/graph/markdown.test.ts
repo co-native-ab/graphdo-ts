@@ -6,7 +6,7 @@ import { createTestEnv, testSignal, type TestEnv } from "../helpers.js";
 import { GraphClient } from "../../src/graph/client.js";
 import {
   MAX_DIRECT_CONTENT_BYTES,
-  MarkdownEtagMismatchError,
+  MarkdownCTagMismatchError,
   MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
   MarkdownFolderEntryKind,
@@ -174,10 +174,10 @@ describe("markdown graph operations", () => {
       testSignal(),
     );
     expect(created.name).toBe("fresh.md");
-    expect(created.eTag).toMatch(/^"\{.*\},\d+"$/);
+    expect(created.cTag).toMatch(/^"c:\{.*\},\d+"$/);
   });
 
-  it("createMarkdownFile creates a brand-new file and returns an eTag", async () => {
+  it("createMarkdownFile creates a brand-new file and returns a cTag", async () => {
     const item = await createMarkdownFile(
       client,
       "folder-1",
@@ -186,7 +186,7 @@ describe("markdown graph operations", () => {
       testSignal(),
     );
     expect(item.name).toBe("new-note.md");
-    expect(item.eTag).toBeTruthy();
+    expect(item.cTag).toBeTruthy();
 
     const files = await listMarkdownFiles(client, "folder-1", testSignal());
     expect(files.map((f) => f.name)).toContain("new-note.md");
@@ -227,71 +227,71 @@ describe("markdown graph operations", () => {
     expect(body).toBe("hello world!");
   });
 
-  it("updateMarkdownFile overwrites with matching etag and bumps the etag", async () => {
+  it("updateMarkdownFile overwrites with matching cTag and bumps the cTag", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    const beforeETag = before.eTag;
-    expect(beforeETag).toBeTruthy();
+    const beforeCTag = before.cTag;
+    expect(beforeCTag).toBeTruthy();
 
     const updated = await updateMarkdownFile(
       client,
       "file-md-1",
-      beforeETag!,
+      beforeCTag!,
       "updated content",
       testSignal(),
     );
     expect(updated.id).toBe("file-md-1");
-    expect(updated.eTag).toBeTruthy();
-    expect(updated.eTag).not.toBe(beforeETag);
+    expect(updated.cTag).toBeTruthy();
+    expect(updated.cTag).not.toBe(beforeCTag);
 
     const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
     expect(body).toBe("updated content");
   });
 
-  it("updateMarkdownFile throws MarkdownEtagMismatchError when the supplied etag is stale", async () => {
+  it("updateMarkdownFile throws MarkdownCTagMismatchError when the supplied cTag is stale", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    // First update bumps the etag.
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+    // First update bumps the cTag.
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "v2", testSignal());
 
-    // Second update with the now-stale etag must fail with the typed error.
+    // Second update with the now-stale cTag must fail with the typed error.
     await expect(
-      updateMarkdownFile(client, "file-md-1", before.eTag!, "v3", testSignal()),
-    ).rejects.toBeInstanceOf(MarkdownEtagMismatchError);
+      updateMarkdownFile(client, "file-md-1", before.cTag!, "v3", testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownCTagMismatchError);
 
     // Content was NOT changed by the failed update.
     const body = await downloadMarkdownContent(client, "file-md-1", testSignal());
     expect(body).toBe("v2");
   });
 
-  it("updateMarkdownFile etag-mismatch error carries the current item with the new etag", async () => {
+  it("updateMarkdownFile cTag-mismatch error carries the current item with the new cTag", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "v2", testSignal());
 
     try {
-      await updateMarkdownFile(client, "file-md-1", before.eTag!, "v3", testSignal());
-      throw new Error("expected MarkdownEtagMismatchError");
+      await updateMarkdownFile(client, "file-md-1", before.cTag!, "v3", testSignal());
+      throw new Error("expected MarkdownCTagMismatchError");
     } catch (err) {
-      expect(err).toBeInstanceOf(MarkdownEtagMismatchError);
-      const e = err as MarkdownEtagMismatchError;
-      expect(e.suppliedEtag).toBe(before.eTag);
+      expect(err).toBeInstanceOf(MarkdownCTagMismatchError);
+      const e = err as MarkdownCTagMismatchError;
+      expect(e.suppliedCTag).toBe(before.cTag);
       expect(e.currentItem.id).toBe("file-md-1");
-      expect(e.currentItem.eTag).toBeTruthy();
-      expect(e.currentItem.eTag).not.toBe(before.eTag);
+      expect(e.currentItem.cTag).toBeTruthy();
+      expect(e.currentItem.cTag).not.toBe(before.cTag);
     }
   });
 
-  it("updateMarkdownFile rejects empty itemId and empty etag", async () => {
-    await expect(updateMarkdownFile(client, "", "etag", "x", testSignal())).rejects.toThrow(
+  it("updateMarkdownFile rejects empty itemId and empty cTag", async () => {
+    await expect(updateMarkdownFile(client, "", "cTag", "x", testSignal())).rejects.toThrow(
       "itemId must not be empty",
     );
     await expect(updateMarkdownFile(client, "file-md-1", "", "x", testSignal())).rejects.toThrow(
-      "etag must not be empty",
+      "cTag must not be empty",
     );
   });
 
   it("updateMarkdownFile rejects payloads over 4 MiB without hitting the network", async () => {
     const oversized = "a".repeat(1024 * 1024).repeat(5);
     await expect(
-      updateMarkdownFile(client, "file-md-1", "any-etag", oversized, testSignal()),
+      updateMarkdownFile(client, "file-md-1", "any-cTag", oversized, testSignal()),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -301,7 +301,7 @@ describe("markdown graph operations", () => {
     const updated = await updateMarkdownFile(
       client,
       "file-md-1",
-      before.eTag!,
+      before.cTag!,
       exact,
       testSignal(),
     );
@@ -311,7 +311,7 @@ describe("markdown graph operations", () => {
   it("updateMarkdownFile rejects a payload of MAX_DIRECT_CONTENT_BYTES + 1 (boundary)", async () => {
     const overByOne = "a".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
     await expect(
-      updateMarkdownFile(client, "file-md-1", "any-etag", overByOne, testSignal()),
+      updateMarkdownFile(client, "file-md-1", "any-cTag", overByOne, testSignal()),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -514,8 +514,8 @@ describe("markdown version history graph operations", () => {
 
   it("overwriting a file via updateMarkdownFile snapshots the prior version", async () => {
     const start = await getDriveItem(client, "file-md-1", testSignal());
-    const after1 = await updateMarkdownFile(client, "file-md-1", start.eTag!, "v2", testSignal());
-    await updateMarkdownFile(client, "file-md-1", after1.eTag!, "v3", testSignal());
+    const after1 = await updateMarkdownFile(client, "file-md-1", start.cTag!, "v2", testSignal());
+    await updateMarkdownFile(client, "file-md-1", after1.cTag!, "v3", testSignal());
 
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
     // Current version + two historical snapshots (the original + v2).
@@ -540,7 +540,7 @@ describe("markdown version history graph operations", () => {
 
   it("downloadDriveItemVersionContent returns the stored content", async () => {
     const start = await getDriveItem(client, "file-md-1", testSignal());
-    await updateMarkdownFile(client, "file-md-1", start.eTag!, "updated", testSignal());
+    await updateMarkdownFile(client, "file-md-1", start.cTag!, "updated", testSignal());
     const versions = await listDriveItemVersions(client, "file-md-1", testSignal());
     // versions[0] is the current version; versions[1] is the prior snapshot.
     expect(versions).toHaveLength(2);
@@ -607,17 +607,17 @@ describe("markdown current revision tracking", () => {
   it("updateMarkdownFile bumps the `version` on every write", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
     const v0 = before.version!;
-    const after1 = await updateMarkdownFile(client, "file-md-1", before.eTag!, "v1", testSignal());
+    const after1 = await updateMarkdownFile(client, "file-md-1", before.cTag!, "v1", testSignal());
     expect(after1.version).toBeTruthy();
     expect(after1.version).not.toBe(v0);
-    const after2 = await updateMarkdownFile(client, "file-md-1", after1.eTag!, "v2", testSignal());
+    const after2 = await updateMarkdownFile(client, "file-md-1", after1.cTag!, "v2", testSignal());
     expect(after2.version).not.toBe(after1.version);
   });
 
   it("prior revision ID surfaces as a history entry after an update", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
     const priorRevision = before.version!;
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v1", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "v1", testSignal());
     const history = await listDriveItemVersions(client, "file-md-1", testSignal());
     // The first overwrite promotes the prior current revision into history.
     expect(history.map((v) => v.id)).toContain(priorRevision);
@@ -640,7 +640,7 @@ describe("getRevisionContent", () => {
 
   it("returns live content when the revision id matches item.version", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "current-body", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "current-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     const body = await getRevisionContent(client, current, current.version!, testSignal());
     expect(body).toEqual({ content: "current-body", isCurrent: true });
@@ -650,7 +650,7 @@ describe("getRevisionContent", () => {
     // Simulate production: Graph API does not always return item.version.
     // The agent reads the current version ID from the /versions list instead.
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "current-body", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "current-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     // Strip version to simulate production where Graph API omits the field.
     const itemWithoutVersion = { ...current, version: undefined };
@@ -670,7 +670,7 @@ describe("getRevisionContent", () => {
   it("returns historical content when the revision id matches a /versions entry", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
     const originalRevision = before.version!;
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "second-body", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "second-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     const body = await getRevisionContent(client, current, originalRevision, testSignal());
     expect(body).toEqual({ content: "hello world!", isCurrent: false });
@@ -686,7 +686,7 @@ describe("getRevisionContent", () => {
   it("unknown-version error enumerates both the current revision and history", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
     const originalRevision = before.version!;
-    await updateMarkdownFile(client, "file-md-1", before.eTag!, "v2", testSignal());
+    await updateMarkdownFile(client, "file-md-1", before.cTag!, "v2", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
     try {
       await getRevisionContent(client, current, "nope", testSignal());
@@ -833,7 +833,7 @@ describe("assertValidGraphId", () => {
       await expect(createMarkdownFile(c, "a/b", "x.md", "x", testSignal())).rejects.toThrow(
         "path separators",
       );
-      await expect(updateMarkdownFile(c, "a b", "etag", "x", testSignal())).rejects.toThrow(
+      await expect(updateMarkdownFile(c, "a b", "cTag", "x", testSignal())).rejects.toThrow(
         "whitespace",
       );
     } finally {

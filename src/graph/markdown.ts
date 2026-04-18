@@ -640,7 +640,7 @@ export async function downloadMarkdownContent(
 }
 
 // ---------------------------------------------------------------------------
-// Create-only / conditional-update (etag-protected)
+// Create-only / conditional-update (cTag-protected)
 // ---------------------------------------------------------------------------
 
 /**
@@ -660,21 +660,21 @@ export class MarkdownFileAlreadyExistsError extends Error {
 
 /**
  * Error raised when {@link updateMarkdownFile} fails because the supplied
- * etag does not match the file's current etag (HTTP 412). Carries the
+ * cTag does not match the file's current cTag (HTTP 412). Carries the
  * file's current metadata so callers can report it back to the agent and
  * trigger a reconcile-and-retry workflow.
  */
-export class MarkdownEtagMismatchError extends Error {
+export class MarkdownCTagMismatchError extends Error {
   constructor(
     public readonly itemId: string,
-    public readonly suppliedEtag: string,
+    public readonly suppliedCTag: string,
     public readonly currentItem: DriveItem,
   ) {
     super(
-      `etag mismatch for item ${itemId}: supplied ${suppliedEtag}, ` +
-        `current ${currentItem.eTag ?? "(unknown)"}`,
+      `cTag mismatch for item ${itemId}: supplied ${suppliedCTag}, ` +
+        `current ${currentItem.cTag ?? "(unknown)"}`,
     );
-    this.name = "MarkdownEtagMismatchError";
+    this.name = "MarkdownCTagMismatchError";
   }
 }
 
@@ -724,22 +724,28 @@ export async function createMarkdownFile(
 
 /**
  * Conditionally overwrite the content of an existing markdown file using an
- * `If-Match` header. Fails with {@link MarkdownEtagMismatchError} when the
- * supplied etag does not match the file's current etag (HTTP 412). On
- * mismatch the error carries the current drive item (with the new etag) so
- * callers can guide the agent to re-fetch, reconcile, and retry.
+ * `If-Match` header carrying the file's `cTag`. Fails with
+ * {@link MarkdownCTagMismatchError} when the supplied cTag does not match
+ * the file's current cTag (HTTP 412). On mismatch the error carries the
+ * current drive item (with the new cTag) so callers can guide the agent to
+ * re-fetch, reconcile, and retry.
+ *
+ * `cTag` is OneDrive's content-only entity tag and is unaffected by
+ * metadata-only changes (rename, share, indexing, preview generation), so
+ * using it here avoids the spurious 412s that would result from sending
+ * `eTag` instead.
  *
  * See https://learn.microsoft.com/en-us/graph/api/driveitem-put-content.
  */
 export async function updateMarkdownFile(
   client: GraphClient,
   itemId: string,
-  etag: string,
+  cTag: string,
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
   assertValidGraphId("itemId", itemId);
-  if (!etag) throw new Error("updateMarkdownFile: etag must not be empty");
+  if (!cTag) throw new Error("updateMarkdownFile: cTag must not be empty");
 
   const bytes = Buffer.byteLength(content, "utf-8");
   if (bytes > MAX_DIRECT_CONTENT_BYTES) {
@@ -752,14 +758,14 @@ export async function updateMarkdownFile(
   let response: Response;
   try {
     response = await client.requestRaw(HttpMethod.PUT, path, content, "text/markdown", signal, {
-      "If-Match": etag,
+      "If-Match": cTag,
     });
   } catch (err: unknown) {
     if (err instanceof GraphRequestError && err.statusCode === 412) {
-      // Fetch the latest item so callers can show the agent the current etag /
+      // Fetch the latest item so callers can show the agent the current cTag /
       // size / timestamp and explain how to reconcile.
       const current = await getDriveItem(client, itemId, signal);
-      throw new MarkdownEtagMismatchError(itemId, etag, current);
+      throw new MarkdownCTagMismatchError(itemId, cTag, current);
     }
     throw err;
   }
