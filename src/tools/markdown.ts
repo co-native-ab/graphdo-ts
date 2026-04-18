@@ -21,6 +21,7 @@ import {
   getRevisionContent,
   listDriveItemVersions,
   listMarkdownFolderEntries,
+  MarkdownFolderEntryKind,
   listRootFolders,
   MarkdownEtagMismatchError,
   MarkdownFileAlreadyExistsError,
@@ -431,8 +432,10 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             signal,
           );
 
-          const supported = allEntries.filter((e) => e.kind === "supported");
-          const unsupported = allEntries.filter((e) => e.kind === "unsupported");
+          const supported = allEntries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported);
+          const unsupported = allEntries.filter(
+            (e) => e.kind === MarkdownFolderEntryKind.Unsupported,
+          );
 
           const folderLabel =
             cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "the configured folder";

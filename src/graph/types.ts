@@ -174,9 +174,15 @@ export const TodoItemSchema = z
 /** Wrapper for Graph API collection responses. */
 export interface GraphListResponse<T> {
   value: T[];
+  "@odata.nextLink"?: string;
 }
 export function GraphListResponseSchema<T extends z.ZodType>(itemSchema: T) {
-  return z.object({ value: z.array(itemSchema) }).loose();
+  return z
+    .object({
+      value: z.array(itemSchema),
+      "@odata.nextLink": z.string().optional(),
+    })
+    .loose();
 }
 
 // ---------------------------------------------------------------------------

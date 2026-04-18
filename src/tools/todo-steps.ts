@@ -9,7 +9,7 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
 } from "../graph/todo.js";
-import { loadAndValidateConfig } from "../config.js";
+import { loadAndValidateTodoConfig } from "../config.js";
 import type { ServerConfig } from "../index.js";
 import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
@@ -75,7 +75,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           const items = await listChecklistItems(
             client,
             todoConfig.todoListId,
@@ -123,7 +123,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           const item = await createChecklistItem(
             client,
             todoConfig.todoListId,
@@ -180,7 +180,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
 
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           const item = await updateChecklistItem(
             client,
             todoConfig.todoListId,
@@ -229,7 +229,7 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       async (args, { signal }) => {
         try {
           const client = config.graphClient;
-          const todoConfig = await loadAndValidateConfig(config.configDir, signal);
+          const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           await deleteChecklistItem(
             client,
             todoConfig.todoListId,

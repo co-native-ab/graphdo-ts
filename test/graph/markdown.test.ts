@@ -9,6 +9,7 @@ import {
   MarkdownEtagMismatchError,
   MarkdownFileAlreadyExistsError,
   MarkdownFileTooLargeError,
+  MarkdownFolderEntryKind,
   MarkdownUnknownVersionError,
   createMarkdownFile,
   deleteDriveItem,
@@ -329,7 +330,7 @@ describe("markdown graph operations: classification & validation", () => {
 
   it("listMarkdownFolderEntries classifies supported .md files", async () => {
     const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
-    const supported = entries.filter((e) => e.kind === "supported");
+    const supported = entries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported);
     expect(supported.map((e) => e.item.id)).toEqual(["ok-1"]);
   });
 
@@ -337,8 +338,8 @@ describe("markdown graph operations: classification & validation", () => {
     const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
     const subdir = entries.find((e) => e.item.id === "subdir-1");
     expect(subdir).toBeDefined();
-    expect(subdir!.kind).toBe("unsupported");
-    if (subdir!.kind === "unsupported") {
+    expect(subdir!.kind).toBe(MarkdownFolderEntryKind.Unsupported);
+    if (subdir!.kind === MarkdownFolderEntryKind.Unsupported) {
       expect(subdir!.reason).toContain("subdirectory");
     }
   });
@@ -346,13 +347,13 @@ describe("markdown graph operations: classification & validation", () => {
   it("listMarkdownFolderEntries flags .md files with unsupported names", async () => {
     const entries = await listMarkdownFolderEntries(client, "folder-1", testSignal());
     const weird = entries.find((e) => e.item.id === "weird-1");
-    expect(weird?.kind).toBe("unsupported");
-    if (weird?.kind === "unsupported") {
+    expect(weird?.kind).toBe(MarkdownFolderEntryKind.Unsupported);
+    if (weird?.kind === MarkdownFolderEntryKind.Unsupported) {
       expect(weird.reason).toContain("unsupported file name");
     }
     const reserved = entries.find((e) => e.item.id === "reserved-1");
-    expect(reserved?.kind).toBe("unsupported");
-    if (reserved?.kind === "unsupported") {
+    expect(reserved?.kind).toBe(MarkdownFolderEntryKind.Unsupported);
+    if (reserved?.kind === MarkdownFolderEntryKind.Unsupported) {
       expect(reserved.reason).toContain("reserved");
     }
   });
@@ -627,5 +628,140 @@ describe("getRevisionContent", () => {
     await expect(getRevisionContent(client, item, "", testSignal())).rejects.toThrow(
       "versionId must not be empty",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pagination via @odata.nextLink (folders > 200)
+// ---------------------------------------------------------------------------
+
+describe("listRootFolders / listMarkdownFiles pagination", () => {
+  let env: TestEnv;
+  let client: GraphClient;
+
+  beforeEach(async () => {
+    env = await createTestEnv();
+    client = new GraphClient(env.graphUrl, "test-token");
+  });
+
+  afterEach(async () => {
+    await env.cleanup();
+  });
+
+  it("listRootFolders returns all folders when there are more than one page (>200)", async () => {
+    const total = 503; // 3 pages of 200
+    env.state.driveRootChildren = Array.from({ length: total }, (_, i) => ({
+      id: `folder-${String(i)}`,
+      name: `Folder ${String(i).padStart(4, "0")}`,
+      folder: { childCount: 0 },
+    }));
+    const folders = await listRootFolders(client, testSignal());
+    expect(folders).toHaveLength(total);
+    // First page boundary, mid page, and last page boundary all retained.
+    expect(folders[0]?.id).toBe("folder-0");
+    expect(folders[200]?.id).toBe("folder-200");
+    expect(folders.at(-1)?.id).toBe(`folder-${String(total - 1)}`);
+  });
+
+  it("listRootFolders still filters out non-folder entries across all pages", async () => {
+    const total = 250;
+    env.state.driveRootChildren = Array.from({ length: total }, (_, i) =>
+      i % 2 === 0
+        ? { id: `f-${String(i)}`, name: `F${String(i)}`, folder: { childCount: 0 } }
+        : { id: `s-${String(i)}`, name: `s${String(i)}.txt`, file: { mimeType: "text/plain" } },
+    );
+    const folders = await listRootFolders(client, testSignal());
+    // Even indices are folders -> 125 folders in 250 entries.
+    expect(folders).toHaveLength(125);
+    expect(folders.every((f) => f.folder !== undefined)).toBe(true);
+  });
+
+  it("listMarkdownFiles paginates folder children", async () => {
+    const total = 410;
+    env.state.driveFolderChildren.set(
+      "big-folder",
+      Array.from({ length: total }, (_, i) => ({
+        id: `md-${String(i)}`,
+        name: `note-${String(i).padStart(4, "0")}.md`,
+        size: 10,
+        file: { mimeType: "text/markdown" },
+      })),
+    );
+    const files = await listMarkdownFiles(client, "big-folder", testSignal());
+    expect(files).toHaveLength(total);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertValidGraphId
+// ---------------------------------------------------------------------------
+
+import { assertValidGraphId } from "../../src/graph/markdown.js";
+
+describe("assertValidGraphId", () => {
+  it("accepts realistic Graph IDs", () => {
+    expect(() => assertValidGraphId("itemId", "01ABCDEFGHIJKLMN")).not.toThrow();
+    expect(() => assertValidGraphId("versionId", "1.0")).not.toThrow();
+    expect(() => assertValidGraphId("folderId", "folder-1")).not.toThrow();
+  });
+
+  it("rejects non-string inputs", () => {
+    expect(() => assertValidGraphId("itemId", undefined)).toThrow("itemId must be a string");
+    expect(() => assertValidGraphId("itemId", null)).toThrow("itemId must be a string");
+    expect(() => assertValidGraphId("itemId", 42)).toThrow("itemId must be a string");
+  });
+
+  it("rejects empty strings", () => {
+    expect(() => assertValidGraphId("itemId", "")).toThrow("itemId must not be empty");
+  });
+
+  it("rejects path separators", () => {
+    expect(() => assertValidGraphId("itemId", "a/b")).toThrow("path separators");
+    expect(() => assertValidGraphId("itemId", "a\\b")).toThrow("path separators");
+  });
+
+  it("rejects whitespace and control characters", () => {
+    expect(() => assertValidGraphId("itemId", "a b")).toThrow("whitespace");
+    expect(() => assertValidGraphId("itemId", "a\tb")).toThrow("whitespace");
+    expect(() => assertValidGraphId("itemId", "a\nb")).toThrow("whitespace");
+    expect(() => assertValidGraphId("itemId", "a\x00b")).toThrow("control characters");
+  });
+
+  it("rejects non-ASCII", () => {
+    expect(() => assertValidGraphId("itemId", "café")).toThrow("ASCII");
+  });
+
+  it("rejects values longer than 256 chars", () => {
+    expect(() => assertValidGraphId("itemId", "a".repeat(257))).toThrow("longer than 256");
+  });
+
+  it("guards every Graph helper that takes an opaque ID", async () => {
+    const env2 = await createTestEnv();
+    const c = new GraphClient(env2.graphUrl, "test-token");
+    try {
+      await expect(getDriveItem(c, "a/b", testSignal())).rejects.toThrow("path separators");
+      await expect(downloadMarkdownContent(c, " ", testSignal())).rejects.toThrow("whitespace");
+      await expect(deleteDriveItem(c, "a\\b", testSignal())).rejects.toThrow("path separators");
+      await expect(listDriveItemVersions(c, "a/b", testSignal())).rejects.toThrow(
+        "path separators",
+      );
+      await expect(downloadDriveItemVersionContent(c, "a/b", "v", testSignal())).rejects.toThrow(
+        "itemId must not contain path separators",
+      );
+      await expect(downloadDriveItemVersionContent(c, "ok", "v/1", testSignal())).rejects.toThrow(
+        "versionId must not contain path separators",
+      );
+      await expect(findMarkdownFileByName(c, "a b", "x.md", testSignal())).rejects.toThrow(
+        "whitespace",
+      );
+      await expect(createMarkdownFile(c, "a/b", "x.md", "x", testSignal())).rejects.toThrow(
+        "path separators",
+      );
+      await expect(updateMarkdownFile(c, "a b", "etag", "x", testSignal())).rejects.toThrow(
+        "whitespace",
+      );
+    } finally {
+      await env2.cleanup();
+    }
   });
 });

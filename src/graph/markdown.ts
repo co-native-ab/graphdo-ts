@@ -187,44 +187,114 @@ export function assertValidMarkdownFileName(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Opaque Graph identifier validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum length we accept for an opaque Graph identifier.
+ *
+ * Real OneDrive drive item IDs are well under 100 chars, drive item version
+ * IDs are short numeric strings (e.g. `"1.0"`, `"2.0"`), and we use the same
+ * shape internally for mock IDs. 256 is a generous cap that keeps the URL
+ * length bounded so a hand-edited config or a hostile caller cannot push an
+ * arbitrarily large blob through `encodeURIComponent` into a Graph URL.
+ */
+const MAX_GRAPH_ID_LENGTH = 256;
+
+/**
+ * Validate that a value looks like an opaque Microsoft Graph identifier
+ * (drive item ID, version ID, etc.) before we splice it into a Graph URL.
+ *
+ * Real Graph IDs are short, opaque, ASCII tokens — they never contain path
+ * separators, whitespace, control characters, or non-ASCII. While we always
+ * `encodeURIComponent` IDs before they hit the wire (so injection of
+ * additional path segments is blocked at the URL layer), this is defence in
+ * depth: a value that looks nothing like a real Graph ID is almost
+ * certainly the result of a config bug, a confused agent, or a malicious
+ * caller, and should fail loudly at the boundary instead of producing a
+ * confusing 404 / 400 from Graph.
+ *
+ * @throws Error with the supplied label when the value is empty, too long,
+ *   contains whitespace, control characters, path separators (`/`, `\`),
+ *   non-ASCII characters, or is otherwise not a plausible Graph ID.
+ */
+export function assertValidGraphId(label: string, value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string`);
+  }
+  if (value.length === 0) {
+    throw new Error(`${label} must not be empty`);
+  }
+  if (value.length > MAX_GRAPH_ID_LENGTH) {
+    throw new Error(`${label} is longer than ${String(MAX_GRAPH_ID_LENGTH)} characters`);
+  }
+  if (/\s/.test(value)) {
+    throw new Error(`${label} must not contain whitespace`);
+  }
+  if (/[\x00-\x1f\x7f]/u.test(value)) {
+    throw new Error(`${label} must not contain control characters`);
+  }
+  if (value.includes("/") || value.includes("\\")) {
+    throw new Error(`${label} must not contain path separators (/ or \\)`);
+  }
+  // Non-ASCII would be silently re-encoded by encodeURIComponent and is not
+  // a shape any real Graph ID has.
+  if (/[^\x00-\x7f]/u.test(value)) {
+    throw new Error(`${label} must be ASCII`);
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
 // Folder listing (used by the folder picker)
 // ---------------------------------------------------------------------------
 
 /**
+ * Discriminator for {@link MarkdownFolderEntry}. Modelled as a TypeScript
+ * `enum` to match the rest of the codebase (`HttpMethod`, `GraphScope`) and
+ * to give callers a single import-able symbol when switching on the kind.
+ */
+export enum MarkdownFolderEntryKind {
+  Supported = "supported",
+  Unsupported = "unsupported",
+}
+
+/**
  * Classified entry returned by {@link listMarkdownFolderEntries}.
  *
- * - `supported`: a `.md` file whose name passes {@link validateMarkdownFileName}
+ * - `Supported`: a `.md` file whose name passes {@link validateMarkdownFileName}
  *   and can be operated on by the other markdown tools.
- * - `unsupported`: a child of the configured folder that the markdown tools
+ * - `Unsupported`: a child of the configured folder that the markdown tools
  *   cannot work with. Surfaced to callers so agents know the entry exists
  *   but cannot be read/written/deleted via these tools. Always carries a
  *   short, human-readable `reason`.
  */
 export type MarkdownFolderEntry =
-  | { readonly kind: "supported"; readonly item: DriveItem }
-  | { readonly kind: "unsupported"; readonly item: DriveItem; readonly reason: string };
+  | { readonly kind: MarkdownFolderEntryKind.Supported; readonly item: DriveItem }
+  | {
+      readonly kind: MarkdownFolderEntryKind.Unsupported;
+      readonly item: DriveItem;
+      readonly reason: string;
+    };
 
 /**
  * List folders directly underneath the user's OneDrive root.
  *
- * Only returns drive items where `folder` is populated. Files are omitted. A
- * flat top-level listing matches the simplicity of the existing todo list
- * picker — no recursive navigation is implemented.
+ * Only returns drive items where `folder` is populated. Files are omitted.
+ * Follows `@odata.nextLink` to return the full set even when the user has
+ * more than one page (Graph caps `$top` at ~200), so a user with thousands
+ * of top-level folders still sees them all in the picker. Server-side
+ * filtering (`$filter=folder ne null`) is not used because Graph's filter
+ * support on driveItem children is inconsistent across personal vs. work
+ * accounts; the client-side filter is reliable everywhere.
  */
 export async function listRootFolders(
   client: GraphClient,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
   logger.debug("listing onedrive root folders");
-  const path = "/me/drive/root/children?$top=200";
-  const response = await client.request(HttpMethod.GET, path, signal);
-  const data = await parseResponse(
-    response,
-    GraphListResponseSchema(DriveItemSchema),
-    HttpMethod.GET,
-    path,
-  );
-  return data.value.filter((item) => item.folder !== undefined);
+  const items = await listAllPages(client, "/me/drive/root/children?$top=200", signal);
+  return items.filter((item) => item.folder !== undefined);
 }
 
 /**
@@ -253,16 +323,76 @@ async function listFolderChildren(
   folderId: string,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  if (!folderId) throw new Error("listFolderChildren: folderId must not be empty");
-  const path = `/me/drive/items/${encodeURIComponent(folderId)}/children?$top=200`;
-  const response = await client.request(HttpMethod.GET, path, signal);
-  const data = await parseResponse(
-    response,
-    GraphListResponseSchema(DriveItemSchema),
-    HttpMethod.GET,
-    path,
+  assertValidGraphId("folderId", folderId);
+  return listAllPages(
+    client,
+    `/me/drive/items/${encodeURIComponent(folderId)}/children?$top=200`,
+    signal,
   );
-  return data.value;
+}
+
+/**
+ * Internal helper: GET a Graph collection endpoint and follow
+ * `@odata.nextLink` until the full result set has been retrieved.
+ *
+ * Graph caps `$top` at ~200 for drive item children, so pagination is
+ * required for users with more than 200 folders or files. We schema-validate
+ * the next link is an `https://graph.*` URL we can safely re-issue: any
+ * other shape is dropped to avoid being redirected to an arbitrary URL.
+ */
+async function listAllPages(
+  client: GraphClient,
+  initialPath: string,
+  signal: AbortSignal,
+): Promise<DriveItem[]> {
+  const all: DriveItem[] = [];
+  let nextPath: string | null = initialPath;
+  let pageCount = 0;
+  // Defensive cap so a runaway nextLink chain (or a misbehaving server)
+  // can't loop forever. 200 pages × 200 items = 40 000 entries — far more
+  // than any realistic OneDrive folder.
+  const MAX_PAGES = 200;
+  while (nextPath !== null) {
+    pageCount += 1;
+    if (pageCount > MAX_PAGES) {
+      throw new Error(
+        `listAllPages: refusing to follow more than ${String(MAX_PAGES)} pages of @odata.nextLink`,
+      );
+    }
+    const response = await client.request(HttpMethod.GET, nextPath, signal);
+    const data = await parseResponse(
+      response,
+      GraphListResponseSchema(DriveItemSchema),
+      HttpMethod.GET,
+      nextPath,
+    );
+    all.push(...data.value);
+    nextPath = extractNextPath(data["@odata.nextLink"]);
+  }
+  return all;
+}
+
+/**
+ * Convert a Graph `@odata.nextLink` (an absolute URL) into a path we can
+ * pass straight back to {@link GraphClient.request}. Returns `null` when
+ * absent, malformed, or pointing somewhere other than the Graph host.
+ */
+function extractNextPath(nextLink: unknown): string | null {
+  if (typeof nextLink !== "string" || nextLink.length === 0) return null;
+  let url: URL;
+  try {
+    url = new URL(nextLink);
+  } catch {
+    return null;
+  }
+  // Graph nextLink hosts: graph.microsoft.com, graph.microsoft.us, etc.
+  // We only follow https:// links to a graph.microsoft.* host.
+  if (url.protocol !== "https:") return null;
+  if (!/^graph\.microsoft\.[a-z.]+$/i.test(url.hostname)) return null;
+  // Strip the /v1.0 prefix if present so the resulting path matches the
+  // shape GraphClient already prepends.
+  const versioned = url.pathname.replace(/^\/v1\.0/, "");
+  return `${versioned}${url.search}`;
 }
 
 /**
@@ -286,7 +416,7 @@ export async function listMarkdownFolderEntries(
   for (const item of children) {
     if (item.folder !== undefined) {
       entries.push({
-        kind: "unsupported",
+        kind: MarkdownFolderEntryKind.Unsupported,
         item,
         reason:
           "subdirectory — only files directly inside the configured root folder are supported",
@@ -305,13 +435,13 @@ export async function listMarkdownFolderEntries(
     const validation = validateMarkdownFileName(item.name);
     if (!validation.valid) {
       entries.push({
-        kind: "unsupported",
+        kind: MarkdownFolderEntryKind.Unsupported,
         item,
         reason: `unsupported file name: ${validation.reason}`,
       });
       continue;
     }
-    entries.push({ kind: "supported", item });
+    entries.push({ kind: MarkdownFolderEntryKind.Supported, item });
   }
   return entries;
 }
@@ -327,7 +457,7 @@ export async function listMarkdownFiles(
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
   const entries = await listMarkdownFolderEntries(client, folderId, signal);
-  return entries.filter((e) => e.kind === "supported").map((e) => e.item);
+  return entries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported).map((e) => e.item);
 }
 
 /**
@@ -343,7 +473,7 @@ export async function findMarkdownFileByName(
   name: string,
   signal: AbortSignal,
 ): Promise<DriveItem | null> {
-  if (!folderId) throw new Error("findMarkdownFileByName: folderId must not be empty");
+  assertValidGraphId("folderId", folderId);
   assertValidMarkdownFileName(name);
 
   const files = await listMarkdownFiles(client, folderId, signal);
@@ -357,7 +487,7 @@ export async function getDriveItem(
   itemId: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (!itemId) throw new Error("getDriveItem: itemId must not be empty");
+  assertValidGraphId("itemId", itemId);
   logger.debug("getting drive item", { itemId });
 
   const path = `/me/drive/items/${encodeURIComponent(itemId)}`;
@@ -395,7 +525,7 @@ export async function downloadMarkdownContent(
   itemId: string,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!itemId) throw new Error("downloadMarkdownContent: itemId must not be empty");
+  assertValidGraphId("itemId", itemId);
 
   const item = await getDriveItem(client, itemId, signal);
   if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
@@ -469,7 +599,7 @@ export async function createMarkdownFile(
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (!folderId) throw new Error("createMarkdownFile: folderId must not be empty");
+  assertValidGraphId("folderId", folderId);
   assertValidMarkdownFileName(fileName);
 
   const bytes = Buffer.byteLength(content, "utf-8");
@@ -511,7 +641,7 @@ export async function updateMarkdownFile(
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (!itemId) throw new Error("updateMarkdownFile: itemId must not be empty");
+  assertValidGraphId("itemId", itemId);
   if (!etag) throw new Error("updateMarkdownFile: etag must not be empty");
 
   const bytes = Buffer.byteLength(content, "utf-8");
@@ -545,7 +675,7 @@ export async function deleteDriveItem(
   itemId: string,
   signal: AbortSignal,
 ): Promise<void> {
-  if (!itemId) throw new Error("deleteDriveItem: itemId must not be empty");
+  assertValidGraphId("itemId", itemId);
   logger.debug("deleting drive item", { itemId });
   await client.request(HttpMethod.DELETE, `/me/drive/items/${encodeURIComponent(itemId)}`, signal);
 }
@@ -569,7 +699,7 @@ export async function listDriveItemVersions(
   itemId: string,
   signal: AbortSignal,
 ): Promise<DriveItemVersion[]> {
-  if (!itemId) throw new Error("listDriveItemVersions: itemId must not be empty");
+  assertValidGraphId("itemId", itemId);
   logger.debug("listing drive item versions", { itemId });
 
   const path = `/me/drive/items/${encodeURIComponent(itemId)}/versions`;
@@ -597,8 +727,8 @@ export async function downloadDriveItemVersionContent(
   versionId: string,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!itemId) throw new Error("downloadDriveItemVersionContent: itemId must not be empty");
-  if (!versionId) throw new Error("downloadDriveItemVersionContent: versionId must not be empty");
+  assertValidGraphId("itemId", itemId);
+  assertValidGraphId("versionId", versionId);
 
   const path =
     `/me/drive/items/${encodeURIComponent(itemId)}` +
@@ -649,7 +779,8 @@ export async function getRevisionContent(
   versionId: string,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!versionId) throw new Error("getRevisionContent: versionId must not be empty");
+  assertValidGraphId("versionId", versionId);
+  assertValidGraphId("item.id", item.id);
 
   if (item.version === versionId) {
     return downloadMarkdownContent(client, item.id, signal);

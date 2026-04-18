@@ -187,8 +187,12 @@ export function hasMarkdownConfig(
   return markdownRootFolderIdError(rootFolderId) === null;
 }
 
-/** Loads config from disk and validates it has todo list fields. Throws a user-friendly error if missing or invalid. */
-export async function loadAndValidateConfig(
+/**
+ * Loads config from disk and validates that a todo list is configured.
+ * Throws a user-friendly error if missing or invalid (e.g. picker has not
+ * been run yet — in which case the user is directed to re-run the picker).
+ */
+export async function loadAndValidateTodoConfig(
   dir: string,
   signal: AbortSignal,
 ): Promise<Config & { todoListId: string; todoListName: string }> {

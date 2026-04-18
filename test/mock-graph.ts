@@ -167,6 +167,48 @@ function parseSegments(pathname: string): string[] {
   return pathname.split("/").filter((s) => s.length > 0);
 }
 
+/**
+ * Apply Graph-style `$top` + `$skip` pagination to an in-memory collection,
+ * returning the page payload (plus an absolute `@odata.nextLink` when more
+ * pages remain). Used by `/me/drive/root/children` and
+ * `/me/drive/items/{id}/children` to exercise the listAllPages helper in
+ * the production code.
+ */
+function paginate<T>(
+  _state: MockState,
+  parsed: URL,
+  basePath: string,
+  all: T[],
+): { value: T[]; "@odata.nextLink"?: string } {
+  const top = clampTopParam(parsed.searchParams.get("$top"));
+  const skip = clampSkipParam(parsed.searchParams.get("$skip"));
+  const slice = all.slice(skip, skip + top);
+  if (skip + top < all.length) {
+    // Mimic the real Graph nextLink shape so listAllPages.extractNextPath
+    // accepts it. The actual host is irrelevant — the client only uses the
+    // path + query, and our GraphClient base URL points at this mock.
+    const params = new URLSearchParams(parsed.searchParams);
+    params.set("$skip", String(skip + top));
+    const synthetic = `https://graph.microsoft.com/v1.0${basePath}?${params.toString()}`;
+    return { value: slice, "@odata.nextLink": synthetic };
+  }
+  return { value: slice };
+}
+
+function clampTopParam(raw: string | null): number {
+  if (raw === null) return 200;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return 200;
+  return Math.min(n, 200);
+}
+
+function clampSkipParam(raw: string | null): number {
+  if (raw === null) return 0;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
 export function createMockGraphServer(state: MockState): Promise<{
   server: http.Server;
   url: string;
@@ -634,7 +676,11 @@ async function handleDriveRequest(
     segments[2] === "root" &&
     segments[3] === "children"
   ) {
-    jsonResponse(res, 200, { value: state.driveRootChildren });
+    jsonResponse(
+      res,
+      200,
+      paginate(state, parsed, "/me/drive/root/children", state.driveRootChildren),
+    );
     return true;
   }
 
@@ -708,8 +754,12 @@ async function handleDriveRequest(
   if (method === "GET" && segments.length === 5 && segments[4] === "children") {
     const children = state.driveFolderChildren.get(itemId) ?? [];
     // Strip in-memory content from responses so the wire shape matches Graph's DriveItem.
-    const value = children.map((f) => driveItemView(f, state));
-    jsonResponse(res, 200, { value });
+    const all = children.map((f) => driveItemView(f, state));
+    jsonResponse(
+      res,
+      200,
+      paginate(state, parsed, `/me/drive/items/${encodeURIComponent(itemId)}/children`, all),
+    );
     return true;
   }
 

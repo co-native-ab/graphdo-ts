@@ -11,7 +11,7 @@ import {
   loadConfig,
   saveConfig,
   hasTodoConfig,
-  loadAndValidateConfig,
+  loadAndValidateTodoConfig,
   type Config,
 } from "../src/config.js";
 
@@ -195,10 +195,10 @@ describe("hasTodoConfig", () => {
   });
 });
 
-describe("loadAndValidateConfig", () => {
+describe("loadAndValidateTodoConfig", () => {
   it("throws helpful error when config file missing", async () => {
     const dir = getTempDir();
-    await expect(loadAndValidateConfig(dir, testSignal())).rejects.toThrow(/not configured/);
+    await expect(loadAndValidateTodoConfig(dir, testSignal())).rejects.toThrow(/not configured/);
   });
 
   it("throws helpful error when config invalid", async () => {
@@ -209,14 +209,14 @@ describe("loadAndValidateConfig", () => {
       JSON.stringify({ todoListId: "", todoListName: "" }),
     );
 
-    await expect(loadAndValidateConfig(dir, testSignal())).rejects.toThrow(/not configured/);
+    await expect(loadAndValidateTodoConfig(dir, testSignal())).rejects.toThrow(/not configured/);
   });
 
   it("returns config when valid", async () => {
     const dir = getTempDir();
     await saveConfig(validConfig, dir, testSignal());
 
-    const result = await loadAndValidateConfig(dir, testSignal());
+    const result = await loadAndValidateTodoConfig(dir, testSignal());
     expect(result).toEqual(validConfig);
   });
 });
