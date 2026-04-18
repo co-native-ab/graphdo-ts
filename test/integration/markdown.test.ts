@@ -1237,6 +1237,134 @@ describe("integration: markdown", () => {
         expect(r.isError).toBe(true);
         expect(firstText(r).toLowerCase()).toContain("subdirectory");
       });
+
+      // ---------------------------------------------------------------------
+      // Regression: production-typical "drive item omits version" path.
+      //
+      // Real OneDrive does not include `version` on `GET /me/drive/items/{id}`
+      // (or on the response from a content upload), even though `/versions`
+      // returns proper IDs. The mock mirrors this behaviour. Without the
+      // /versions-fallback in `resolveCurrentRevision`, the agent-facing
+      // Revision would read `(none)` / `(unknown)` and the cTag-mismatch
+      // diff workflow would be unreachable. These tests lock in the
+      // contract end-to-end so any future regression (re-introducing
+      // `version` on the mock, or removing the fallback) fails loudly.
+      // ---------------------------------------------------------------------
+
+      it("regression: tool output does not leak the bare '(none)' / '(unknown)' placeholder when the drive item omits version", async () => {
+        const get = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const getText = firstText(get);
+        const cTag = extract("cTag", getText);
+
+        const create = (await c.callTool({
+          name: "markdown_create_file",
+          arguments: { fileName: "regression-new.md", content: "fresh" },
+        })) as ToolResult;
+
+        const upd = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", cTag, content: "updated" },
+        })) as ToolResult;
+
+        for (const r of [get, create, upd]) {
+          expect(r.isError).toBeFalsy();
+          const text = firstText(r);
+          // Old broken state: `Revision: (none)` (drive item didn't surface
+          // version, no fallback) → unusable revision string.
+          expect(text).not.toMatch(/Revision:\s*\(none\)/);
+          // New unresolvable state would hint at list_file_versions; assert
+          // the fallback succeeded so we get a real revision instead.
+          expect(text).not.toMatch(/Revision:\s*\(unknown/);
+        }
+      });
+
+      it("regression: Revision reported by markdown_get_file matches the current /versions entry returned by markdown_list_file_versions", async () => {
+        const get = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const reportedRev = extract("Revision", firstText(get));
+
+        const versions = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        // The list output renders revisions one per line; the current
+        // version is the first (newest) entry. Ensure the bare ID appears
+        // somewhere in the listing — and crucially is the same value that
+        // markdown_get_file surfaced.
+        expect(versions.isError).toBeFalsy();
+        const versionsBody = firstText(versions);
+        expect(versionsBody).toContain(reportedRev);
+      });
+
+      it("regression: Revision reported by markdown_create_file / markdown_update_file is usable as fromVersionId in markdown_diff_file_versions", async () => {
+        // Create → revision A; update → revision B; diff(A, B) must work
+        // end-to-end even though the underlying drive item omits `version`
+        // on every Graph response.
+        const create = (await c.callTool({
+          name: "markdown_create_file",
+          arguments: { fileName: "regression-roundtrip.md", content: "v1\n" },
+        })) as ToolResult;
+        expect(create.isError).toBeFalsy();
+        const revA = extract("Revision", firstText(create));
+        const cTag = extract("cTag", firstText(create));
+
+        const upd = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "regression-roundtrip.md", cTag, content: "v2\n" },
+        })) as ToolResult;
+        expect(upd.isError).toBeFalsy();
+        const revB = extract("Revision", firstText(upd));
+        expect(revB).not.toBe(revA);
+
+        const diff = (await c.callTool({
+          name: "markdown_diff_file_versions",
+          arguments: {
+            fileName: "regression-roundtrip.md",
+            fromVersionId: revA,
+            toVersionId: revB,
+          },
+        })) as ToolResult;
+        expect(diff.isError).toBeFalsy();
+        const diffBody = firstText(diff);
+        expect(diffBody).toContain("-v1");
+        expect(diffBody).toContain("+v2");
+      });
+
+      it("regression: cTag-mismatch error surfaces a real Current Revision (not '(unknown)') even though Graph omits item.version", async () => {
+        const get1 = (await c.callTool({
+          name: "markdown_get_file",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        const staleCTag = extract("cTag", firstText(get1));
+
+        await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", cTag: staleCTag, content: "concurrent-write" },
+        });
+
+        const stale = (await c.callTool({
+          name: "markdown_update_file",
+          arguments: { fileName: "hello.md", cTag: staleCTag, content: "stale-write" },
+        })) as ToolResult;
+        expect(stale.isError).toBe(true);
+        const body = firstText(stale);
+        // The Current Revision line must carry an actual revision ID, not
+        // a placeholder. Without the /versions fallback this would read
+        // `Current Revision: (unknown)`.
+        expect(body).toMatch(/Current Revision:\s+(?!\(unknown)\S/);
+        const errRev = extract("Current Revision", body);
+        // And it must be the same ID surfaced by /versions.
+        const versions = (await c.callTool({
+          name: "markdown_list_file_versions",
+          arguments: { fileName: "hello.md" },
+        })) as ToolResult;
+        expect(firstText(versions)).toContain(errRev);
+      });
     });
 
     describe("markdown_preview_file", () => {

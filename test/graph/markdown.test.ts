@@ -594,30 +594,46 @@ describe("markdown current revision tracking", () => {
     await env.cleanup();
   });
 
-  it("getDriveItem returns a `version` field for seeded files (lazy-assigned)", async () => {
+  it("getDriveItem omits `version` (mirrors real OneDrive, which commonly does not include it)", async () => {
     const item = await getDriveItem(client, "file-md-1", testSignal());
-    expect(item.version).toBeTruthy();
-    expect(typeof item.version).toBe("string");
+    expect(item.version).toBeUndefined();
   });
 
-  it("createMarkdownFile returns a `version` field on creation", async () => {
+  it("createMarkdownFile omits `version` on the returned drive item", async () => {
     const created = await createMarkdownFile(client, "folder-2", "fresh.md", "one", testSignal());
-    expect(created.version).toBeTruthy();
+    expect(created.version).toBeUndefined();
   });
 
-  it("updateMarkdownFile bumps the `version` on every write", async () => {
+  it("updateMarkdownFile omits `version` on the returned drive item", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    const v0 = before.version!;
+    const after = await updateMarkdownFile(client, "file-md-1", before.cTag!, "v1", testSignal());
+    expect(after.version).toBeUndefined();
+  });
+
+  it("/versions surfaces a stable, monotonically-bumping current revision id even though the drive item omits `version`", async () => {
+    const before = await getDriveItem(client, "file-md-1", testSignal());
+    const beforeVersions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const v0 = beforeVersions[0]?.id;
+    expect(v0).toBeTruthy();
+
     const after1 = await updateMarkdownFile(client, "file-md-1", before.cTag!, "v1", testSignal());
-    expect(after1.version).toBeTruthy();
-    expect(after1.version).not.toBe(v0);
+    const v1Versions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const v1 = v1Versions[0]?.id;
+    expect(v1).toBeTruthy();
+    expect(v1).not.toBe(v0);
+
     const after2 = await updateMarkdownFile(client, "file-md-1", after1.cTag!, "v2", testSignal());
-    expect(after2.version).not.toBe(after1.version);
+    void after2;
+    const v2Versions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    expect(v2Versions[0]?.id).not.toBe(v1);
   });
 
   it("prior revision ID surfaces as a history entry after an update", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    const priorRevision = before.version!;
+    const beforeVersions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const priorRevision = beforeVersions[0]?.id;
+    expect(priorRevision).toBeTruthy();
+
     await updateMarkdownFile(client, "file-md-1", before.cTag!, "v1", testSignal());
     const history = await listDriveItemVersions(client, "file-md-1", testSignal());
     // The first overwrite promotes the prior current revision into history.
@@ -640,31 +656,30 @@ describe("resolveCurrentRevision", () => {
   });
 
   it("returns item.version verbatim when present (no /versions call needed)", async () => {
+    // The mock omits `version` on driveItem responses, so synthesise one
+    // here to exercise the fast path: when Graph DOES populate `version`,
+    // the resolver must return it without consulting /versions.
     const item = await getDriveItem(client, "file-md-1", testSignal());
-    expect(item.version).toBeTruthy();
-    const resolved = await resolveCurrentRevision(client, item, testSignal());
-    expect(resolved).toBe(item.version);
+    const itemWithVersion = { ...item, version: "synthetic-rev" };
+    const resolved = await resolveCurrentRevision(client, itemWithVersion, testSignal());
+    expect(resolved).toBe("synthetic-rev");
   });
 
-  it("falls back to the newest /versions entry when item.version is absent", async () => {
-    // Simulate production: GET /me/drive/items/{id} returns no `version` field
-    // even though /versions returns proper IDs.
+  it("falls back to the newest /versions entry when item.version is absent (the production-typical case)", async () => {
     const item = await getDriveItem(client, "file-md-1", testSignal());
-    const itemWithoutVersion = { ...item, version: undefined };
+    // The mock already mirrors real Graph and omits `version` on the item,
+    // so no synthetic stripping is needed.
+    expect(item.version).toBeUndefined();
     const history = await listDriveItemVersions(client, "file-md-1", testSignal());
     const expected = history[0]?.id;
     expect(expected).toBeTruthy();
 
-    const resolved = await resolveCurrentRevision(client, itemWithoutVersion, testSignal());
+    const resolved = await resolveCurrentRevision(client, item, testSignal());
     expect(resolved).toBe(expected);
   });
 
   it("returns undefined when item.version is absent and /versions yields nothing", async () => {
-    // Build an item whose ID has no /versions entries (the mock only seeds
-    // versions lazily on first view of a file; an item the mock has never
-    // seen returns an empty list rather than 404 here because we never call
-    // GET /items/{id} on it - we go straight to /versions, which is empty
-    // in MockState for an unknown ID).
+    // Test the case where an item exists but has no version history entries.
     env.state.driveItemVersions.set("ghost-item", []);
     const ghost = {
       id: "ghost-item",
@@ -676,9 +691,8 @@ describe("resolveCurrentRevision", () => {
   });
 
   it("returns undefined (does not throw) when /versions errors out", async () => {
-    // Use a bogus item ID that the mock will 404 on its /versions endpoint;
-    // the resolver must swallow the error and return undefined so the
-    // caller's primary operation isn't poisoned by a best-effort lookup.
+    // Test that /versions errors are swallowed and return undefined rather
+    // than failing the primary operation.
     const ghost = {
       id: "definitely-not-a-real-item-id",
       name: "ghost.md",
@@ -703,41 +717,41 @@ describe("getRevisionContent", () => {
     await env.cleanup();
   });
 
-  it("returns live content when the revision id matches item.version", async () => {
+  it("returns live content when the revision id is the current one (taken from /versions, since item.version is omitted by Graph)", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
     await updateMarkdownFile(client, "file-md-1", before.cTag!, "current-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
-    const body = await getRevisionContent(client, current, current.version!, testSignal());
-    expect(body).toEqual({ content: "current-body", isCurrent: true });
-  });
-
-  it("returns live content when the current version id is taken from the versions list (item.version absent)", async () => {
-    // Simulate production: Graph API does not always return item.version.
-    // The agent reads the current version ID from the /versions list instead.
-    const before = await getDriveItem(client, "file-md-1", testSignal());
-    await updateMarkdownFile(client, "file-md-1", before.cTag!, "current-body", testSignal());
-    const current = await getDriveItem(client, "file-md-1", testSignal());
-    // Strip version to simulate production where Graph API omits the field.
-    const itemWithoutVersion = { ...current, version: undefined };
-    // The /versions list now leads with the current version as its first entry.
+    // The mock omits `version` on the drive item to mirror real Graph; the
+    // current version ID must come from the /versions list.
     const history = await listDriveItemVersions(client, "file-md-1", testSignal());
     const currentVersionId = history[0]?.id;
     if (!currentVersionId) throw new Error("expected at least one version in the list");
-    const body = await getRevisionContent(
-      client,
-      itemWithoutVersion,
-      currentVersionId,
-      testSignal(),
-    );
+    const body = await getRevisionContent(client, current, currentVersionId, testSignal());
     expect(body).toEqual({ content: "current-body", isCurrent: true });
+  });
+
+  it("fast-paths when item.version is populated and matches the requested id", async () => {
+    // Cover the `item.version === versionId` short-circuit even though the
+    // mock doesn't surface `version` itself: synthesise an item with a known
+    // version field to exercise the path Graph takes when it does include
+    // the field.
+    const item = await getDriveItem(client, "file-md-1", testSignal());
+    const itemWithVersion = { ...item, version: "synthetic-rev" };
+    const body = await getRevisionContent(client, itemWithVersion, "synthetic-rev", testSignal());
+    // The mock ignores the synthetic version and returns the live content
+    // because /content is served from the file's current bytes.
+    expect(body.isCurrent).toBe(true);
+    expect(body.content).toBe("hello world!");
   });
 
   it("returns historical content when the revision id matches a /versions entry", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    const originalRevision = before.version!;
+    const beforeVersions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const originalRevision = beforeVersions[0]?.id;
+    expect(originalRevision).toBeTruthy();
     await updateMarkdownFile(client, "file-md-1", before.cTag!, "second-body", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
-    const body = await getRevisionContent(client, current, originalRevision, testSignal());
+    const body = await getRevisionContent(client, current, originalRevision!, testSignal());
     expect(body).toEqual({ content: "hello world!", isCurrent: false });
   });
 
@@ -750,16 +764,21 @@ describe("getRevisionContent", () => {
 
   it("unknown-version error enumerates both the current revision and history", async () => {
     const before = await getDriveItem(client, "file-md-1", testSignal());
-    const originalRevision = before.version!;
+    const beforeVersions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const originalRevision = beforeVersions[0]?.id;
+    expect(originalRevision).toBeTruthy();
     await updateMarkdownFile(client, "file-md-1", before.cTag!, "v2", testSignal());
     const current = await getDriveItem(client, "file-md-1", testSignal());
+    const currentVersions = await listDriveItemVersions(client, "file-md-1", testSignal());
+    const currentRevision = currentVersions[0]?.id;
+    expect(currentRevision).toBeTruthy();
     try {
       await getRevisionContent(client, current, "nope", testSignal());
       throw new Error("expected MarkdownUnknownVersionError");
     } catch (err) {
       expect(err).toBeInstanceOf(MarkdownUnknownVersionError);
       const known = (err as MarkdownUnknownVersionError).availableVersionIds;
-      expect(known).toContain(current.version);
+      expect(known).toContain(currentRevision);
       expect(known).toContain(originalRevision);
     }
   });

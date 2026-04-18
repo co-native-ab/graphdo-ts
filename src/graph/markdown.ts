@@ -930,8 +930,9 @@ export async function getRevisionContent(
   assertValidGraphId("versionId", versionId);
   assertValidGraphId("item.id", item.id);
 
-  // Fast path: item.version is populated (always present in the mock, and in
-  // Graph API responses when the field is returned).
+  // Fast path: item.version is populated (sometimes returned by Graph; with
+  // our mock and many real OneDrive responses the field is omitted, in
+  // which case we fall through to the /versions-driven lookup below).
   if (item.version === versionId) {
     const content = await downloadMarkdownContent(client, item.id, signal);
     return { content, isCurrent: true };
