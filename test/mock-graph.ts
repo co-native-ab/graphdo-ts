@@ -864,7 +864,12 @@ function findMockFile(state: MockState, itemId: string): MockDriveFile | undefin
 function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
   // Lazily assign a cTag / version on first view if the seed didn't set one.
   // Real Graph always returns a cTag for files; tests that don't care about
-  // specific values shouldn't have to set them explicitly.
+  // specific values shouldn't have to set them explicitly. We still maintain
+  // an internal `file.version` so the `/versions` endpoint can surface a
+  // stable current-revision ID — but, mirroring real OneDrive, this internal
+  // version is NOT included in the returned drive item (real Graph commonly
+  // omits the `version` field on `GET /me/drive/items/{id}` even when the
+  // file has a meaningful version history).
   if (file.cTag === undefined && file.file !== undefined && state !== undefined) {
     file.cTag = state.genCTag(file.id);
   }
@@ -895,7 +900,7 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
     name: file.name,
     size: file.size,
     cTag: file.cTag,
-    version: file.version,
+    // Intentionally NOT exposing `file.version` here — see note above.
     lastModifiedDateTime: file.lastModifiedDateTime,
     file: file.file,
     folder: file.folder,
