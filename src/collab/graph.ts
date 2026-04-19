@@ -34,7 +34,7 @@
 
 import type { GraphClient } from "../graph/client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "../graph/client.js";
-import type { ValidatedGraphId } from "../graph/ids.js";
+import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
 import type { DriveItem } from "../graph/types.js";
 import { DriveItemSchema, GraphListResponseSchema } from "../graph/types.js";
 import { logger } from "../logger.js";
@@ -347,7 +347,7 @@ export async function walkAttachmentsTree(
 
       if (child.folder !== undefined) {
         // It's a subfolder — enqueue for recursive traversal.
-        const childId = child.id as ValidatedGraphId;
+        const childId = validateGraphId("attachmentChildFolderId", child.id);
         queue.push({
           folderId: childId,
           pathPrefix: `${childPath}/`,

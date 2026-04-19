@@ -28,7 +28,7 @@ import {
   findChildFolderByName,
   walkAttachmentsTree,
 } from "../collab/graph.js";
-import { resolveScopedPath } from "../collab/scope.js";
+import { resolveScopedPath, MAX_ANCESTRY_HOPS } from "../collab/scope.js";
 import { readMarkdownFrontmatter, type CollabFrontmatter } from "../collab/frontmatter.js";
 import { formatError } from "./shared.js";
 import type { DriveItem } from "../graph/types.js";
@@ -42,6 +42,24 @@ const LIST_FILES_BREADTH_CAP = 500;
 
 /** Sentinel folder name, excluded from ROOT listing. */
 const SENTINEL_FOLDER_NAME = ".collab";
+
+/**
+ * Extract the integer revision number from a OneDrive cTag.
+ *
+ * OneDrive cTags have the shape `"{<guid>,<revision>}"` (quoted), e.g.
+ * `"{8B6E5C0E-1234-...,17}"`. The revision suffix increments on every
+ * content write. We surface it in the `collab_read` envelope (§2.3) as
+ * `revision: <n>` so the agent can correlate reads with later
+ * `collab_write` cTag-mismatch errors. Returns `0` when the cTag is
+ * missing or doesn't match the expected shape (defensive — the value
+ * is informational, not load-bearing).
+ */
+function extractRevisionFromCTag(cTag: string | undefined): number {
+  if (cTag === undefined) return 0;
+  const match = /,(\d+)"/.exec(cTag);
+  if (match?.[1] === undefined) return 0;
+  return parseInt(match[1], 10);
+}
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -316,12 +334,13 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             }
 
             // Ancestry check for itemId: walk parentReference.id up to the project folder
-            // This is a simplified scope check — the full algorithm is applied when path is used
+            // This is a simplified scope check — the full algorithm is applied when path is used.
+            // The hop cap matches scope.ts MAX_ANCESTRY_HOPS so behaviour is uniform across
+            // both code paths.
             const projectFolderId = metadata.folderId;
             let cursorParentId: string | undefined = resolvedItem.parentReference?.id;
             let foundAncestor = false;
-            const maxHops = 8;
-            for (let hop = 0; hop < maxHops && cursorParentId !== undefined; hop++) {
+            for (let hop = 0; hop < MAX_ANCESTRY_HOPS && cursorParentId !== undefined; hop++) {
               if (cursorParentId === projectFolderId) {
                 foundAncestor = true;
                 break;
@@ -381,10 +400,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             const body = readResult.body;
 
             // Note: audit emission (`frontmatter_reset`) is W3 Day 3; deferred.
-            // Revision number extraction would come from cTag parsing or version endpoint;
-            // for now use a placeholder extracted from cTag if available.
-            const revisionMatch = resolvedItem.cTag?.match(/,(\d+)"/);
-            const revision = revisionMatch?.[1] ? parseInt(revisionMatch[1], 10) : 0;
+            const revision = extractRevisionFromCTag(resolvedItem.cTag);
 
             const output = formatAuthoritativeRead(resolvedItem, frontmatter, body, revision);
             return { content: [{ type: "text", text: output }] };
