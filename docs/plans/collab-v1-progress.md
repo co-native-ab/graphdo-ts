@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: W0 Day 3 — Form-factory module on `src/tools/collab-forms.ts` (complete, awaiting merge)
-Current milestone: _none — W0 Day 3 complete; W0 Days 4–5 (buffer) start in the next PR_
-Next milestone: W0 Days 4–5 — buffer (W0 hardening test rows; cross-host browser smoke)
+Last updated: W0 Days 4–5 — first smoke run (Linux dev box + GitHub Copilot CLI) green on S1–S7; S8 + Claude Desktop / VS Code Copilot deferred as follow-ups
+Current milestone: W0 Days 4–5 — buffer (smoke partially complete; ready to enter W1 with deferred follow-up smokes tracked)
+Next milestone: W1 Day 1 — `userOid` plumbing (lands ADR-006)
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -11,18 +11,17 @@ work reads this file first.
 
 ## Completed
 
-| Milestone | PR                                                        | Merged  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------- | --------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | merged  | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added.                                                                                                                                                                                                                                                                                                  |
-| W0 Day 2  | [#34](https://github.com/co-native-ab/graphdo-ts/pull/34) | merged  | `src/loopback-security.ts` (CSRF, header pins, hardened CSP); `picker.ts` + `loopback.ts` enforce Host/Origin/Sec-Fetch-Site/Content-Type pins + per-request CSP nonce; `landingPageHtml`/`pickerPageHtml`/`layoutHtml` thread `csrfToken` + `nonce`. New `test/loopback-security.test.ts` + §5.4 hardening rows on `test/picker.test.ts` + `test/loopback.test.ts`.                                                                                                         |
-| W0 Day 3  | [#35](https://github.com/co-native-ab/graphdo-ts/pull/35) | pending | `src/tools/collab-forms.ts` form-factory with module-level single-flight slot + `try { ... } finally { slot.release() }` contract; `FormBusyError` (`src/errors.ts`) carries the in-flight URL + kind. `login` and `todo_select_list` migrated to acquire the slot around their browser flows. New `test/tools/collab-forms.test.ts` covers the §8 row-18 lock-release matrix (submit / cancel / timeout / transport abort / uncaught exception) against an early-stub form. |
+| Milestone | PR                                                        | Merged | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------- | --------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | merged | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added.                                                                                                                                                                                                                                                                                                  |
+| W0 Day 2  | [#34](https://github.com/co-native-ab/graphdo-ts/pull/34) | merged | `src/loopback-security.ts` (CSRF, header pins, hardened CSP); `picker.ts` + `loopback.ts` enforce Host/Origin/Sec-Fetch-Site/Content-Type pins + per-request CSP nonce; `landingPageHtml`/`pickerPageHtml`/`layoutHtml` thread `csrfToken` + `nonce`. New `test/loopback-security.test.ts` + §5.4 hardening rows on `test/picker.test.ts` + `test/loopback.test.ts`.                                                                                                         |
+| W0 Day 3  | [#35](https://github.com/co-native-ab/graphdo-ts/pull/35) | merged | `src/tools/collab-forms.ts` form-factory with module-level single-flight slot + `try { ... } finally { slot.release() }` contract; `FormBusyError` (`src/errors.ts`) carries the in-flight URL + kind. `login` and `todo_select_list` migrated to acquire the slot around their browser flows. New `test/tools/collab-forms.test.ts` covers the §8 row-18 lock-release matrix (submit / cancel / timeout / transport abort / uncaught exception) against an early-stub form. |
 
 ## In flight
 
-| Milestone | Branch | PR  | Started | Sub-status |
-| --------- | ------ | --- | ------- | ---------- |
-
-_(Nothing in flight.)_
+| Milestone   | Branch                                   | PR        | Started    | Sub-status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------- | ---------------------------------------- | --------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Days 4–5 | `copilot/continue-collab-implementation` | _this PR_ | 2026-04-19 | Buffer days. The §5.4 hardening test rows landed in PRs #34 and #35 are already at the `~320 LOC` figure called for in `collab-v1.md` §11 (W0 hardening test correction), so the buffer has been spent on (a) publishing [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md) and (b) running it. **First smoke run — 2026-04-19, Linux dev box + GitHub Copilot CLI + system default browser:** S1 login happy path ✅ (zero CSP console errors at `127.0.0.1:46781/`, success page rendered, `simon@co-native.com` returned; tab does not auto-close because the page wasn't `window.open`-ed — expected); S2 login cancel ✅; S3 DNS-rebinding sanity ✅ (forged `POST /cancel` with `Host: evil.example` → `403 Forbidden: invalid Host header`; legitimate sign-in still completed afterward); S4 `todo_select_list` happy path ✅ (`config.json` updated atomically); S5 `todo_select_list` cancel ✅ (`config.json` unchanged); S6 form-busy lock ✅ (second `todo_select_list` returned `Another approval form is already open at http://127.0.0.1:46133 (todo_select_list).`; lock released after first picker completed); S7 logout ✅ (branded confirmation page; subsequent login required fresh interactive sign-in); S8 headless fallback ⏭️ deferred (not applicable to this desktop run). **Deferred follow-up smokes (W5 Day 5 will re-run the full matrix):** Claude Desktop on macOS+Win, VS Code Copilot on macOS+Win, S8 headless. **Findings to track (not failures):** (1) `logout` does not acquire the form-busy slot — only `login` and `todo_select_list` do — so a concurrent logout while a picker is in flight opens a separate confirmation page rather than surfacing `FormBusyError`; needs a design discussion / ADR follow-up on whether `logout` should participate in the lock. (2) GitHub Copilot CLI exposes the todo / markdown tools conditionally after login (visible via `tools_changed_notice`); future tests that interleave them with login/logout in that host need to account for the visibility transition. No source/behavioural code changes in this PR. |
 
 ## Not started
 
@@ -34,7 +33,7 @@ back to its DoD in the plan.
 - [x] **W0 Day 1** — `escapeHtml` helper + template audit _(complete in [#33](https://github.com/co-native-ab/graphdo-ts/pull/33))_
 - [x] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts` _(complete in [#34](https://github.com/co-native-ab/graphdo-ts/pull/34))_
 - [x] **W0 Day 3** — Form-factory module (`src/tools/collab-forms.ts`) _(complete in [#35](https://github.com/co-native-ab/graphdo-ts/pull/35))_
-- [ ] **W0 Days 4–5** — buffer (W0 hardening test rows; cross-host browser smoke)
+- [x] **W0 Days 4–5** — buffer (cross-host browser smoke per [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md); first run green on Linux + GitHub Copilot CLI; Claude Desktop / VS Code Copilot / S8 headless deferred to W5 Day 5)
 
 ### Week 1 — auth + scaffolding
 
@@ -94,6 +93,33 @@ Re-baseline triggers per `collab-v1.md` §9:
       (scope cut or add a second engineer for W4 + W5).
 
 No re-baselining beyond W3 — runway is too short.
+
+## Smoke run log
+
+Append one row per cross-host browser smoke run. Reference:
+[`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md).
+
+| Date       | Host               | OS    | Browser        | Result                   | Notes                                                                                                                                                                                                             |
+| ---------- | ------------------ | ----- | -------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-04-19 | GitHub Copilot CLI | Linux | system default | S1–S7 ✅, S8 ⏭️ deferred | Findings F1 + F2 below. DNS-rebinding sanity (S3) returned `403 Forbidden: invalid Host header` against the live loopback — §5.4 Host pin verified end-to-end. Picker port observed 46781 (login) / 46133 (todo). |
+
+### Open follow-ups from smoke runs
+
+- **F1 — `logout` does not acquire the form-busy slot.** Only
+  `login` and `todo_select_list` acquire via `acquireFormSlot`
+  (see `src/tools/login.ts` and `src/tools/config.ts`); `logout`
+  opens its branded confirmation page outside the lock. Concurrent
+  `logout` while a picker is in flight therefore opens a second
+  browser page instead of returning `FormBusyError`. Needs a
+  design discussion: should `logout` participate in the lock for
+  consistency, or is "logout always wins" the intended UX? Capture
+  the resolution as an ADR if non-trivial. Tracked for W1 review.
+- **F2 — Conditional tool exposure in GitHub Copilot CLI.** That
+  host exposes the todo / markdown tools only after login, surfaced
+  via a `tools_changed_notice`. Not a defect — but any future
+  collab integration test or smoke matrix that interleaves those
+  tools with `login` / `logout` in Copilot CLI needs to wait for
+  the notice before assuming the tool list is stable.
 
 ## ADR ledger
 

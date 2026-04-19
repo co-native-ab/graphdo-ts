@@ -2464,7 +2464,9 @@ inherits a hardened substrate.
   first time round; CSRF + Origin + Host + Content-Type +
   Sec-Fetch-Site + CSP test rows alone are ~300 LOC of tests
   (Appendix A correction). Use the buffer for that and for
-  cross-host browser smoke (Claude Desktop, VS Code Copilot).
+  cross-host browser smoke (Claude Desktop, VS Code Copilot) per
+  the manual checklist in
+  [`docs/plans/cross-host-browser-smoke.md`](./cross-host-browser-smoke.md).
 
 ### Week 1 — auth + scaffolding
 
@@ -2587,7 +2589,10 @@ list.test.ts` end-to-end happy path.
   tool list, frontmatter-reformat note for users, leases-sidecar
   note, `doc_id`-recovery flow, attachments-recursive note.
 - **W5 Day 5 — End-to-end `npm run check` + cross-host browser
-  smoke + buffer.**
+  smoke + buffer.** Cross-host smoke follows the manual checklist
+  in
+  [`docs/plans/cross-host-browser-smoke.md`](./cross-host-browser-smoke.md),
+  re-used from W0 Days 4–5.
 
 ### Week 6 — slip absorption
 
