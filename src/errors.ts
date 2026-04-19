@@ -106,6 +106,56 @@ export class ProjectAlreadyInitialisedError extends Error {
   }
 }
 
+/**
+ * Raised by `collab_write` (W3 Day 2) against the authoritative file
+ * when both the live frontmatter `doc_id` and the local cache
+ * (`<configDir>/projects/<projectId>.json` `docId`) are gone — a fresh
+ * machine where a cooperator also wiped the YAML block in OneDrive web.
+ *
+ * Per `docs/plans/collab-v1.md` §3.1 this is _recoverable_: the agent
+ * must call `session_recover_doc_id` (W5 Day 1), which walks the file's
+ * `/versions` history for parseable frontmatter and writes the
+ * recovered `doc_id` back to local metadata without touching the file.
+ * Only when that walk also turns up nothing
+ * (`DocIdUnrecoverableError`) is the project effectively dead.
+ *
+ * The error name and `nextStep` field appear verbatim in §2.6
+ * (typed-error table) so callers can pattern-match without importing
+ * the class.
+ */
+export class DocIdRecoveryRequiredError extends Error {
+  /** Stable identifier the agent should pass to the recovery tool — never localised. */
+  public readonly nextStep = "session_recover_doc_id" as const;
+
+  constructor(public readonly projectId: string) {
+    super(
+      `Authoritative file frontmatter has no doc_id and the local project ` +
+        `metadata for ${projectId} also has no cached docId. ` +
+        "Call session_recover_doc_id to walk the file's version history " +
+        "for a recoverable doc_id before retrying the write.",
+    );
+    this.name = "DocIdRecoveryRequiredError";
+  }
+}
+
+/**
+ * Informational result raised by `session_recover_doc_id` (W5 Day 1)
+ * when there is nothing to recover — the live frontmatter is parseable
+ * **and** the local cache already holds a `docId`. Per §2.2 this is
+ * **not** an `isError: true` outcome; the tool surfaces the existing
+ * `docId` so the caller knows the recovery was a no-op. Defined here so
+ * the W5 implementation does not have to back-fill it.
+ */
+export class DocIdAlreadyKnownError extends Error {
+  constructor(public readonly docId: string) {
+    super(
+      `doc_id ${docId} is already present in both the live frontmatter and ` +
+        "the local project metadata. Nothing to recover.",
+    );
+    this.name = "DocIdAlreadyKnownError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but
