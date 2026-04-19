@@ -69,6 +69,49 @@ export interface LoginResult {
 /** Basic info about the logged-in account. */
 export interface AccountInfo {
   username: string;
+  /**
+   * Entra object identifier of the signed-in user (`idTokenClaims.oid`).
+   *
+   * Per ADR-0006, this is the canonical user identifier surfaced to collab
+   * consumers (audit log, agentId derivation, scope-key, etc.). MSAL's
+   * `localAccountId` is intentionally NOT used because it can diverge from
+   * `oid` in multi-tenant and B2B-guest setups, and we do not want that
+   * ambiguity baked into audit trails.
+   */
+  userOid: string;
+}
+
+// ---------------------------------------------------------------------------
+// idTokenClaims helpers
+// ---------------------------------------------------------------------------
+
+/** Minimal shape of the parts of `idTokenClaims` we read from MSAL. */
+interface IdTokenClaimsWithOid {
+  oid?: unknown;
+}
+
+/**
+ * Extract the `oid` claim from an MSAL `idTokenClaims`-shaped value.
+ * Returns `undefined` if missing or not a string.
+ */
+function readOidFromClaims(claims: unknown): string | undefined {
+  if (claims === null || typeof claims !== "object") return undefined;
+  const oid = (claims as IdTokenClaimsWithOid).oid;
+  return typeof oid === "string" && oid.length > 0 ? oid : undefined;
+}
+
+/**
+ * Extract `idTokenClaims.oid` from a fresh MSAL `AuthenticationResult`.
+ *
+ * MSAL exposes the parsed id-token claims either on `result.idTokenClaims`
+ * directly or, for cached accounts, on `result.account.idTokenClaims`. We
+ * check both — in that order — so login flows and silent refreshes both work.
+ */
+function readUserOidFromResult(result: msal.AuthenticationResult): string | undefined {
+  return (
+    readOidFromClaims(result.idTokenClaims) ??
+    readOidFromClaims((result.account as { idTokenClaims?: unknown } | null)?.idTokenClaims)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +199,7 @@ function createFileCachePlugin(configDir: string): msal.ICachePlugin {
 
 async function saveAccount(
   account: msal.AccountInfo,
+  userOid: string,
   configDir: string,
   signal: AbortSignal,
 ): Promise<void> {
@@ -164,7 +208,12 @@ async function saveAccount(
     recursive: true,
     mode: 0o700,
   });
-  await fs.writeFile(accountPath, JSON.stringify(account, undefined, 2) + "\n", {
+  // Persist the MSAL account verbatim plus the resolved `userOid` under a
+  // dedicated top-level key so we never have to re-derive it on read. The
+  // separate field makes the schema explicit and avoids depending on MSAL
+  // happening to round-trip `idTokenClaims` through its own cache.
+  const payload = { ...account, userOid };
+  await fs.writeFile(accountPath, JSON.stringify(payload, undefined, 2) + "\n", {
     mode: 0o600,
     signal,
   });
@@ -174,14 +223,25 @@ async function saveAccount(
 const AccountInfoSchema = z
   .object({
     username: z.string(),
-    // msal.AccountInfo has more fields, but we only care about username for now.
+    /**
+     * `userOid` is the persisted form of `idTokenClaims.oid` resolved at
+     * login time. It is required — without it we cannot satisfy the
+     * `AccountInfo` contract surfaced to collab consumers.
+     */
+    userOid: z.string().min(1),
+    // msal.AccountInfo has more fields, but we only care about username +
+    // userOid for now.
   })
   .loose();
+
+interface PersistedAccount extends msal.AccountInfo {
+  userOid: string;
+}
 
 async function loadAccount(
   configDir: string,
   signal: AbortSignal,
-): Promise<msal.AccountInfo | undefined> {
+): Promise<PersistedAccount | undefined> {
   const accountPath = path.join(configDir, ACCOUNT_FILE_NAME);
   try {
     const data = await fs.readFile(accountPath, { encoding: "utf-8", signal });
@@ -205,7 +265,7 @@ async function loadAccount(
       path: accountPath,
       username: parsed.data.username,
     });
-    return parsed.data as msal.AccountInfo;
+    return parsed.data as unknown as PersistedAccount;
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === "ENOENT") {
       logger.debug("account file not found", { path: accountPath });
@@ -304,7 +364,18 @@ export class MsalAuthenticator implements Authenticator {
         throw new Error("Browser authentication returned no account");
       }
 
-      await saveAccount(result.account, this.configDir, signal);
+      const userOid = readUserOidFromResult(result);
+      if (!userOid) {
+        // ADR-0006: `userOid = idTokenClaims.oid` is required. If the id
+        // token did not include an `oid` claim, refuse to persist a
+        // partial account rather than silently producing audit entries
+        // with a missing or made-up identifier.
+        throw new Error(
+          "Browser authentication did not return an Entra `oid` claim — cannot establish user identity.",
+        );
+      }
+
+      await saveAccount(result.account, userOid, this.configDir, signal);
       this.cachedScopes = toGraphScopes(result.scopes);
       logger.info("browser login successful", {
         username: result.account.username,
@@ -405,7 +476,7 @@ export class MsalAuthenticator implements Authenticator {
   async accountInfo(signal: AbortSignal): Promise<AccountInfo | null> {
     const account = await loadAccount(this.configDir, signal);
     if (!account) return null;
-    return { username: account.username };
+    return { username: account.username, userOid: account.userOid };
   }
 
   async grantedScopes(signal: AbortSignal): Promise<GraphScope[]> {
@@ -568,7 +639,14 @@ export class StaticAuthenticator implements Authenticator {
   }
 
   accountInfo(_signal: AbortSignal): Promise<AccountInfo | null> {
-    return Promise.resolve({ username: "static-token" });
+    // The all-zero UUID is a deterministic, obviously-synthetic placeholder
+    // for environments using a static bearer token (CI, local dev). It is
+    // never a real Entra `oid` and is safe to surface in audit trails as a
+    // marker that no MSAL identity was established.
+    return Promise.resolve({
+      username: "static-token",
+      userOid: "00000000-0000-0000-0000-000000000000",
+    });
   }
 
   grantedScopes(_signal: AbortSignal): Promise<GraphScope[]> {

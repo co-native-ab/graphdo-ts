@@ -49,6 +49,7 @@ export function registerStatusTool(server: McpServer, config: ServerConfig): Too
             lines.push(`Status: Logged in`);
             if (info) {
               lines.push(`User: ${info.username}`);
+              lines.push(`User OID: ${info.userOid}`);
             }
 
             // Granted scopes

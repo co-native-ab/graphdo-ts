@@ -14,6 +14,7 @@ import { type GraphScope, GraphScope as GS } from "../src/scopes.js";
 export class MockAuthenticator implements Authenticator {
   private _token: string | null;
   private _username: string;
+  private _userOid: string;
   private _browserLogin: boolean;
   private _logoutCalled = false;
   private _grantedScopes: GraphScope[];
@@ -21,11 +22,15 @@ export class MockAuthenticator implements Authenticator {
   constructor(opts?: {
     token?: string;
     username?: string;
+    userOid?: string;
     browserLogin?: boolean;
     grantedScopes?: GraphScope[];
   }) {
     this._token = opts?.token ?? null;
     this._username = opts?.username ?? "test@example.com";
+    // Deterministic test default — a real-looking UUID so consumers that
+    // truncate or slug it produce stable values across runs.
+    this._userOid = opts?.userOid ?? "11111111-1111-1111-1111-111111111111";
     this._browserLogin = opts?.browserLogin ?? true;
     this._grantedScopes = opts?.grantedScopes ?? [
       GS.MailSend,
@@ -85,7 +90,7 @@ export class MockAuthenticator implements Authenticator {
     if (signal.aborted)
       return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
     if (!this._token) return Promise.resolve(null);
-    return Promise.resolve({ username: this._username });
+    return Promise.resolve({ username: this._username, userOid: this._userOid });
   }
 
   grantedScopes(signal: AbortSignal): Promise<GraphScope[]> {
