@@ -36,6 +36,14 @@ import { logger } from "../logger.js";
 /** Filename extension that identifies a markdown file at the project root. */
 export const MARKDOWN_EXTENSION = ".md";
 
+/**
+ * Maximum length OneDrive accepts for a folder name. The real limit varies
+ * by total path length (~400 chars), but 255 matches the per-segment cap
+ * used by `validateMarkdownFileName` and Windows/POSIX in general — well
+ * inside what OneDrive will accept and enough to catch a runaway caller.
+ */
+const MAX_FOLDER_NAME_LENGTH = 255;
+
 const DriveItemListSchema = GraphListResponseSchema(DriveItemSchema);
 
 // ---------------------------------------------------------------------------
@@ -168,8 +176,30 @@ export async function createChildFolder(
   folderName: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
+  // `folderName` is sent as JSON in the request body (not the URL), so the
+  // primary risk is not URL injection but a name OneDrive itself rejects
+  // — or a future caller supplying user-controlled input. Apply the same
+  // baseline checks `validateMarkdownFileName` does for files: non-empty,
+  // bounded length, no path separators, no control characters, not the
+  // relative-path components `.` / `..`. Allowed characters otherwise
+  // mirror what OneDrive accepts so the actual server-side rules
+  // (e.g. trailing dot, reserved names) still apply.
   if (folderName.length === 0) {
     throw new Error("folderName must not be empty");
+  }
+  if (folderName.length > MAX_FOLDER_NAME_LENGTH) {
+    throw new Error(
+      `folderName exceeds maximum length of ${String(MAX_FOLDER_NAME_LENGTH)} characters`,
+    );
+  }
+  if (folderName.includes("/") || folderName.includes("\\")) {
+    throw new Error("folderName must not contain path separators (/ or \\)");
+  }
+  if (folderName === "." || folderName === "..") {
+    throw new Error("folderName must not be '.' or '..'");
+  }
+  if (/[\x00-\x1f\x7f]/u.test(folderName)) {
+    throw new Error("folderName must not contain control characters");
   }
   const path = `/me/drive/items/${encodeURIComponent(parentFolderId)}/children`;
   const body = {
