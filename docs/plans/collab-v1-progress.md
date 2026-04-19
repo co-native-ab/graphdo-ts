@@ -105,21 +105,26 @@ Append one row per cross-host browser smoke run. Reference:
 
 ### Open follow-ups from smoke runs
 
-- **F1 — `logout` does not acquire the form-busy slot.** Only
-  `login` and `todo_select_list` acquire via `acquireFormSlot`
-  (see `src/tools/login.ts` and `src/tools/config.ts`); `logout`
-  opens its branded confirmation page outside the lock. Concurrent
-  `logout` while a picker is in flight therefore opens a second
-  browser page instead of returning `FormBusyError`. Needs a
-  design discussion: should `logout` participate in the lock for
-  consistency, or is "logout always wins" the intended UX? Capture
-  the resolution as an ADR if non-trivial. Tracked for W1 review.
-- **F2 — Conditional tool exposure in GitHub Copilot CLI.** That
-  host exposes the todo / markdown tools only after login, surfaced
-  via a `tools_changed_notice`. Not a defect — but any future
-  collab integration test or smoke matrix that interleaves those
-  tools with `login` / `logout` in Copilot CLI needs to wait for
-  the notice before assuming the tool list is stable.
+- **F1 — `logout` does not acquire the form-busy slot.** _Resolved._
+  `src/tools/login.ts` now wraps the `logout` handler in
+  `acquireFormSlot("logout")` around the call into
+  `MsalAuthenticator.logout` (which opens the branded
+  confirmation page). A concurrent `logout` while a picker /
+  login is in flight now returns `FormBusyError` carrying the
+  in-flight URL instead of opening a second browser tab. The
+  cheap "Not logged in" pre-check stays outside the slot since
+  it never opens a browser. New integration tests in
+  `test/integration/login.test.ts` cover both paths. The smoke
+  checklist gains S7a to exercise the cross-tool case
+  manually. No ADR required — this is a straightforward
+  consistency fix; the §5.3 single-in-flight contract already
+  documents the intent.
+- **F2 — Conditional tool exposure in GitHub Copilot CLI.** _Documented._
+  Captured in `cross-host-browser-smoke.md` under the
+  pre-flight "GitHub Copilot CLI tool visibility" note so
+  future smoke runs explicitly wait for `tools_changed_notice`
+  before interleaving scope-gated tools with login/logout. No
+  source change — this is intended dynamic-tools behaviour.
 
 ## ADR ledger
 

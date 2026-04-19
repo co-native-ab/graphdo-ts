@@ -129,6 +129,9 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
         },
       },
       async (_args, { signal }) => {
+        // Cheap pre-check: don't hold the form slot if there is no
+        // session to clear (the logout flow short-circuits in that
+        // case and never opens a browser).
         try {
           if (!(await config.authenticator.isAuthenticated(signal))) {
             return {
@@ -140,6 +143,25 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
               ],
             };
           }
+        } catch (error: unknown) {
+          return formatError("logout", error, { prefix: "Logout failed: " });
+        }
+
+        // Acquire the form-factory slot before invoking the underlying
+        // logout flow. `MsalAuthenticator.logout` opens a branded
+        // confirmation page in the browser, so without the slot a
+        // concurrent picker / login form could open a second tab on
+        // top of the in-flight form.
+        let slot: FormSlot;
+        try {
+          slot = acquireFormSlot("logout");
+        } catch (error: unknown) {
+          if (error instanceof FormBusyError) {
+            return formatError("logout", error);
+          }
+          throw error;
+        }
+        try {
           await config.authenticator.logout(signal);
           config.onScopesChanged?.([]);
           return {
@@ -157,6 +179,8 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
             };
           }
           return formatError("logout", error, { prefix: "Logout failed: " });
+        } finally {
+          slot.release();
         }
       },
     ),

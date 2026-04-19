@@ -1,6 +1,6 @@
 // Integration tests for tool discovery and login flow.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import {
   setupIntegrationEnv,
   teardownIntegrationEnv,
@@ -11,6 +11,7 @@ import {
   type IntegrationEnv,
   type ToolResult,
 } from "./helpers.js";
+import { acquireFormSlot, resetFormFactoryForTest } from "../../src/tools/collab-forms.js";
 
 let env: IntegrationEnv;
 
@@ -183,6 +184,75 @@ describe("integration: discovery & login", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual(["auth_status", "login", "logout"]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Form-busy lock — F1 follow-up: logout also acquires the slot
+  // -------------------------------------------------------------------------
+
+  describe("form-busy lock", () => {
+    afterEach(() => {
+      // Belt-and-braces — release any slot left held if a test fails
+      // before its own cleanup runs.
+      resetFormFactoryForTest();
+    });
+
+    it("logout returns FormBusyError when another form holds the slot", async () => {
+      const authed = new MockAuthenticator({ token: "still-valid" });
+      const client = await createTestClient(env, authed);
+
+      // Simulate another browser form (e.g. an in-flight todo_select_list
+      // picker) holding the form-factory slot.
+      const other = acquireFormSlot("todo_select_list");
+      other.setUrl("http://127.0.0.1:54321");
+
+      try {
+        const result = (await client.callTool({
+          name: "logout",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBe(true);
+        const text = firstText(result);
+        expect(text).toContain("Another approval form is already open");
+        expect(text).toContain("http://127.0.0.1:54321");
+        expect(text).toContain("todo_select_list");
+      } finally {
+        other.release();
+      }
+
+      // After the other form releases, logout works again.
+      const ok = (await client.callTool({
+        name: "logout",
+        arguments: {},
+      })) as ToolResult;
+      expect(ok.isError).toBeFalsy();
+      expect(firstText(ok)).toContain("Logged out");
+    });
+
+    it("logout short-circuits without acquiring the slot when not authenticated", async () => {
+      const auth = new MockAuthenticator();
+      await auth.logout(testSignal());
+      const client = await createTestClient(env, auth);
+
+      // Hold the slot from another form — the cheap "not logged in"
+      // pre-check must not contend for the slot since it never opens
+      // a browser.
+      const other = acquireFormSlot("todo_select_list");
+      other.setUrl("http://127.0.0.1:54321");
+
+      try {
+        const result = (await client.callTool({
+          name: "logout",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        expect(firstText(result)).toContain("Not logged in");
+      } finally {
+        other.release();
+      }
     });
   });
 });
