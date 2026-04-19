@@ -24,6 +24,7 @@
 
 import type { GraphClient } from "../graph/client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "../graph/client.js";
+import type { ValidatedGraphId } from "../graph/ids.js";
 import type { DriveItem } from "../graph/types.js";
 import { DriveItemSchema, GraphListResponseSchema } from "../graph/types.js";
 import { logger } from "../logger.js";
@@ -48,12 +49,9 @@ const DriveItemListSchema = GraphListResponseSchema(DriveItemSchema);
  */
 export async function getDriveItem(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (itemId.length === 0) {
-    throw new Error("itemId must not be empty");
-  }
   const path = `/me/drive/items/${encodeURIComponent(itemId)}`;
   const response = await client.request(HttpMethod.GET, path, signal);
   return parseResponse(response, DriveItemSchema, HttpMethod.GET, path);
@@ -67,12 +65,9 @@ export async function getDriveItem(
  */
 async function listChildren(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  if (folderId.length === 0) {
-    throw new Error("folderId must not be empty");
-  }
   const items: DriveItem[] = [];
   let path: string | null = `/me/drive/items/${encodeURIComponent(folderId)}/children?$top=200`;
   while (path !== null) {
@@ -111,7 +106,7 @@ function nextRelativePath(absoluteUrl: string | undefined): string | null {
  */
 export async function listRootMarkdownFiles(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
   logger.debug("listing root markdown files", { folderId });
@@ -130,7 +125,7 @@ export async function listRootMarkdownFiles(
  */
 export async function findChildFolderByName(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   name: string,
   signal: AbortSignal,
 ): Promise<DriveItem | null> {
@@ -169,13 +164,10 @@ export class FolderAlreadyExistsError extends Error {
  */
 export async function createChildFolder(
   client: GraphClient,
-  parentFolderId: string,
+  parentFolderId: ValidatedGraphId,
   folderName: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (parentFolderId.length === 0) {
-    throw new Error("parentFolderId must not be empty");
-  }
   if (folderName.length === 0) {
     throw new Error("folderName must not be empty");
   }

@@ -16,6 +16,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { getMyDrive } from "../graph/markdown.js";
+import { validateGraphId } from "../graph/ids.js";
 import {
   AuthenticationRequiredError,
   NoMarkdownFileError,
@@ -195,7 +196,12 @@ async function runInitProject(
   }
 
   const result = await handle.waitForSelection;
-  const chosenFolderId = result.selected.id;
+  // The picker option `id` started life as a Graph drive item id surfaced
+  // by `listRootFolders`. Re-validate at this boundary so the value is
+  // brand-typed before it threads through every collab Graph helper
+  // (defence in depth — if a future picker option source produced a
+  // non-Graph id we'd fail loudly here rather than splice into a URL).
+  const chosenFolderId = validateGraphId("chosenFolderId", result.selected.id);
 
   // ------- Validate folder contents -------
 
@@ -262,7 +268,17 @@ async function runInitProject(
     createdBy: { displayName: createdByDisplayName },
     createdAt: toIsoOffset(now()),
   };
-  const sentinelItem = await writeSentinel(client, collabFolder.id, sentinelDoc, signal);
+  const sentinelItem = await writeSentinel(
+    client,
+    // The `.collab/` folder id was just minted by `createChildFolder`
+    // (a Graph round-trip whose response is Zod-validated). Re-validate
+    // here so the value is brand-typed before it threads into the
+    // sentinel write — defence in depth against a future schema change
+    // that lets a malformed id through.
+    validateGraphId("collabFolder.id", collabFolder.id),
+    sentinelDoc,
+    signal,
+  );
 
   // ------- Record local metadata + recents -------
 

@@ -224,11 +224,17 @@ export async function loadAndValidateTodoConfig(
  * Throws a user-friendly error if missing or invalid (e.g. empty, `/`, or
  * containing path separators — in which case the user is directed to re-run
  * the picker, which always writes a single-folder opaque ID).
+ *
+ * Re-types `markdown.rootFolderId` as {@link ValidatedGraphId} so callers
+ * can pass it straight into Graph helpers without re-validating. A
+ * persisted value that fails {@link validateGraphId} (a hand-edited
+ * config.json) raises the same "use the picker" error as the missing
+ * case, rather than splicing into a Graph URL downstream.
  */
 export async function loadAndValidateMarkdownConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { markdown: { rootFolderId: string } & MarkdownConfig }> {
+): Promise<Config & { markdown: { rootFolderId: ValidatedGraphId } & MarkdownConfig }> {
   const config = await loadConfig(dir, signal);
   const rootFolderId = config?.markdown?.rootFolderId;
   const err = markdownRootFolderIdError(rootFolderId);
@@ -241,7 +247,19 @@ export async function loadAndValidateMarkdownConfig(
       `markdown root folder ${detail} - use the markdown_select_root_folder tool to choose one`,
     );
   }
-  return config;
+  let validatedRootId: ValidatedGraphId;
+  try {
+    validatedRootId = validateGraphId("markdown.rootFolderId", config.markdown.rootFolderId);
+  } catch (cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `markdown root folder is corrupted (${reason}) - use the markdown_select_root_folder tool to re-select one`,
+    );
+  }
+  return {
+    ...config,
+    markdown: { ...config.markdown, rootFolderId: validatedRootId },
+  };
 }
 
 /**
