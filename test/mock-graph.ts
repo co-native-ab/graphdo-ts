@@ -824,6 +824,77 @@ async function handleDriveRequest(
     return true;
   }
 
+  // POST /me/drive/items/{folderId}/children — create a child folder.
+  // Used by the collab `session_init_project` flow to create the
+  // `.collab/` subfolder under the chosen project root. Honours
+  // `@microsoft.graph.conflictBehavior=fail` (409 on collision) so the
+  // init flow can race deterministically against a concurrent
+  // initialiser.
+  if (method === "POST" && segments.length === 5 && segments[4] === "children") {
+    const parentId = decodeURIComponent(segments[3] ?? "");
+    const parentExists =
+      state.driveFolderChildren.has(parentId) ||
+      state.driveRootChildren.some((i) => i.id === parentId);
+    if (!parentExists) {
+      errorResponse(res, 404, "itemNotFound", `folder ${parentId} not found`);
+      return true;
+    }
+    const raw = await readBody(req);
+    let payload: { name?: string; folder?: object; "@microsoft.graph.conflictBehavior"?: string };
+    try {
+      payload = JSON.parse(raw) as typeof payload;
+    } catch {
+      errorResponse(res, 400, "invalidRequest", "request body is not valid JSON");
+      return true;
+    }
+    if (typeof payload.name !== "string" || payload.name.length === 0) {
+      errorResponse(res, 400, "invalidRequest", "name is required");
+      return true;
+    }
+    if (payload.folder === undefined) {
+      errorResponse(res, 400, "invalidRequest", "folder facet is required");
+      return true;
+    }
+    const existing = state.driveFolderChildren.get(parentId) ?? [];
+    const collide = existing.find((c) => c.name.toLowerCase() === payload.name?.toLowerCase());
+    if (collide && payload["@microsoft.graph.conflictBehavior"] === "fail") {
+      errorResponse(
+        res,
+        409,
+        "nameAlreadyExists",
+        `An item with the name "${payload.name}" already exists in this folder.`,
+      );
+      return true;
+    }
+    if (collide) {
+      jsonResponse(res, 200, {
+        id: collide.id,
+        name: collide.name,
+        folder: collide.folder ?? { childCount: 0 },
+      });
+      return true;
+    }
+    const newId = state.genId();
+    const created: MockDriveFile = {
+      id: newId,
+      name: payload.name,
+      folder: { childCount: 0 },
+      lastModifiedDateTime: new Date().toISOString(),
+    };
+    existing.push(created);
+    state.driveFolderChildren.set(parentId, existing);
+    // Register the new folder so subsequent uploads / listings can target it
+    // by id (mirroring what real OneDrive does once a folder is created).
+    state.driveFolderChildren.set(newId, []);
+    jsonResponse(res, 201, {
+      id: created.id,
+      name: created.name,
+      folder: created.folder,
+      lastModifiedDateTime: created.lastModifiedDateTime,
+    });
+    return true;
+  }
+
   // DELETE /me/drive/items/{id}
   if (method === "DELETE" && segments.length === 4) {
     const parentId = state.findParentFolderId(itemId);
