@@ -255,6 +255,47 @@ export class CollabCTagMismatchError extends Error {
   }
 }
 
+/**
+ * Raised by `collab_write` (W3 Day 2) when the active session has
+ * exhausted its write budget (`writesUsed >= writeBudgetTotal`).
+ *
+ * Per `docs/plans/collab-v1.md` §5.2 the write budget is enforced by the
+ * tool layer — the underlying Graph helper does not know about budgets.
+ * The error carries the current state so the agent can surface the
+ * numbers verbatim and direct the human at `session_renew` (which
+ * resets the clock but **not** the counters per §2.2) or at starting a
+ * new session.
+ */
+export class BudgetExhaustedError extends Error {
+  constructor(
+    public readonly writesUsed: number,
+    public readonly writeBudgetTotal: number,
+  ) {
+    super(
+      `Write budget exhausted: ${writesUsed} / ${writeBudgetTotal} writes used in this session. ` +
+        "Stop the MCP server (or wait for TTL expiry) and start a new session to continue.",
+    );
+    this.name = "BudgetExhaustedError";
+  }
+}
+
+/**
+ * Raised by `collab_write` and `collab_create_proposal` (W4 Day 2) when
+ * a `source: "external"` re-approval form is dismissed by the human
+ * (cancel button, browser close, timeout). Per `docs/plans/collab-v1.md`
+ * §5.2.4 the write is **not** issued in this case — no Graph round-trip,
+ * no counter increments.
+ */
+export class ExternalSourceDeclinedError extends Error {
+  constructor(public readonly path: string) {
+    super(
+      `External-source write to "${path}" was declined at the browser approval form. ` +
+        "Re-issue collab_write only if you genuinely want to proceed.",
+    );
+    this.name = "ExternalSourceDeclinedError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but

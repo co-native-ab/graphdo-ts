@@ -78,7 +78,8 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("session_status");
     expect(names).toContain("collab_read");
     expect(names).toContain("collab_list_files");
-    expect(names).toHaveLength(29);
+    expect(names).toContain("collab_write");
+    expect(names).toHaveLength(30);
   });
 
   // -------------------------------------------------------------------------

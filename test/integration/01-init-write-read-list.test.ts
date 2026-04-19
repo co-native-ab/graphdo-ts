@@ -257,7 +257,7 @@ describe("01-init-write-read-list", () => {
   // -------------------------------------------------------------------------
 
   it.todo(
-    "after `collab_write` lands (W3 Day 2): writing the authoritative file injects frontmatter `doc_id`, bumps cTag, appends an audit entry",
+    "after the §3.6 audit writer lands (W3 Day 3): writing the authoritative file appends an audit entry",
   );
 
   describe("collab_read + collab_list_files (W2 Day 4)", () => {
@@ -325,6 +325,138 @@ This is the body content.
       expect(listText).toContain("[authoritative]");
       // .collab folder should NOT appear in listing
       expect(listText).not.toContain(".collab");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // collab_write (W3 Day 2)
+  // -------------------------------------------------------------------------
+
+  describe("collab_write (W3 Day 2)", () => {
+    it("writing the authoritative file injects frontmatter doc_id and bumps cTag", async () => {
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({
+        token: "init-token",
+        username: "alice@example.com",
+      });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      const initResult = (await c.callTool({
+        name: "session_init_project",
+        arguments: {},
+      })) as ToolResult;
+      expect(initResult.isError).toBeFalsy();
+
+      // Read the current cTag of the authoritative file.
+      const readResult = (await c.callTool({
+        name: "collab_read",
+        arguments: { path: "spec.md" },
+      })) as ToolResult;
+      expect(readResult.isError).toBeFalsy();
+      const readText = firstText(readResult);
+      const cTagMatch = /cTag: (\S+)/.exec(readText);
+      const initialCTag = cTagMatch?.[1];
+      expect(initialCTag).toBeDefined();
+      expect(initialCTag).not.toBe("unknown");
+
+      // Write replacement content WITHOUT frontmatter — the tool must
+      // mint and inject a fresh canonical frontmatter block.
+      const writeResult = (await c.callTool({
+        name: "collab_write",
+        arguments: {
+          path: "spec.md",
+          content: "# Updated Spec\n\nNew body content.\n",
+          cTag: initialCTag,
+          source: "chat",
+        },
+      })) as ToolResult;
+      expect(writeResult.isError).toBeFalsy();
+      const writeText = firstText(writeResult);
+      expect(writeText).toContain("wrote: spec.md");
+      expect(writeText).toContain("isAuthoritative: true");
+      expect(writeText).toContain("kind: replaced");
+      expect(writeText).toContain("source: chat");
+      expect(writeText).toContain("writes: 1 / 50");
+      expect(writeText).toContain("source counters: chat=1");
+
+      // Inspect the live file content directly: must have a valid
+      // frontmatter envelope with a fresh doc_id and the new body.
+      const specFile = env.graphState.driveFolderChildren
+        .get("folder-proj")
+        ?.find((f) => f.id === "file-spec");
+      expect(specFile?.content).toMatch(/^---\n/);
+      expect(specFile?.content).toMatch(/doc_id: "[0-9A-HJKMNP-TV-Z]{26}"/);
+      expect(specFile?.content).toContain("# Updated Spec");
+      expect(specFile?.content).toContain("New body content.");
+      // cTag has been bumped.
+      expect(specFile?.cTag).not.toBe(initialCTag);
+
+      // Re-reading exposes the freshly minted doc_id and the new cTag.
+      const reread = (await c.callTool({
+        name: "collab_read",
+        arguments: { path: "spec.md" },
+      })) as ToolResult;
+      const rereadText = firstText(reread);
+      expect(rereadText).toContain("isAuthoritative: true");
+      expect(rereadText).toContain("doc_id");
+      expect(rereadText).toMatch(/cTag: (?!unknown).+/);
+    });
+
+    it("returns CollabCTagMismatchError when the supplied cTag is stale", async () => {
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({ token: "init-token" });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      await c.callTool({ name: "session_init_project", arguments: {} });
+
+      const writeResult = (await c.callTool({
+        name: "collab_write",
+        arguments: {
+          path: "spec.md",
+          content: "# Updated\n",
+          cTag: '"{00000000-0000-0000-0000-000000000000,1}"',
+          source: "chat",
+        },
+      })) as ToolResult;
+      expect(writeResult.isError).toBe(true);
+      const text = firstText(writeResult);
+      expect(text).toContain("cTag mismatch");
+      // No write was issued — file content unchanged.
+      const specFile = env.graphState.driveFolderChildren
+        .get("folder-proj")
+        ?.find((f) => f.id === "file-spec");
+      expect(specFile?.content).toBe("# spec\n");
+    });
+
+    it("creates a non-authoritative file with byPath when no cTag is supplied", async () => {
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({ token: "init-token" });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      await c.callTool({ name: "session_init_project", arguments: {} });
+
+      const writeResult = (await c.callTool({
+        name: "collab_write",
+        arguments: {
+          path: "drafts/scratch.md",
+          content: "# Scratch\n",
+          source: "chat",
+        },
+      })) as ToolResult;
+      expect(writeResult.isError).toBeFalsy();
+      const text = firstText(writeResult);
+      expect(text).toContain("wrote: scratch.md");
+      expect(text).toContain("kind: created");
+      expect(text).toContain("isAuthoritative: false");
+
+      // The drafts/ folder was lazily created and contains scratch.md.
+      const projectChildren = env.graphState.driveFolderChildren.get("folder-proj") ?? [];
+      const draftsFolder = projectChildren.find((c) => c.name === "drafts");
+      expect(draftsFolder).toBeDefined();
+      const draftsChildren = env.graphState.driveFolderChildren.get(draftsFolder?.id ?? "") ?? [];
+      const scratch = draftsChildren.find((c) => c.name === "scratch.md");
+      expect(scratch).toBeDefined();
+      expect(scratch?.content).toBe("# Scratch\n");
     });
   });
 });
