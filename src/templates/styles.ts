@@ -401,16 +401,3 @@ export const PICKER_STYLE = `
       .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
       .page-status { color: ${dark.text}; }
     }`;
-
-// ---------------------------------------------------------------------------
-// HTML utility
-// ---------------------------------------------------------------------------
-
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}

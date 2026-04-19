@@ -1,6 +1,7 @@
 // HTML template for the browser-based option picker page.
 
-import { escapeHtml, PICKER_STYLE } from "./styles.js";
+import { PICKER_STYLE } from "./styles.js";
+import { escapeHtml } from "./escape.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 

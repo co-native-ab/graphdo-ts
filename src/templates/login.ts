@@ -1,6 +1,7 @@
 // HTML templates for the MSAL login loopback pages.
 
-import { escapeHtml, LOGIN_STYLE, SUCCESS_STYLE, ERROR_STYLE } from "./styles.js";
+import { LOGIN_STYLE, SUCCESS_STYLE, ERROR_STYLE } from "./styles.js";
+import { escapeHtml } from "./escape.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 

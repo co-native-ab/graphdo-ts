@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: _bootstrap — not yet started_
-Current milestone: _none — pending green-light per `collab-v1.md` §12.7_
-Next milestone: W0 Day 1 — `escapeHtml` helper + template audit
+Last updated: W0 Day 1 — `escapeHtml` helper + template audit (complete, awaiting merge)
+Current milestone: _none — W0 Day 1 complete; W0 Day 2 starts in the next PR_
+Next milestone: W0 Day 2 — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -11,11 +11,9 @@ work reads this file first.
 
 ## Completed
 
-| Milestone | PR  | Merged | Notes |
-| --------- | --- | ------ | ----- |
-
-_(No milestones complete. Bootstrap PR adds this file and ADR-005;
-W0 Day 1 starts in the next PR.)_
+| Milestone | PR                                                        | Merged  | Notes                                                                                                                                                                       |
+| --------- | --------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | pending | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added. |
 
 ## In flight
 
@@ -31,7 +29,7 @@ back to its DoD in the plan.
 
 ### Week 0 (prerequisite hardening)
 
-- [ ] **W0 Day 1** — `escapeHtml` helper + template audit
+- [x] **W0 Day 1** — `escapeHtml` helper + template audit _(complete in [#33](https://github.com/co-native-ab/graphdo-ts/pull/33))_
 - [ ] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
 - [ ] **W0 Day 3** — Form-factory module (`src/tools/collab-forms.ts`)
 - [ ] **W0 Days 4–5** — buffer (W0 hardening test rows; cross-host browser smoke)
