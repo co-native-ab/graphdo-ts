@@ -10,9 +10,21 @@ import type { IncomingMessage, ServerResponse, Server } from "node:http";
 import type { AuthorizeResponse } from "@azure/msal-node";
 import type { ILoopbackClient } from "@azure/msal-node";
 
+import { z } from "zod";
 import { logger } from "./logger.js";
 import { UserCancelledError } from "./errors.js";
 import { landingPageHtml, successPageHtml, errorPageHtml } from "./templates/login.js";
+import {
+  buildLoopbackCsp,
+  generateRandomToken,
+  validateLoopbackPostHeaders,
+  verifyCsrfToken,
+} from "./loopback-security.js";
+
+/** Maximum POST body size (1 MB). */
+const MAX_BODY_SIZE = 1_048_576;
+
+const CancelSchema = z.object({ csrfToken: z.string() });
 
 // ---------------------------------------------------------------------------
 // LoginLoopbackClient
@@ -35,6 +47,8 @@ export class LoginLoopbackClient implements ILoopbackClient {
   private server: Server | undefined;
   private authUrl: string | undefined;
   private serverReady: Promise<void> | undefined;
+  /** Per-server CSRF token; required on every state-changing POST. */
+  private readonly csrfToken: string = generateRandomToken();
 
   /** Set the Microsoft auth URL (called from the openBrowser wrapper). */
   setAuthUrl(url: string): void {
@@ -99,6 +113,21 @@ export class LoginLoopbackClient implements ILoopbackClient {
   getAuthUrl(): string | undefined {
     return this.authUrl;
   }
+
+  /** Expose CSRF token for request handler / templates. */
+  getCsrfToken(): string {
+    return this.csrfToken;
+  }
+
+  /** Allowed Host header values for POST requests. MSAL's redirect URI uses
+   *  `localhost`, but some browsers normalise to `127.0.0.1`; accept both. */
+  getAllowedHosts(): string[] {
+    if (!this.server?.listening) return [];
+    const address = this.server.address();
+    if (!address || typeof address === "string") return [];
+    const port = String(address.port);
+    return [`localhost:${port}`, `127.0.0.1:${port}`];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,14 +146,19 @@ function handleRequest(
   const parsedUrl = new URL(rawUrl, redirectUri);
   const pathname = parsedUrl.pathname;
 
+  // Per-request CSP nonce. Hardened CSP forbids unsafe-inline.
+  const nonce = generateRandomToken();
+
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'",
-  );
+  res.setHeader("Content-Security-Policy", buildLoopbackCsp(nonce));
 
   // Auth code redirect from Microsoft: /?code=...&state=...
+  // This is a top-level cross-site GET originating from login.microsoftonline.com,
+  // so Sec-Fetch-Site / Origin / CSRF checks are intentionally skipped. The
+  // path is read-only with respect to the loopback server's own state — it
+  // only resolves the in-flight Promise with the auth code that MSAL will
+  // exchange server-side for tokens.
   if (pathname === "/" && parsedUrl.searchParams.has("code")) {
     const authResponse = parseAuthResponse(parsedUrl.searchParams);
     // Redirect to /done to strip the code from browser history
@@ -142,6 +176,7 @@ function handleRequest(
       parsedUrl.searchParams.get("error_description") ??
         parsedUrl.searchParams.get("error") ??
         "Unknown error",
+      nonce,
     );
     resolve(authResponse);
     return;
@@ -149,27 +184,77 @@ function handleRequest(
 
   // Landing page
   if (pathname === "/" && req.method === "GET") {
-    serveLandingPage(res, client);
+    serveLandingPage(res, client, nonce);
     return;
   }
 
   // Success page (shown after redirect from auth code capture)
   if (pathname === "/done" && req.method === "GET") {
-    serveSuccessPage(res);
+    serveSuccessPage(res, nonce);
     return;
   }
 
-  // Cancel login
+  // Cancel login — state-changing POST, must pass full hardening.
   if (pathname === "/cancel" && req.method === "POST") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    client.closeServer();
-    reject(new UserCancelledError("Login cancelled by user"));
+    handleCancel(req, res, client, reject);
     return;
   }
 
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
+}
+
+function handleCancel(
+  req: IncomingMessage,
+  res: ServerResponse,
+  client: LoginLoopbackClient,
+  reject: (err: Error) => void,
+): void {
+  const headerCheck = validateLoopbackPostHeaders(req, {
+    allowedHosts: client.getAllowedHosts(),
+  });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
+  let body = "";
+  let size = 0;
+  req.on("data", (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_BODY_SIZE) {
+      res.writeHead(413, { "Content-Type": "text/plain" });
+      res.end("Payload Too Large");
+      req.destroy();
+      return;
+    }
+    body += chunk.toString();
+  });
+  req.on("end", () => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("Invalid request body");
+      return;
+    }
+    const parseResult = CancelSchema.safeParse(parsed);
+    if (
+      !parseResult.success ||
+      !verifyCsrfToken(client.getCsrfToken(), parseResult.data.csrfToken)
+    ) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden: invalid CSRF token");
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    client.closeServer();
+    reject(new UserCancelledError("Login cancelled by user"));
+  });
 }
 
 function parseAuthResponse(params: URLSearchParams): AuthorizeResponse {
@@ -191,23 +276,24 @@ function serveHtml(res: ServerResponse, html: string): void {
   res.end(html);
 }
 
-function serveLandingPage(res: ServerResponse, client: LoginLoopbackClient): void {
+function serveLandingPage(res: ServerResponse, client: LoginLoopbackClient, nonce: string): void {
   const authUrl = client.getAuthUrl();
   if (!authUrl) {
     serveErrorPage(
       res,
       "Authentication URL is not available. Please close this window and try again.",
+      nonce,
     );
     return;
   }
 
-  serveHtml(res, landingPageHtml(authUrl));
+  serveHtml(res, landingPageHtml(authUrl, { csrfToken: client.getCsrfToken(), nonce }));
 }
 
-function serveSuccessPage(res: ServerResponse): void {
-  serveHtml(res, successPageHtml());
+function serveSuccessPage(res: ServerResponse, nonce: string): void {
+  serveHtml(res, successPageHtml({ nonce }));
 }
 
-function serveErrorPage(res: ServerResponse, errorMessage: string): void {
-  serveHtml(res, errorPageHtml(errorMessage));
+function serveErrorPage(res: ServerResponse, errorMessage: string, nonce: string): void {
+  serveHtml(res, errorPageHtml(errorMessage, { nonce }));
 }

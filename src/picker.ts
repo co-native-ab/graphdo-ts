@@ -11,6 +11,12 @@ import { z } from "zod";
 import { logger } from "./logger.js";
 import { UserCancelledError } from "./errors.js";
 import { pickerPageHtml } from "./templates/picker.js";
+import {
+  buildLoopbackCsp,
+  generateRandomToken,
+  validateLoopbackPostHeaders,
+  verifyCsrfToken,
+} from "./loopback-security.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -104,7 +110,12 @@ export function startBrowserPicker(
     // Mutable view of the currently-valid options. Refresh replaces this, and
     // /select validates against it, so a selection can never resolve to a
     // stale option that is no longer offered.
-    const state: PickerState = { options: [...config.options], onSelect: config.onSelect };
+    const state: PickerState = {
+      options: [...config.options],
+      onSelect: config.onSelect,
+      csrfToken: generateRandomToken(),
+      hostHeader: "",
+    };
 
     const server = createServer((req, res) => {
       handleRequest(req, res, config, state, server, onSelected, onError, signal);
@@ -124,7 +135,8 @@ export function startBrowserPicker(
         rejectHandle(err);
         return;
       }
-      const url = `http://127.0.0.1:${String(addr.port)}`;
+      state.hostHeader = `127.0.0.1:${String(addr.port)}`;
+      const url = `http://${state.hostHeader}`;
       logger.info("picker server started", { url });
       resolveHandle({ url, waitForSelection });
     });
@@ -152,6 +164,10 @@ export function startBrowserPicker(
 interface PickerState {
   options: PickerOption[];
   onSelect: PickerConfig["onSelect"];
+  /** Per-server CSRF token. Required on every state-changing POST. */
+  csrfToken: string;
+  /** `127.0.0.1:<port>` — the only Host header value the server will accept. */
+  hostHeader: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,15 +186,16 @@ function handleRequest(
 ): void {
   const url = req.url ?? "/";
 
+  // Per-request CSP nonce. The hardened CSP forbids unsafe-inline, so the
+  // inline <style> and <script> in the rendered page must carry this nonce.
+  const nonce = generateRandomToken();
+
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'",
-  );
+  res.setHeader("Content-Security-Policy", buildLoopbackCsp(nonce));
 
   if (req.method === "GET" && url === "/") {
-    servePickerPage(res, config, state);
+    servePickerPage(res, config, state, nonce);
     return;
   }
 
@@ -193,12 +210,7 @@ function handleRequest(
   }
 
   if (req.method === "POST" && url === "/cancel") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    setTimeout(() => {
-      server.close();
-    }, 100);
-    onError(new UserCancelledError("Selection cancelled by user"));
+    handleCancel(req, res, state, server, onError);
     return;
   }
 
@@ -206,7 +218,12 @@ function handleRequest(
   res.end("Not Found");
 }
 
-function servePickerPage(res: ServerResponse, config: PickerConfig, state: PickerState): void {
+function servePickerPage(
+  res: ServerResponse,
+  config: PickerConfig,
+  state: PickerState,
+  nonce: string,
+): void {
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
   });
@@ -218,6 +235,8 @@ function servePickerPage(res: ServerResponse, config: PickerConfig, state: Picke
       filterPlaceholder: config.filterPlaceholder,
       createLink: config.createLink,
       refreshEnabled: config.refreshOptions !== undefined,
+      csrfToken: state.csrfToken,
+      nonce,
     }),
   );
 }
@@ -254,7 +273,13 @@ function handleGetOptions(
   })();
 }
 
-const SelectionSchema = z.object({ id: z.string(), label: z.string() });
+const SelectionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  csrfToken: z.string(),
+});
+
+const CancelSchema = z.object({ csrfToken: z.string() });
 
 function handleSelection(
   req: IncomingMessage,
@@ -264,6 +289,13 @@ function handleSelection(
   onSelected: (result: PickerResult) => void,
   signal: AbortSignal,
 ): void {
+  const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
   let body = "";
   let size = 0;
   req.on("data", (chunk: Buffer) => {
@@ -285,7 +317,13 @@ function handleSelection(
           res.end("Invalid request body");
           return;
         }
-        const { id } = parseResult.data;
+        const { id, csrfToken } = parseResult.data;
+
+        if (!verifyCsrfToken(state.csrfToken, csrfToken)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden: invalid CSRF token");
+          return;
+        }
 
         // Validate the selection against the server's current (possibly
         // refreshed) option set so the user can't smuggle in a stale ID.
@@ -318,5 +356,56 @@ function handleSelection(
         res.end(`Error: ${message}`);
       }
     })();
+  });
+}
+
+function handleCancel(
+  req: IncomingMessage,
+  res: ServerResponse,
+  state: PickerState,
+  server: Server,
+  onError: (err: Error) => void,
+): void {
+  const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
+  let body = "";
+  let size = 0;
+  req.on("data", (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_BODY_SIZE) {
+      res.writeHead(413, { "Content-Type": "text/plain" });
+      res.end("Payload Too Large");
+      req.destroy();
+      return;
+    }
+    body += chunk.toString();
+  });
+  req.on("end", () => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("Invalid request body");
+      return;
+    }
+    const parseResult = CancelSchema.safeParse(parsed);
+    if (!parseResult.success || !verifyCsrfToken(state.csrfToken, parseResult.data.csrfToken)) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden: invalid CSRF token");
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    setTimeout(() => {
+      server.close();
+    }, 100);
+    onError(new UserCancelledError("Selection cancelled by user"));
   });
 }
