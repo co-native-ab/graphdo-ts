@@ -44,6 +44,17 @@ MSAL Node exposes two candidate identifiers on
    recommended by Microsoft's own audit-log guidance for "who did
    this".
 
+The `oid` claim is also present inside the access token, but per
+OAuth 2.0 / OIDC the access token is opaque to the client — only
+the resource server (Microsoft Graph) is supposed to read it, and
+Microsoft documents that v2.0 access tokens may be encrypted and
+must not be parsed by client applications. The id token, by
+contrast, is the OIDC artifact designed precisely for the client
+to learn about the signed-in user, and MSAL Node already parses it
+into `AuthenticationResult.idTokenClaims` for free. See the
+"Read `oid` from the access token instead of the id token"
+alternative below for the full rationale.
+
 The collab v1 `docs/plans/collab-v1.md` §10 OQ-6 closed Round 3
 with the explicit decision to pin `userOid = idTokenClaims.oid`.
 ADR-0005 (decision 15) records that choice; this ADR codifies the
@@ -167,6 +178,34 @@ relevant to `auth_status`, which runs on the user's own workstation.
   in the id token MSAL just parsed. The id-token claim is
   authoritative and free.
 
+### Read `oid` from the access token instead of the id token
+
+- **ALT-005a**: **Description**: The `oid` claim is also present in
+  the access token issued by Entra. We could decode the access
+  token's JWT body and read `oid` from there, removing any
+  dependency on the id token (and thereby on the `openid` /
+  `profile` scopes that produce one).
+- **ALT-005b**: **Rejection Reason**: Per the OAuth 2.0 / OpenID
+  Connect contract, **access tokens are opaque to the client**. The
+  id token is the artifact OIDC defines for the client to learn
+  about the signed-in user; the access token is for the resource
+  server (Microsoft Graph in our case). Microsoft documents this
+  explicitly for v2.0 endpoints: client applications **must not**
+  inspect or take a dependency on the access-token format, and
+  Entra reserves the right to encrypt access tokens (and already
+  does for some resources, in which case the token is not even a
+  readable JWT from the client's side). MSAL Node already parses
+  the id token for us and exposes the result as
+  `AuthenticationResult.idTokenClaims` — no JWT decoding, no
+  signature-validation gymnastics. Reading `oid` from the id token
+  is therefore both the conventional and the lower-risk path: it
+  uses the artifact OIDC designed for this purpose, costs zero
+  extra parsing, and stays correct even if Microsoft starts
+  encrypting Graph access tokens for our app. The `openid` scope is
+  always implicitly requested (MSAL Node adds it for any
+  interactive flow), so an id token is always present in the
+  responses we already get.
+
 ### Add `userOid` directly to `ServerConfig`
 
 - **ALT-005**: **Description**: Have `createMcpServer` resolve
@@ -215,3 +254,5 @@ relevant to `auth_status`, which runs on the user's own workstation.
 - **REF-002**: [`docs/plans/collab-v1.md`](../plans/collab-v1.md) §9 W1 Day 1 — DoD that this ADR satisfies; §10 OQ-6 — Round-3 rationale.
 - **REF-003**: [Microsoft Entra — id token claims reference (`oid`)](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference) — canonical definition of the `oid` claim used as `userOid`.
 - **REF-004**: [MSAL Node — `AccountInfo`](https://learn.microsoft.com/en-us/javascript/api/@azure/msal-node/) — surface that exposes `localAccountId` and (optionally) `idTokenClaims`; clarifies why we prefer the latter.
+- **REF-005**: [Microsoft identity platform — access tokens (v2.0)](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens) — documents that access tokens are opaque to client applications, may be encrypted, and must not be parsed by clients. Motivates reading `oid` from the id token rather than the access token.
+- **REF-006**: [OpenID Connect Core 1.0 — ID Token](https://openid.net/specs/openid-connect-core-1_0.html#IDToken) — the OIDC artifact designed for the client to learn about the signed-in user; the conventional surface for claims like `oid`/`sub`.
