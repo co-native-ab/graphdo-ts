@@ -22,7 +22,7 @@ section refers back here when it makes a security-shaped trade-off.
 
 1. Accidental destructive actions by a well-behaved agent that has been
    misled by a confused human.
-2. A hostile *web page* the user visits while an MCP session is active.
+2. A hostile _web page_ the user visits while an MCP session is active.
    It must not be able to drive the loopback approval forms (CSRF, DNS
    rebinding, port-scan-and-POST).
 3. Leakage of secrets (Bearer tokens, refresh tokens, id-token claims)
@@ -43,7 +43,7 @@ section refers back here when it makes a security-shaped trade-off.
    drafts produced both false positives (legitimate from-scratch
    rewrites) and false negatives (a malicious agent need only quote
    one shingle of real content). See §2.3 `collab_write`.
-3. A malicious *cooperator* with write access to the project folder.
+3. A malicious _cooperator_ with write access to the project folder.
    They can forge frontmatter (P1-4 below), tamper with the sentinel
    (mitigated by local pinning, see §3.2), or write garbage to the
    authoritative file. v1 has no cryptographic signing of frontmatter
@@ -81,8 +81,8 @@ section refers back here when it makes a security-shaped trade-off.
    See §2.3 for the heuristic tripwire.
 
 **Local rate limits as a security boundary.** Write budget, destructive
-budget, and renewal caps defend the *agent* against runaway loops and
-the *human* against UI fatigue. They are **not** a security boundary
+budget, and renewal caps defend the _agent_ against runaway loops and
+the _human_ against UI fatigue. They are **not** a security boundary
 against the human user, who can lift them by editing local files or
 restarting the MCP server. They **are** a security boundary against the
 agent within a single session, which is why the destructive counter is
@@ -97,18 +97,18 @@ Read in repo: all 10 tools are registered in `src/tools/markdown.ts`.
 Static metadata is grouped in a `MARKDOWN_TOOL_DEFS` array
 (`src/tools/markdown.ts:217-228`). Names and current shapes:
 
-| Tool | Inputs (zod shape) | Source |
-| --- | --- | --- |
-| `markdown_select_root_folder` | `{}` | `src/tools/markdown.ts:332-449` |
-| `markdown_list_files` | `{}` | `src/tools/markdown.ts:452-520` |
-| `markdown_get_file` | `idOrNameShape` (`itemId?`, `fileName?`) | `src/tools/markdown.ts:522-598` |
-| `markdown_create_file` | `{ fileName, content }` | `src/tools/markdown.ts:600-673` |
-| `markdown_update_file` | `idOrNameShape + { cTag, content }` | `src/tools/markdown.ts:675-811` |
-| `markdown_delete_file` | `idOrNameShape` | `src/tools/markdown.ts:813-881` |
-| `markdown_list_file_versions` | `idOrNameShape` | `src/tools/markdown.ts:883-975` |
-| `markdown_get_file_version` | `idOrNameShape + { versionId }` | `src/tools/markdown.ts:977-1063` |
+| Tool                          | Inputs (zod shape)                               | Source                            |
+| ----------------------------- | ------------------------------------------------ | --------------------------------- |
+| `markdown_select_root_folder` | `{}`                                             | `src/tools/markdown.ts:332-449`   |
+| `markdown_list_files`         | `{}`                                             | `src/tools/markdown.ts:452-520`   |
+| `markdown_get_file`           | `idOrNameShape` (`itemId?`, `fileName?`)         | `src/tools/markdown.ts:522-598`   |
+| `markdown_create_file`        | `{ fileName, content }`                          | `src/tools/markdown.ts:600-673`   |
+| `markdown_update_file`        | `idOrNameShape + { cTag, content }`              | `src/tools/markdown.ts:675-811`   |
+| `markdown_delete_file`        | `idOrNameShape`                                  | `src/tools/markdown.ts:813-881`   |
+| `markdown_list_file_versions` | `idOrNameShape`                                  | `src/tools/markdown.ts:883-975`   |
+| `markdown_get_file_version`   | `idOrNameShape + { versionId }`                  | `src/tools/markdown.ts:977-1063`  |
 | `markdown_diff_file_versions` | `idOrNameShape + { fromVersionId, toVersionId }` | `src/tools/markdown.ts:1065-1222` |
-| `markdown_preview_file` | `{ fileName }` | `src/tools/markdown.ts:1224-1296` |
+| `markdown_preview_file`       | `{ fileName }`                                   | `src/tools/markdown.ts:1224-1296` |
 
 `idOrNameShape` is defined in `src/tools/markdown.ts:255-266`. All tools
 return `{ content: [{ type: "text", text }], isError? }`. `formatError()`
@@ -131,7 +131,7 @@ Read in repo: `src/graph/markdown.ts:740-773`.
 
 - `PUT /me/drive/items/{itemId}/content` with header `If-Match: <cTag>`.
 - Body sent via `client.requestRaw(HttpMethod.PUT, path, content,
-  "text/markdown", signal, { "If-Match": cTag })`.
+"text/markdown", signal, { "If-Match": cTag })`.
 - On HTTP 412 the code does a follow-up `getDriveItem` and throws
   `MarkdownCTagMismatchError(itemId, suppliedCTag, currentItem)`
   (`src/graph/markdown.ts:667-679`).
@@ -195,7 +195,7 @@ Read in repo:
 - Tokens flow into `GraphClient` through a `TokenCredential`
   adapter created in `src/index.ts:84-86`.
 - `getMe` fetches `/me` and returns `{ id, displayName, mail,
-  userPrincipalName }` (`src/graph/mail.ts:11-15`,
+userPrincipalName }` (`src/graph/mail.ts:11-15`,
   `src/graph/types.ts:20-33`). It is currently called only by the
   `auth_status` tool flow.
 
@@ -212,7 +212,7 @@ call `GET /me` and use `User.id` (which is the Graph `id`, not the Entra
 Read in repo:
 
 - `src/loopback.ts:34-...` — `LoginLoopbackClient implements
-  ILoopbackClient`. Starts a `node:http` server on `127.0.0.1` random port,
+ILoopbackClient`. Starts a `node:http` server on `127.0.0.1` random port,
   serves a branded landing page, captures the OAuth `?code=`, returns to
   MSAL via `AuthorizeResponse`. Only used by login.
 - `src/picker.ts` — generic single-shot picker (~250 LOC). Public
@@ -249,7 +249,7 @@ Merged 2026-04-11. Three pieces of #6 affect this work directly:
    define their own typed errors (`SessionExpiredError`,
    `OutOfScopeError`, etc.) and let `formatError` render them.
 
-Items in #6 *not* used directly: literal-union enums for Graph fields
+Items in #6 _not_ used directly: literal-union enums for Graph fields
 (useful when defining `RecurrencePatternType`-style enums for collab
 metadata), the `parseResponse` helper (every collab Graph helper should
 use it).
@@ -263,7 +263,7 @@ use it).
 - All write tools accept `source: "chat" | "project" | "external"` as a
   required argument (constraint).
 - Result envelope mirrors `markdown_*`: `{ content: [{ type: "text",
-  text }], isError? }` rendered by `formatError` on failure.
+text }], isError? }` rendered by `formatError` on failure.
 - Inputs are validated with zod inside `inputSchema`; defence-in-depth
   re-validation happens in the handler (same pattern as
   `src/tools/markdown.ts:564-575`).
@@ -289,37 +289,48 @@ Proposed shared zod fragments:
 
 ```ts
 const sourceShape = {
-  source: z.enum(["chat", "project", "external"]).describe(
-    "Where this content originated. 'chat' = the human typed it this turn; " +
-      "'project' = read via collab_read in this session; " +
-      "'external' = anything else (web fetch, prior session, generated). " +
-      "Writes with source='external' trigger a browser re-approval."
-  ),
+  source: z
+    .enum(["chat", "project", "external"])
+    .describe(
+      "Where this content originated. 'chat' = the human typed it this turn; " +
+        "'project' = read via collab_read in this session; " +
+        "'external' = anything else (web fetch, prior session, generated). " +
+        "Writes with source='external' trigger a browser re-approval.",
+    ),
 } as const;
 
 const cTagShape = {
-  cTag: z.string().min(1).describe(
-    "Opaque cTag previously returned by collab_read or another collab write. " +
-      "Sent verbatim in If-Match. cTag is OneDrive's content-only entity tag, " +
-      "so unrelated metadata changes (rename, share, indexing) do not invalidate it."
-  ),
+  cTag: z
+    .string()
+    .min(1)
+    .describe(
+      "Opaque cTag previously returned by collab_read or another collab write. " +
+        "Sent verbatim in If-Match. cTag is OneDrive's content-only entity tag, " +
+        "so unrelated metadata changes (rename, share, indexing) do not invalidate it.",
+    ),
 } as const;
 
 const conflictModeShape = {
-  conflictMode: z.enum(["fail", "proposal"]).default("fail").describe(
-    "Behavior on cTag mismatch (HTTP 412). 'fail' returns an error with the " +
-      "current cTag and revision so the agent can re-read and reconcile. " +
-      "'proposal' diverts the new content to /proposals/<ulid>.md and records " +
-      "a proposal entry in frontmatter. 'diff3' is reserved for v2."
-  ),
+  conflictMode: z
+    .enum(["fail", "proposal"])
+    .default("fail")
+    .describe(
+      "Behavior on cTag mismatch (HTTP 412). 'fail' returns an error with the " +
+        "current cTag and revision so the agent can re-read and reconcile. " +
+        "'proposal' diverts the new content to /proposals/<ulid>.md and records " +
+        "a proposal entry in frontmatter. 'diff3' is reserved for v2.",
+    ),
 } as const;
 
 const projectScopedPathShape = {
-  path: z.string().min(1).describe(
-    "Scope-relative path inside the active project, e.g. 'proposals/p-foo.md', " +
-      "'drafts/scratch.md', 'attachments/diagram.png'. Absolute paths, '..', " +
-      "URL-encoded traversal, and the authoritative .md at the root are rejected."
-  ),
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      "Scope-relative path inside the active project, e.g. 'proposals/p-foo.md', " +
+        "'drafts/scratch.md', 'attachments/diagram.png'. Absolute paths, '..', " +
+        "URL-encoded traversal, and the authoritative .md at the root are rejected.",
+    ),
 } as const;
 ```
 
@@ -373,14 +384,14 @@ budgets. Side effects:
 
 Graph endpoints called:
 
-| Step | Endpoint | Doc |
-| --- | --- | --- |
-| List candidate folders for the picker | `GET /me/drive/root/children?$select=id,name,folder,webUrl,parentReference` | <https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0> |
-| Resolve a pasted OneDrive URL | `GET /shares/{encoded-id}/driveItem?$select=id,name,parentReference,folder` | <https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0> |
-| Enumerate files in chosen folder | `GET /me/drive/items/{folderId}/children?$select=id,name,file,size` | (same as list-children) |
-| Verify `.collab/` does not yet exist | `GET /me/drive/items/{folderId}:/.collab/project.json` (expect 404) | <https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0> |
-| Create `.collab` folder | `POST /me/drive/items/{folderId}/children` with `{ name: ".collab", folder: {} }` | <https://learn.microsoft.com/en-us/graph/api/driveitem-post-children?view=graph-rest-1.0> |
-| Write sentinel file | `PUT /me/drive/items/{collabFolderId}:/project.json:/content?@microsoft.graph.conflictBehavior=fail` | <https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0> |
+| Step                                  | Endpoint                                                                                             | Doc                                                                                       |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| List candidate folders for the picker | `GET /me/drive/root/children?$select=id,name,folder,webUrl,parentReference`                          | <https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0> |
+| Resolve a pasted OneDrive URL         | `GET /shares/{encoded-id}/driveItem?$select=id,name,parentReference,folder`                          | <https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0>              |
+| Enumerate files in chosen folder      | `GET /me/drive/items/{folderId}/children?$select=id,name,file,size`                                  | (same as list-children)                                                                   |
+| Verify `.collab/` does not yet exist  | `GET /me/drive/items/{folderId}:/.collab/project.json` (expect 404)                                  | <https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0>           |
+| Create `.collab` folder               | `POST /me/drive/items/{folderId}/children` with `{ name: ".collab", folder: {} }`                    | <https://learn.microsoft.com/en-us/graph/api/driveitem-post-children?view=graph-rest-1.0> |
+| Write sentinel file                   | `PUT /me/drive/items/{collabFolderId}:/project.json:/content?@microsoft.graph.conflictBehavior=fail` | <https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0>   |
 
 Headers: `Authorization: Bearer <token>`, `Content-Type:
 application/json` (sentinel write). Retries: inherited from `GraphClient`
@@ -403,7 +414,7 @@ Error cases:
 - `NoMarkdownFileError` — folder contains zero `.md` files at the
   root. (More than one is allowed and resolved by the form.)
 - `FormPayloadInvalidError` — the form server received a `POST
-  /submit` whose JSON body was missing `authoritativeFileId` (or
+/submit` whose JSON body was missing `authoritativeFileId` (or
   any other required field). The browser UI prevents this when
   N≥2 by disabling Submit until a radio is chosen, but a forged
   POST to the loopback could bypass the UI; this is the server-
@@ -435,12 +446,12 @@ session_open_project(args: {}): Promise<ToolResult>
 
 Graph endpoints:
 
-| Step | Endpoint | Doc |
-| --- | --- | --- |
-| Render "Shared with me" list | `GET /me/drive/sharedWithMe?$select=id,name,remoteItem` | <https://learn.microsoft.com/en-us/graph/api/drive-sharedwithme?view=graph-rest-1.0> |
-| Resolve URL paste | `GET /shares/{encoded-id}/driveItem` | <https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0> |
-| Read sentinel | `GET /me/drive/items/{remoteItem.id}:/.collab/project.json:/content` | <https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0> |
-| Look up authoritative file | `GET /me/drive/items/{authoritativeFileId}` | <https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0> |
+| Step                         | Endpoint                                                             | Doc                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Render "Shared with me" list | `GET /me/drive/sharedWithMe?$select=id,name,remoteItem`              | <https://learn.microsoft.com/en-us/graph/api/drive-sharedwithme?view=graph-rest-1.0>    |
+| Resolve URL paste            | `GET /shares/{encoded-id}/driveItem`                                 | <https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0>            |
+| Read sentinel                | `GET /me/drive/items/{remoteItem.id}:/.collab/project.json:/content` | <https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0> |
+| Look up authoritative file   | `GET /me/drive/items/{authoritativeFileId}`                          | <https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0>         |
 
 Error cases:
 
@@ -497,7 +508,7 @@ Reports:
 - `expiresAt` (absolute), seconds remaining.
 - `writes used / total`.
 - `renewals used / total per session`, `renewals used / total per
-  24h window`.
+24h window`.
 - `destructive approvals used / total`.
 - `source counters`: counts per `source` value (chat / project /
   external) for visibility.
@@ -512,7 +523,7 @@ Recovery tool for the case where both the live frontmatter and the
 local project metadata `doc_id` are gone (fresh machine + a human
 wiped the YAML block in OneDrive web). Without this the next
 `collab_write` to the authoritative file refuses with
-`DocIdRecoveryRequiredError` (§3.1). That error is *recoverable* —
+`DocIdRecoveryRequiredError` (§3.1). That error is _recoverable_ —
 this tool is the canonical recovery. The project is only
 "effectively dead" if `session_recover_doc_id` itself fails with
 `DocIdUnrecoverableError` (50 versions inspected, none parseable),
@@ -527,16 +538,23 @@ Procedure:
 1. Require an active session (sentinel + pin already validated).
 2. `GET /me/drive/items/{authoritativeFileId}/versions` — list every
    historical version, newest-first.
-3. Walk the list; for each, `GET .../versions/{vid}/content`,
-   parse the YAML frontmatter with the read-path codec.
+3. Walk the list **sequentially, newest-first, stop on first
+   success** (do not parallelise — that would spend bandwidth on
+   versions the typical case never reads). For each version,
+   `GET .../versions/{vid}/content`, parse the YAML frontmatter
+   with the read-path codec. Each GET is subject to the standard
+   throttle/retry machinery (§4.5); retries apply per GET.
+   Typical case: 1-2 GETs (the most recent version usually still
+   has frontmatter). Worst case: 50 GETs.
 4. The first version whose frontmatter parses cleanly and contains
-   a `doc_id` wins. Extract `doc_id`.
+   a `doc_id` wins. Extract `doc_id` and **stop immediately** — do
+   not continue walking older versions for cross-checking.
 5. Write `docId` back into `<configDir>/projects/<projectId>.json`
    (atomic save). **No body change. No `restoreVersion` call.** No
    destructive-budget cost. No write-budget cost (treated as a
    metadata operation analogous to `session_status`).
 6. Audit `doc_id_recovered` with `{ recoveredFrom: "<versionId>",
-   recoveredAt }`.
+recoveredAt, versionsInspected }`.
 7. Return text confirming the recovered `doc_id` and the version it
    came from. Subsequent `collab_write` to the authoritative file
    re-injects this `doc_id` into the next emitted YAML block (§3.1
@@ -553,9 +571,9 @@ clearly in the error message.
 
 Graph endpoints:
 
-| Step | Endpoint | Doc |
-| --- | --- | --- |
-| List versions | `GET /me/drive/items/{authoritativeFileId}/versions` | <https://learn.microsoft.com/en-us/graph/api/driveitem-list-versions?view=graph-rest-1.0> |
+| Step                  | Endpoint                                                           | Doc                                                                                             |
+| --------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| List versions         | `GET /me/drive/items/{authoritativeFileId}/versions`               | <https://learn.microsoft.com/en-us/graph/api/driveitem-list-versions?view=graph-rest-1.0>       |
 | Read a single version | `GET /me/drive/items/{authoritativeFileId}/versions/{vid}/content` | <https://learn.microsoft.com/en-us/graph/api/driveitemversion-get-contents?view=graph-rest-1.0> |
 
 Reads are bounded: cap the walk at the most recent 50 versions
@@ -608,9 +626,9 @@ For non-authoritative reads, output mirrors `markdown_get_file`.
 
 Graph endpoints:
 
-| Step | Endpoint |
-| --- | --- |
-| Authoritative file | `GET /me/drive/items/{authoritativeFileId}` then `GET /me/drive/items/{authoritativeFileId}/content` |
+| Step                 | Endpoint                                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Authoritative file   | `GET /me/drive/items/{authoritativeFileId}` then `GET /me/drive/items/{authoritativeFileId}/content`                        |
 | Other in-scope files | `GET /me/drive/items/{projectFolderId}:/{relative}:/?$select=id,name,size,cTag,lastModifiedDateTime` then `GET .../content` |
 
 Headers: standard. Retries: inherited. Returns immediately on 404 with a
@@ -650,8 +668,8 @@ may legitimately contain non-authoritative files (a stray
 they are listed as ordinary entries. `/attachments/` is a junk drawer
 by design (constraint) and may contain anything **at any depth**;
 listed as a tree (§4.6 step 5 allows recursive paths under
-attachments). Scope enforcement (§4.6) is what gates *write* and
-*read* operations on individual paths; the listing tool is
+attachments). Scope enforcement (§4.6) is what gates _write_ and
+_read_ operations on individual paths; the listing tool is
 intentionally honest about what's there.
 
 Per-group depth follows §4.6 step 5: ROOT and PROPOSALS and DRAFTS
@@ -688,6 +706,25 @@ flat groups; recursive walk under attachments uses
 expose a single-call recursive enumeration, so we fan out — bounded
 by the §4.6 step 7 N=8 ancestry cap so a pathological tree cannot
 blow up the response). Retries: inherited.
+
+**Breadth cap.** Total entries returned across all groups is capped
+at **500 per call**. The cap protects MCP response size (Claude
+Desktop and VS Code Copilot both throttle large tool responses)
+and protects the agent's context window. On overflow:
+
+- The listing stops adding entries to the affected group(s),
+  preserving newest-first within attachments and source-order
+  elsewhere.
+- The result includes `truncated: true` and a per-group breakdown
+  of how many entries were omitted (e.g. `{"attachments":
+{"omitted": 9612}}`).
+- The agent should narrow with the `prefix` arg (already in the
+  signature) or surface the truncation to the human, who can
+  clean up the folder.
+
+The cap is intentionally a flat 500, not configurable, to keep the
+contract predictable; if real-world workloads need more, raise the
+cap in v2 with explicit delta-polling support (§4.5 v2 trigger).
 
 Error cases: `NoActiveSessionError`, `SessionExpiredError`,
 `OutOfScopeError`, `GraphRequestError`, `AuthenticationRequiredError`.
@@ -889,20 +926,20 @@ Process:
 2. Locate the target section in the current authoritative body.
    Lookup is **slug-first, content-hash fallback**:
    a. Compute the GitHub-flavored slug for every heading in the
-      current body (§3.1 slug algorithm).
+   current body (§3.1 slug algorithm).
    b. Try the proposal's `targetSectionId` slug. If exactly one
-      heading matches, that's the target.
+   heading matches, that's the target.
    c. If zero matches (heading was renamed) **or** more than one
-      matches (collision or duplicate heading inserted), fall back
-      to the proposal's recorded `section_content_hash_at_create`.
-      Hash every section in the current body and look for a match.
+   matches (collision or duplicate heading inserted), fall back
+   to the proposal's recorded `section_content_hash_at_create`.
+   Hash every section in the current body and look for a match.
    d. Hash match wins; record an audit entry
-      `slug_drift_resolved` with the old and new slugs.
+   `slug_drift_resolved` with the old and new slugs.
    e. Neither slug nor hash matches → return
-      `SectionAnchorLostError` (not the same as
-      `SectionNotFoundError`; carries old slug, current heading
-      slugs as a hint, and the proposal id so the agent can
-      consider creating a new proposal).
+   `SectionAnchorLostError` (not the same as
+   `SectionNotFoundError`; carries old slug, current heading
+   slugs as a hint, and the proposal id so the agent can
+   consider creating a new proposal).
 3. Compute the current section's content hash (SHA-256 of the body
    between this heading and the next equal-or-higher level
    heading; for an unheaded prose section at the top of the file,
@@ -913,7 +950,7 @@ Process:
    that equals the current hash, or (b) the same slug with any hash
    when no exact-hash match exists, or (c) any slug with the same
    `section_content_hash` (catches a section that was renamed
-   *and* has authorship). The destructive check fires if any
+   _and_ has authorship). The destructive check fires if any
    matching entry has `author_kind: "human"` or an
    `author_agent_id` other than the current agent.
 5. If destructive: open destructive re-approval form. Form shows a
@@ -930,7 +967,7 @@ Why slug + content hash, not line numbers: line numbers shift the
 moment a human edits the OneDrive web UI to add a paragraph above the
 section. Slug is stable across body insertions; the content hash
 discriminates between "still the section the human wrote" and "we
-already rewrote it" *and* survives slug drift from heading renames or
+already rewrote it" _and_ survives slug drift from heading renames or
 duplicate-heading collisions. When the slug match exists but the hash
 doesn't, the destructive check falls back to "treat as
 already-touched" — the worst case is a spurious re-prompt, never a
@@ -1028,23 +1065,23 @@ Error cases:
 Set on the `defineTool` call. Wrong annotations confuse capable hosts;
 they drive UX hints like "this tool may modify state".
 
-| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
-| --- | :---: | :---: | :---: | :---: |
-| `session_init_project` | false | false | false | true |
-| `session_open_project` | false | false | false | true |
-| `session_renew` | false | false | true | true |
-| `session_status` | true | false | true | false |
-| `session_recover_doc_id` | false | false | true | false |
-| `collab_read` | true | false | true | false |
-| `collab_list_files` | true | false | true | false |
-| `collab_write` | false | false | false | false |
-| `collab_acquire_section` | false | false | false | false |
-| `collab_release_section` | false | false | true | false |
-| `collab_create_proposal` | false | false | false | false |
-| `collab_apply_proposal` | false | true | false | false |
-| `collab_list_versions` | true | false | true | false |
-| `collab_restore_version` | false | true | false | false |
-| `collab_delete_file` | false | true | false | false |
+| Tool                     | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+| ------------------------ | :------------: | :---------------: | :--------------: | :-------------: |
+| `session_init_project`   |     false      |       false       |      false       |      true       |
+| `session_open_project`   |     false      |       false       |      false       |      true       |
+| `session_renew`          |     false      |       false       |       true       |      true       |
+| `session_status`         |      true      |       false       |       true       |      false      |
+| `session_recover_doc_id` |     false      |       false       |       true       |      false      |
+| `collab_read`            |      true      |       false       |       true       |      false      |
+| `collab_list_files`      |      true      |       false       |       true       |      false      |
+| `collab_write`           |     false      |       false       |      false       |      false      |
+| `collab_acquire_section` |     false      |       false       |      false       |      false      |
+| `collab_release_section` |     false      |       false       |       true       |      false      |
+| `collab_create_proposal` |     false      |       false       |      false       |      false      |
+| `collab_apply_proposal`  |     false      |       true        |      false       |      false      |
+| `collab_list_versions`   |      true      |       false       |       true       |      false      |
+| `collab_restore_version` |     false      |       true        |      false       |      false      |
+| `collab_delete_file`     |     false      |       true        |      false       |      false      |
 
 `openWorldHint: true` on the four flow-opening tools because they
 communicate with an external system (the user's browser) outside the
@@ -1058,25 +1095,59 @@ precedent at `src/graph/markdown.ts:667-679`). v1 introduces only the
 errors that carry actionable structured data the agent or operator
 needs. Everything else is a plain `Error` rendered by `formatError`.
 
-| Class | Carries | Used by |
-| --- | --- | --- |
-| `NoActiveSessionError` | nothing | every collab tool |
-| `SessionExpiredError` | `expiresAt`, `renewalsRemaining` | every collab tool |
-| `BudgetExhaustedError` | `budgetType: "write" \| "destructive"`, `used`, `total` | write tools |
-| `OutOfScopeError` | `attemptedPath`, `reason` enum (see §4.6) | path-taking tools |
-| `CollabCTagMismatchError` | `currentCTag`, `currentRevision`, `currentItem` | write/lease tools |
-| `SectionAlreadyLeasedError` | `holderAgentId`, `expiresAt` | `collab_acquire_section` |
-| `SectionAnchorLostError` | `proposalId`, `oldSlug`, `currentSlugs[]` | `collab_apply_proposal` |
-| `SentinelTamperedError` | `pinnedAuthoritativeFileId`, `currentSentinelAuthoritativeFileId`, `pinnedAt` | `session_open_project` |
-| `DocIdRecoveryRequiredError` | `nextStep: "session_recover_doc_id"` | `collab_write` against authoritative |
-| `DocIdUnrecoverableError` | `versionsInspected`, `nextStep: "init_fresh_project"` | `session_recover_doc_id` |
-| `BrowserApprovalDeclinedError` | `flowType`, `csrfTokenMatched: boolean` | every approval form |
+| Class                          | Carries                                                                       | Used by                              |
+| ------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------ |
+| `NoActiveSessionError`         | nothing                                                                       | every collab tool                    |
+| `SessionExpiredError`          | `expiresAt`, `renewalsRemaining`                                              | every collab tool                    |
+| `BudgetExhaustedError`         | `budgetType: "write" \| "destructive"`, `used`, `total`                       | write tools                          |
+| `OutOfScopeError`              | `attemptedPath`, `reason` enum (see §4.6)                                     | path-taking tools                    |
+| `CollabCTagMismatchError`      | `currentCTag`, `currentRevision`, `currentItem`                               | write/lease tools                    |
+| `SectionAlreadyLeasedError`    | `holderAgentId`, `expiresAt`                                                  | `collab_acquire_section`             |
+| `SectionAnchorLostError`       | `proposalId`, `oldSlug`, `currentSlugs[]`                                     | `collab_apply_proposal`              |
+| `SentinelTamperedError`        | `pinnedAuthoritativeFileId`, `currentSentinelAuthoritativeFileId`, `pinnedAt` | `session_open_project`               |
+| `DocIdRecoveryRequiredError`   | `nextStep: "session_recover_doc_id"`                                          | `collab_write` against authoritative |
+| `DocIdUnrecoverableError`      | `versionsInspected`, `nextStep: "init_fresh_project"`                         | `session_recover_doc_id`             |
+| `BrowserApprovalDeclinedError` | `flowType`, `csrfTokenMatched: boolean`                                       | every approval form                  |
 
-Everything else (e.g. `RefuseDeleteAuthoritativeError`,
-`PathLayoutViolationError`, `BrowserFormTimeoutError`,
-`FrontmatterRoundtripError`, `RenewalCapPerSessionError`) is a plain
-`Error` with a clear message — the test suite asserts on message
-substrings, not on `instanceof`.
+Everything else is a plain `Error` with a clear message — the test
+suite asserts on message substrings, not on `instanceof`. The
+following errors are mentioned across §2.2-§2.3 and are
+**deliberately plain `Error`s, not in the table above**, because
+they carry no actionable structured data the agent or operator
+needs beyond the message itself:
+
+- `RefuseDeleteAuthoritativeError`, `RefuseDeleteSentinelError`
+  (§2.3 `collab_delete_file`)
+- `PathLayoutViolationError` (§2.3, §4.6)
+- `BrowserFormTimeoutError`, `BrowserFormCancelledError`,
+  `FormBusyError`, `FormPayloadInvalidError` (§5.3)
+- `FrontmatterRoundtripError`, `MultiDocFrontmatterRejectedError`
+  (§3.1)
+- `RenewalCapPerSessionError`, `RenewalCapPerWindowError` (§2.2)
+- `SectionNotFoundError`, `LeaseNotHeldError`,
+  `LeasesFileMissingError`, `LeasesFileTooLargeError` (§2.3, §3.2.1)
+- `ProposalNotFoundError`, `ProposalAlreadyAppliedError`,
+  `ProposalIdCollisionError` (§2.3)
+- `MarkdownUnknownVersionError` (reused from existing
+  `src/graph/markdown.ts:892`)
+- `SchemaWriteError`, `SchemaVersionUnsupportedError` (§3.x)
+- `SentinelMissingError`, `SentinelMalformedError`,
+  `SentinelAlreadyExistsError`, `BlockedScopeError`,
+  `NoWriteAccessError`, `NotAFolderError`,
+  `AuthoritativeFileMissingError`, `NoMarkdownFileError`,
+  `StaleRecentError`, `SessionAlreadyActiveError` (§2.2)
+- `InvalidShareUrlError`, `ShareNotFoundError`,
+  `ShareAccessDeniedError` (§4.4)
+- `DocIdAlreadyKnownError` (§2.2 `session_recover_doc_id`,
+  informational; not `isError: true`)
+- `ExternalSourceDeclinedError`,
+  `DestructiveApprovalDeclinedError` (§5.2)
+- `FileNotFoundError` (§2.3 `collab_read`)
+
+If implementation uncovers a need for structured data on any of
+these (e.g. a UI wants to render a holder's display name), promote
+the error to the typed-class table above and update §3.6 audit
+columns accordingly. The default is plain `Error`.
 
 ## 3. Schemas
 
@@ -1089,31 +1160,31 @@ interface notation here for readability; runtime validation is via Zod.
 ---
 collab:
   version: 1
-  doc_id: 01JABCDE0FGHJKMNPQRSTV0WXY     # ULID, assigned on first write; stable for life of file
+  doc_id: 01JABCDE0FGHJKMNPQRSTV0WXY # ULID, assigned on first write; stable for life of file
   created_at: "2026-04-19T05:30:00Z"
   sections:
-    - id: "intro"                          # heading slug (GitHub algorithm; see slug rules below)
+    - id: "intro" # heading slug (GitHub algorithm; see slug rules below)
       title: "Introduction"
-      # Note: leases live in .collab/leases.json (§3.2.1), NOT here, to avoid 8 MiB lease cycles.
+      # Leases for this section live in .collab/leases.json (§3.2.1).
   proposals:
     - id: 01JCDEF...
       target_section_slug: "intro"
-      target_section_content_hash_at_create: "sha256:def56789..."  # snapshot at create time; survives slug renames
-      author_agent_id: "a3f2c891-..."   # claimed; see "integrity" note below
-      author_display_name: "Alice"      # display only
+      target_section_content_hash_at_create: "sha256:def56789..." # snapshot at create time; survives slug renames
+      author_agent_id: "a3f2c891-..." # claimed; see "integrity" note below
+      author_display_name: "Alice" # display only
       created_at: "2026-04-19T05:51:00Z"
-      status: "open"                     # open | applied | superseded | withdrawn
+      status: "open" # open | applied | superseded | withdrawn
       body_path: "proposals/01JCDEF....md"
       rationale: "tighten the wording"
       source: "chat"
-  authorship:                            # append-only trail per section
-    - target_section_slug: "intro"       # heading slug at write time
-      section_content_hash: "sha256:abcd1234..."  # SHA-256 of section body at time of write
-      author_kind: "agent"               # agent | human
-      author_agent_id: "..."             # claimed; see "integrity" note below
+  authorship: # append-only trail per section
+    - target_section_slug: "intro" # heading slug at write time
+      section_content_hash: "sha256:abcd1234..." # SHA-256 of section body at time of write
+      author_kind: "agent" # agent | human
+      author_agent_id: "..." # claimed; see "integrity" note below
       author_display_name: "..."
       written_at: "2026-04-19T05:50:00Z"
-      revision: 17                        # OneDrive revision after the write
+      revision: 17 # OneDrive revision after the write
 ---
 # Project Title
 ...
@@ -1127,7 +1198,7 @@ clickable anchor. Inline pseudo-code:
    trim whitespace.
 2. Drop everything that is not `[a-z0-9-_ ]` (Unicode letters/digits
    collapsed via NFKC then ASCII-folded with `String.prototype
-   .normalize("NFKD")` then a `[^\w\- ]` strip; matches GitHub
+.normalize("NFKD")` then a `[^\w\- ]` strip; matches GitHub
    exactly for ASCII headings, deviates only on rare CJK that
    GitHub itself handles inconsistently).
 3. Replace runs of whitespace with a single `-`.
@@ -1220,6 +1291,7 @@ Notes:
   - LF line endings (never CRLF).
   - One round-trip test in `test/collab/frontmatter.test.ts` asserts
     `serialise(parse(serialise(input))) === serialise(input)`.
+
 - Library: `yaml` (proposed dependency, see section 6 and dep-review
   in section 9).
 - Alternative considered: `gray-matter` (rejected per constraint; would
@@ -1293,7 +1365,7 @@ pinning that is **rename-tolerant**:
    `displayAuthoritativeFileName` is updated from the live sentinel
    on each successful open and is for display only.
 4. The user must explicitly forget the project from recents (which
-   clears the pinning) before re-opening with a *different file id*.
+   clears the pinning) before re-opening with a _different file id_.
    This is a deliberate friction step that catches a real tamper but
    not a benign rename.
 5. An `audit.type = "sentinel_changed"` entry is written before the
@@ -1321,10 +1393,10 @@ file is the right shape.
 `sectionSlug` (no `target_` prefix); the authoritative-file
 frontmatter uses `target_section_slug` for `proposals[]` and
 `authorship[]` entries. Different prefixes are deliberate: in the
-leases sidecar each entry *is* the section being held, so the
+leases sidecar each entry _is_ the section being held, so the
 "target" qualifier adds no information; in the frontmatter
 `proposals[]`/`authorship[]` arrays, each entry describes an
-operation *targeting* a section, so the "target" prefix
+operation _targeting_ a section, so the "target" prefix
 disambiguates from any future field describing the section
 metadata itself. Both forms slugify through the same `slug.ts`
 algorithm.
@@ -1360,7 +1432,7 @@ Properties:
 - **Untrusted, like the sentinel.** A cooperator with folder write
   access can edit this file directly. Agents using leases are
   cooperating in good faith; the audit log is what records who
-  *actually* called `collab_acquire_section`. Lease integrity is
+  _actually_ called `collab_acquire_section`. Lease integrity is
   not a security boundary.
 - **No pinning.** Unlike the sentinel, the leases sidecar is not
   pinned in local metadata. It can be deleted and recreated
@@ -1453,7 +1525,7 @@ and updates `folderPath` in the recents entry (and `folderPath` in
 `<configDir>/projects/<projectId>.json`). No audit entry, no warning;
 this catches the originator moving the folder to a different parent
 in OneDrive web. The pin block (§3.3) is unchanged because
-`pinnedAuthoritativeFileId` is unchanged. Folder *deletion* still
+`pinnedAuthoritativeFileId` is unchanged. Folder _deletion_ still
 trips `BlockedScopeError` via the existing scope-discovery checks.
 
 ### 3.5 Renewal counts `<configDir>/sessions/renewal-counts.json`
@@ -1467,10 +1539,7 @@ of timestamps; entries older than 24h are pruned on read.
   "schemaVersion": 1,
   "windows": {
     "00000000-0000-0000-0000-0000a3f2c891/01JABCDE...": {
-      "renewals": [
-        "2026-04-18T07:00:00Z",
-        "2026-04-19T03:30:00Z"
-      ]
+      "renewals": ["2026-04-18T07:00:00Z", "2026-04-19T03:30:00Z"]
     }
   }
 }
@@ -1507,28 +1576,28 @@ Common envelope:
 
 Per-type `details`:
 
-| `type` | Notable fields |
-| --- | --- |
-| `session_start` | `ttlSeconds`, `writeBudget`, `destructiveBudget`, `clientName`, `clientVersion` |
-| `session_end` | `reason: "ttl" \| "budget" \| "mcp_shutdown" \| "manual_stop"`, `writesUsed`, `renewalsUsed` |
-| `tool_call` | `inputSummary` (allow-listed; see below), `cTagBefore`, `cTagAfter`, `revisionAfter`, `bytes` (writes only), `source` (writes only), `resolvedItemId` |
-| `scope_denied` | `reason` (see §4.6 enum), `attemptedPath`, `resolvedItemId?` |
-| `destructive_approval` | `tool`, `outcome: "approved" \| "declined" \| "timeout"`, `diffSummaryHash`, `csrfTokenMatched` |
-| `renewal` | `windowCountBefore`, `windowCountAfter`, `sessionRenewalsBefore`, `sessionRenewalsAfter` |
-| `external_source_approval` | `tool`, `path`, `outcome`, `csrfTokenMatched` |
-| `frontmatter_reset` | `reason: "missing" \| "malformed"`, `previousRevision`, `recoveredDocId: boolean` |
-| `slug_drift_resolved` | `proposalId`, `oldSlug`, `newSlug`, `matchedBy: "content_hash"` |
-| `doc_id_recovered` | `recoveredFrom: "<versionId>"`, `versionsInspected` |
-| `agent_name_unknown` | `clientInfoPresent: boolean`, `agentIdAssigned` (warn-once-per-session) |
-| `sentinel_changed` | `pinnedAuthoritativeFileId`, `currentAuthoritativeFileId`, `pinnedAtFirstSeenCTag`, `currentSentinelCTag` |
-| `external_change_detected` | `pinnedCTag`, `liveCTag`, `liveRevision` |
-| `error` | `errorName`, `errorMessage`, `graphCode?`, `graphStatus?` |
+| `type`                     | Notable fields                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session_start`            | `ttlSeconds`, `writeBudget`, `destructiveBudget`, `clientName`, `clientVersion`                                                                       |
+| `session_end`              | `reason: "ttl" \| "budget" \| "mcp_shutdown" \| "manual_stop"`, `writesUsed`, `renewalsUsed`                                                          |
+| `tool_call`                | `inputSummary` (allow-listed; see below), `cTagBefore`, `cTagAfter`, `revisionAfter`, `bytes` (writes only), `source` (writes only), `resolvedItemId` |
+| `scope_denied`             | `reason` (see §4.6 enum), `attemptedPath`, `resolvedItemId?`                                                                                          |
+| `destructive_approval`     | `tool`, `outcome: "approved" \| "declined" \| "timeout"`, `diffSummaryHash`, `csrfTokenMatched`                                                       |
+| `renewal`                  | `windowCountBefore`, `windowCountAfter`, `sessionRenewalsBefore`, `sessionRenewalsAfter`                                                              |
+| `external_source_approval` | `tool`, `path`, `outcome`, `csrfTokenMatched`                                                                                                         |
+| `frontmatter_reset`        | `reason: "missing" \| "malformed"`, `previousRevision`, `recoveredDocId: boolean`                                                                     |
+| `slug_drift_resolved`      | `proposalId`, `oldSlug`, `newSlug`, `matchedBy: "content_hash"`                                                                                       |
+| `doc_id_recovered`         | `recoveredFrom: "<versionId>"`, `versionsInspected`                                                                                                   |
+| `agent_name_unknown`       | `clientInfoPresent: boolean`, `agentIdAssigned` (warn-once-per-session)                                                                               |
+| `sentinel_changed`         | `pinnedAuthoritativeFileId`, `currentAuthoritativeFileId`, `pinnedAtFirstSeenCTag`, `currentSentinelCTag`                                             |
+| `external_change_detected` | `pinnedCTag`, `liveCTag`, `liveRevision`                                                                                                              |
+| `error`                    | `errorName`, `errorMessage`, `graphCode?`, `graphStatus?`                                                                                             |
 
 **Audit redaction policy.** Every audit producer goes through one
 `writeAudit(envelope)` helper that enforces:
 
 - `inputSummary` is an explicit allow-list: `{ path, source,
-  conflictMode, contentSizeBytes, sectionId?, proposalId? }` per tool.
+conflictMode, contentSizeBytes, sectionId?, proposalId? }` per tool.
   Never `content`. Never `body`. Never `rationale` text — only
   `rationaleSizeBytes` and a SHA-256 prefix (first 16 hex chars).
 - `intent` is included up to **200 chars**, NFKC-normalised, control
@@ -1538,7 +1607,7 @@ Per-type `details`:
   leaked audit log).
 - `errorMessage` is sourced from `formatError` output. For
   `GraphRequestError`, `.message` is structured (`method/path/code/
-  message/status`) and contains no headers, so token leakage via this
+message/status`) and contains no headers, so token leakage via this
   path is impossible. The audit writer additionally **rejects** any
   envelope whose serialised JSON contains the substring `"Bearer "`
   (defence in depth; logged at `warn` and the line is dropped).
@@ -1559,12 +1628,26 @@ Per-type `details`:
 
 Atomic append: open with `O_APPEND` and a single `fs.appendFile` call.
 Concurrent appenders from two MCP processes do not corrupt each
-other (POSIX guarantees atomic writes ≤ `PIPE_BUF`, ~4096 bytes, for
-`O_APPEND`). On crash a partial trailing line may exist; the parser
-tolerates it. All writes are best-effort: an audit failure does not
-fail the tool call (logged at `warn`).
+other on POSIX (POSIX guarantees atomic writes ≤ `PIPE_BUF`,
+~4096 bytes, for `O_APPEND`). On crash a partial trailing line may
+exist; the parser tolerates it. All writes are best-effort: an
+audit failure does not fail the tool call (logged at `warn`).
+
+**Windows caveat.** Windows has no `O_APPEND`. Node's
+`fs.appendFile` on Windows opens, seeks-to-end, writes, closes —
+**not atomic against another process.** Two MCP instances appending
+to the same audit file on Windows can interleave bytes mid-line.
+For v1 this is accepted as a fringe scenario (the typical user runs
+one MCP host at a time per project), and the parser's partial-line
+tolerance covers the corruption case: any line that fails JSON
+parse is logged and skipped, never crashes the reader. Promoted to
+§10 open question 8 so it stays visible. v2 mitigation candidates:
+file-lock via `proper-lockfile` (adds a runtime dep), or a sidecar
+queue file written by a single appender process. Out of scope for
+v1.
 
 ### 3.7 Destructive counter persistence
+
 `<configDir>/sessions/destructive-counts.json`
 
 ```json
@@ -1624,7 +1707,6 @@ already enforced.
 (see grep at `src/graph/types.ts:200,226,245,266`). No `$select`
 trimming is needed for v1, though it would shave bytes on hot reads;
 deferred.
-
 
 Microsoft Learn: <https://learn.microsoft.com/en-us/graph/api/driveitem-get?view=graph-rest-1.0>
 and <https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0>.
@@ -1755,7 +1837,7 @@ should rather see a clear failure than a stuck handler. Acceptance test
 in section 8.10.
 
 > **Cut: delta polling.** Earlier draft included a `GET /me/drives/
-> {driveId}/root/delta` flow for opportunistic out-of-band change
+{driveId}/root/delta` flow for opportunistic out-of-band change
 > detection. Cut from v1 because the `lastSeenAuthoritativeCTag`
 > comparison on session resume (§3.3) gives the same signal at
 > session granularity, which is sufficient for the v1 use cases.
@@ -1855,14 +1937,14 @@ non-wizard layout (constraint).
 
 ### 5.1 Reusable pieces from existing code
 
-| Component | What we reuse |
-| --- | --- |
+| Component                          | What we reuse                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
 | Local HTTP server with random port | `src/picker.ts` factory pattern (random port, `127.0.0.1`, body cap, abort wiring). |
-| HTML shell (head, fonts, favicon) | `pageLayout` / `pageHead` in `src/templates/layout.ts`. |
-| Design tokens and CSS | `src/templates/tokens.ts`, `src/templates/styles.ts`. |
-| `openBrowser` injection | `ServerConfig.openBrowser` (`src/index.ts:50`). |
-| Tab auto-close after submit | `pickerSuccessHtml` countdown (`src/templates/picker.ts`). |
-| Cancel handling | `UserCancelledError` (`src/errors.ts:12-17`). |
+| HTML shell (head, fonts, favicon)  | `pageLayout` / `pageHead` in `src/templates/layout.ts`.                             |
+| Design tokens and CSS              | `src/templates/tokens.ts`, `src/templates/styles.ts`.                               |
+| `openBrowser` injection            | `ServerConfig.openBrowser` (`src/index.ts:50`).                                     |
+| Tab auto-close after submit        | `pickerSuccessHtml` countdown (`src/templates/picker.ts`).                          |
+| Cancel handling                    | `UserCancelledError` (`src/errors.ts:12-17`).                                       |
 
 ### 5.2 Form specifications
 
@@ -1885,14 +1967,14 @@ Routes:
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| Folder | radio + URL paste | radio is populated from `GET /me/drive/root/children`; paste box resolves via `/shares` endpoint. |
-| Authoritative file | radio | populated when folder picked. **Always shown when ≥1 root `.md` file exists.** When N=1, the single option is pre-selected so the human only has to confirm via Submit; when N≥2, no default is selected and Submit is disabled until the human makes a deliberate choice. Greyed only if the folder has zero `.md` files. |
-| TTL | slider | 15 min – 8 h, default 2 h. |
-| Write budget | slider | 10 – 500, default 50. |
-| Destructive budget | number | default 10, hard cap 50. |
-| Renewal policy | dropdown | "manual" only in v1; future "auto-renew" placeholder visible but disabled. |
+| Field              | Type              | Notes                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Folder             | radio + URL paste | radio is populated from `GET /me/drive/root/children`; paste box resolves via `/shares` endpoint.                                                                                                                                                                                                                          |
+| Authoritative file | radio             | populated when folder picked. **Always shown when ≥1 root `.md` file exists.** When N=1, the single option is pre-selected so the human only has to confirm via Submit; when N≥2, no default is selected and Submit is disabled until the human makes a deliberate choice. Greyed only if the folder has zero `.md` files. |
+| TTL                | slider            | 15 min – 8 h, default 2 h.                                                                                                                                                                                                                                                                                                 |
+| Write budget       | slider            | 10 – 500, default 50.                                                                                                                                                                                                                                                                                                      |
+| Destructive budget | number            | default 10, hard cap 50.                                                                                                                                                                                                                                                                                                   |
+| Renewal policy     | dropdown          | "manual" only in v1; future "auto-renew" placeholder visible but disabled.                                                                                                                                                                                                                                                 |
 
 Server-side captured state on `POST /submit`: `{ folderId, folderPath,
 authoritativeFileId, authoritativeFileName, ttlSeconds, writeBudget,
@@ -1913,14 +1995,14 @@ page just stays open (matches today's behaviour).
 
 Routes mirror the init form. Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| Recents | list | populated from `recent.json`; entries with `available: false` are shown disabled with the reason. |
-| Shared with me | list | populated from `GET /me/drive/sharedWithMe`. Only items with write access and `folder` set are enabled. |
-| Paste a OneDrive folder URL | text | resolved via `/shares` endpoint. |
-| TTL | slider | as above. |
-| Write budget | slider | as above. |
-| Destructive budget | number | as above. |
+| Field                       | Type   | Notes                                                                                                   |
+| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| Recents                     | list   | populated from `recent.json`; entries with `available: false` are shown disabled with the reason.       |
+| Shared with me              | list   | populated from `GET /me/drive/sharedWithMe`. Only items with write access and `folder` set are enabled. |
+| Paste a OneDrive folder URL | text   | resolved via `/shares` endpoint.                                                                        |
+| TTL                         | slider | as above.                                                                                               |
+| Write budget                | slider | as above.                                                                                               |
+| Destructive budget          | number | as above.                                                                                               |
 
 `POST /submit` body: `{ folderId }` (everything else is captured from
 the controls). Server reads sentinel, validates, then activates
@@ -1981,7 +2063,7 @@ the wrong one. v1 mitigation:
   every subsequent collab tool; it must not be conditional on
   outcome.
 - **Forms do not consume throttle or retry budget while waiting.**
-  A pending form is *not* a Graph call. The throttle/retry
+  A pending form is _not_ a Graph call. The throttle/retry
   primitives in `GraphClient` count only HTTP transactions. The
   tool call itself blocks awaiting the form's promise; from the
   Graph layer's perspective nothing is happening. Test row in §8.2
@@ -2039,8 +2121,8 @@ by login, picker, and the new collab forms:**
    is present and not `same-origin`. Browsers that don't send the
    header are not punished.
 6. **CSP retained.** `Content-Security-Policy: default-src 'none';
-   form-action 'self'; script-src 'self' 'nonce-<perRequest>';
-   style-src 'self' 'nonce-<perRequest>'; base-uri 'none'; frame-ancestors 'none'`
+form-action 'self'; script-src 'self' 'nonce-<perRequest>';
+style-src 'self' 'nonce-<perRequest>'; base-uri 'none'; frame-ancestors 'none'`
    matches what `src/picker.ts:175` already does, with
    `frame-ancestors 'none'` added so the form cannot be iframed by a
    rebinding attacker.
@@ -2080,7 +2162,6 @@ collab forms inherit a hardened substrate from day one.
   `schemaVersion: 1` (sentinel, local project metadata, recents,
   renewal counts, audit lines, frontmatter `collab.version`).
   Detection on read:
-
   - `schemaVersion === 1` → parse normally.
   - `schemaVersion > 1` → reject with `SchemaVersionUnsupportedError`,
     instruct the user to upgrade graphdo.
@@ -2091,21 +2172,34 @@ collab forms inherit a hardened substrate from day one.
   achieved by rejecting unknown versions cleanly.
 
 - Dependency additions:
-  - `yaml` (constraint says yes; not `gray-matter`).
-    - **Pre-merge verification.** Run `npm audit` and check the
-      GitHub Advisory Database for `yaml` advisories before lockfile
-      commit. The plan author has done a mental check: the modern
-      `yaml` library (eemeli/yaml) does not execute YAML tags by
-      default and has no known prototype-pollution-class issues
-      comparable to old `js-yaml`'s `!!js/function`. Verify
-      empirically.
-    - **Parse hardening.** Always call `parse(input, { prettyErrors:
-      true, strict: true })`. **Never** use `parseAllDocuments`
-      (multi-doc input is a smell and a parser-confusion vector).
-      Forbid custom tags. After parse, verify the root is a plain
-      object (`Object.getPrototypeOf(x) === Object.prototype`)
-      before passing to Zod for shape validation. The Zod step is
-      what enforces our schema; `yaml` is just the parser.
+  - `yaml` (constraint says yes; not `gray-matter`). - **Version pinning policy: `~` not `^`.** The `yaml` library
+    has shipped minor releases that changed default serialisation
+    (quoting of keys matching reserved words, line-break handling
+    near block boundaries). The deterministic-emitter contract
+    in §3.1 ("byte-stable across `yaml` versions") is
+    aspirational, not guaranteed. Pin the exact minor with `~`
+    (e.g. `"~2.5.0"`), accept patch-level upgrades only, and
+    require a deliberate version bump to take a new minor. - **Snapshot test for byte-exact output.** Add
+    `test/collab/frontmatter-snapshot.test.ts` that asserts
+    byte-exact serialisation for a canonical fixture covering
+    every field in §3.1 (doc_id, sections with mixed slugs,
+    proposals with rationale containing special chars,
+    authorship with hashes, multi-line strings, dates). When the
+    `yaml` package bumps, this snapshot fails before users
+    encounter the drift in noisy diffs. Treat any snapshot
+    failure as a release-blocker. - **Pre-merge verification.** Run `npm audit` and check the
+    GitHub Advisory Database for `yaml` advisories before lockfile
+    commit. The plan author has done a mental check: the modern
+    `yaml` library (eemeli/yaml) does not execute YAML tags by
+    default and has no known prototype-pollution-class issues
+    comparable to old `js-yaml`'s `!!js/function`. Verify
+    empirically. - **Parse hardening.** Always call `parse(input, { prettyErrors:
+true, strict: true })`. **Never** use `parseAllDocuments`
+    (multi-doc input is a smell and a parser-confusion vector).
+    Forbid custom tags. After parse, verify the root is a plain
+    object (`Object.getPrototypeOf(x) === Object.prototype`)
+    before passing to Zod for shape validation. The Zod step is
+    what enforces our schema; `yaml` is just the parser.
   - ULID generator: propose using a small inlined implementation
     (~30 LOC, no dep) to avoid an extra package; alternative is `ulid`
     on npm. Inlined is preferred for supply-chain reasons (matches
@@ -2144,12 +2238,12 @@ existing scope-driven enable/disable; the answer is that scope-driven
 enable/disable is **orthogonal** to session state. The two states
 combine like this:
 
-| Scope granted? | Session active? | Tool state |
-| --- | --- | --- |
-| no | n/a | disabled (hidden in `tools/list`) |
-| yes | no | enabled, returns `NoActiveSessionError` |
-| yes | yes, not expired | enabled, runs |
-| yes | yes, expired | enabled, returns `SessionExpiredError` |
+| Scope granted? | Session active?  | Tool state                              |
+| -------------- | ---------------- | --------------------------------------- |
+| no             | n/a              | disabled (hidden in `tools/list`)       |
+| yes            | no               | enabled, returns `NoActiveSessionError` |
+| yes            | yes, not expired | enabled, runs                           |
+| yes            | yes, expired     | enabled, returns `SessionExpiredError`  |
 
 The first row uses the existing `syncToolState` machinery
 (`src/tool-registry.ts:90-111`) — collab tools simply add
@@ -2194,11 +2288,11 @@ a new conceptual group ("collaboration") that is a sub-group of
 2. **Workflow line.** Append to the existing "WORKFLOW" line in
    `buildInstructions:179-181` a collab branch:
    `"For collaboration: call session_init_project (originator) or
-    session_open_project (collaborator), then collab_* tools."`
+session_open_project (collaborator), then collab_* tools."`
 3. **Behavior rule.** Add to the existing rules block:
    `"When a collab_* tool returns a NoActiveSessionError, call
-    session_open_project or session_init_project immediately - do
-    not ask the user which one, the browser form will guide them."`
+session_open_project or session_init_project immediately - do
+not ask the user which one, the browser form will guide them."`
 
 These are tiny edits to one file, but they need to be in the plan so
 they are not forgotten in the rollout.
@@ -2267,29 +2361,29 @@ Files:
 Folder: `test/integration/collab/`. Each test sets up a fresh
 `MockState` and a `MockAuthenticator`, then drives the full server.
 
-| Test | Scenario |
-| --- | --- |
-| `01-init-write-read-list.test.ts` | `session_init_project` → `collab_write` → `collab_read` → `collab_list_files`. Asserts sentinel created, frontmatter `doc_id` assigned, audit entries written. `collab_list_files` shows root files faithfully (no UNSUPPORTED bucket) and marks the authoritative file. |
-| `02-two-agents-different-sections.test.ts` | Two MCP clients against the same mock Graph. Each acquires a different section, writes, releases. No cTag conflicts. |
-| `03-cTag-mismatch-proposal-fallback.test.ts` | Agent A writes successfully; agent B writes with `conflictMode: "proposal"` and stale cTag. Asserts proposal file created in `/proposals/`, frontmatter updated, no body overwrite. |
-| `04-frontmatter-stripped.test.ts` | Direct mock-Graph write that wipes frontmatter (simulates the OneDrive web UI). Next `collab_read` returns defaults; `frontmatter_reset` audit entry written with `recoveredDocId: true`. Next `collab_write` re-injects with the **same `doc_id`** recovered from `<configDir>/projects/<projectId>.json`. Variant: also delete the local project metadata; next `collab_write` returns `DocIdRecoveryRequiredError` and instructs the human to restore from `/versions`. |
-| `05-source-external-reapproval.test.ts` | `collab_write` with `source: "external"` triggers the re-prompt path. Browser spy approves; write completes. Audit records `external_source_approval`. |
-| `06-source-external-declined.test.ts` | Same as above but spy declines; tool returns `ExternalSourceDeclinedError`. No write. |
-| `07-destructive-apply-proposal.test.ts` | Apply a proposal whose `target_section_slug` matches a current heading and whose authorship trail attributes the matching section to a human. Destructive re-prompt fires; on approve, write succeeds and destructive counter increments. **Variant A:** same slug with hash mismatch (an agent has already rewritten it) → still treated as destructive (conservative). **Variant B:** slug renamed in body but `section_content_hash_at_create` matches an existing section → `slug_drift_resolved` audited and apply proceeds. **Variant C:** neither slug nor hash matches → `SectionAnchorLostError` carrying old slug + current heading slugs. |
-| `08-scope-traversal-rejected.test.ts` | One row per refusal reason in §4.6: `..`, `..%2f`, `%2e%2e/`, double-encoded `%252e%252e`, full-width `．．/`, leading `/`, drive-letter `C:/`, control char `\u0001`, dot-prefixed `.collab/foo`, layout `random/foo.md`, `proposals/foo.txt` (wrong extension), `proposals/sub/foo.md` (subfolder under flat group → `subfolder_in_flat_group`), `attachments/sub/sub2/foo.png` (allowed; recursive group), `proposals/foo.md` resolved to a `remoteItem` (shortcut/redirect), cross-drive item, case-aliased `Proposals/foo.md`. Each refusal returns `OutOfScopeError` with the matching reason; the attachments-recursive case succeeds. No Graph call should be issued for pre-resolution refusals (mock asserts zero requests). |
-| `09-budget-exhaustion.test.ts` | Default 50 writes succeed; 51st returns `BudgetExhaustedError`. Reads continue to work. |
-| `10-ttl-expiry.test.ts` | Use a fake clock helper; advance past TTL; next call returns `SessionExpiredError`. `session_renew` resets. |
-| `11-renewal-caps.test.ts` | Cap-3-per-session: fourth `session_renew` returns `RenewalCapPerSessionError`. Cap-6-per-window: simulate 6 renewals across 23h then a 7th in the same window returns `RenewalCapPerWindowError`; advance to >24h, allowed again. |
-| `12-throttle-surfaced.test.ts` | Mock Graph returns 429 with `Retry-After: 1` to all writes. Verify exactly `maxRetries + 1 = 4` attempts (per `src/graph/client.ts:204`), then `GraphRequestError` surfaced as tool error. No infinite retry. **Plus form-wait isolation row:** open a destructive form that takes 5 seconds to submit; assert no retry counter ticks during the wait and that subsequent Graph calls are not delayed. |
-| `13-form-xss-escaped.test.ts` | `collab_write` with `intent: "<script>alert(1)</script>"` shown in the external-source re-prompt form. Assert form HTML contains `&lt;script&gt;` text, not raw tag. Repeat for `path`, `folderPath`, `authoritativeFileName`, and a diff body containing `<script>` markers. |
-| `14-loopback-csrf-rejected.test.ts` | Forge a `POST /submit` with missing CSRF token, wrong CSRF token, wrong `Host`, missing `Origin`, wrong `Content-Type`. Each must return 4xx and not advance form state. Audit records `csrfTokenMatched: false`. |
-| `15-sentinel-tamper-detected.test.ts` | Open the project once (pin recorded). **Variant A (rename, allowed):** mutate sentinel `authoritativeFileName` while keeping the same `authoritativeFileId`. Re-open: succeeds, `displayAuthoritativeFileName` refreshed silently, no audit entry. **Variant B (real tamper):** mutate sentinel `authoritativeFileId`. Re-open: returns `SentinelTamperedError`; `sentinel_changed` audit entry written. "Forget project" then re-open: succeeds with new pin. **Variant C (folder moved):** move the project folder to a different parent in mock Graph; re-open succeeds and `folderPath` is silently refreshed in recents and local metadata. |
-| `16-multiple-root-md.test.ts` | **N=1 variant:** init folder with single root `.md` `spec.md` — form pre-selects it; spy submits without changing selection; sentinel records `spec.md`. **N=3 variant:** folder with `README.md`, `NOTES.md`, `spec.md` — form has no default; spy attempts submit with no selection (rejected client-side); spy then selects `spec.md` and submits; sentinel records `spec.md`; the other two remain unmodified and are visible in `collab_list_files` ROOT group as ordinary entries. |
-| `17-share-url-host-allowlist.test.ts` | Paste `file:///etc/passwd`, `http://localhost`, `https://attacker.example`, `https://1drv.ms/foo` (allowed). First three return `InvalidShareUrlError` with no Graph call. Fourth proceeds to `/shares/u!…`. |
-| `18-form-busy-lock.test.ts` | Open the init form; while it's open, another tool call requests a destructive form. Second call returns `FormBusyError` carrying the URL of the in-flight form. After completing the first form, the second call succeeds. **Lock-release matrix:** the lock must release on every terminal outcome. Sub-tests cover submit, cancel (POST /cancel), timeout (form server's 120 s elapsed), transport abort (caller's signal aborted), and an uncaught exception thrown inside the form's submit handler. After each, a fresh form request must succeed. |
-| `19-session-survives-reconnect.test.ts` | Active session in process P. Drop the stdio transport without exiting P. Open a new transport against P. Active session is the same `sessionId`; budgets and destructive counter unchanged. Variant: kill P; restart; session is gone. |
-| `20-doc-id-recovery.test.ts` | Three variants. **A (success):** wipe both frontmatter and local `docId`, then call `session_recover_doc_id` — walks mock-Graph versions, finds an old version with parseable frontmatter, writes `doc_id` back to local cache, audits `doc_id_recovered`; subsequent `collab_write` succeeds. **B (already known):** call `session_recover_doc_id` when both live frontmatter and local cache hold the same `doc_id` — returns `DocIdAlreadyKnownError` informational, not isError. **C (unrecoverable):** wipe everything plus history; call returns `DocIdUnrecoverableError` with `versionsInspected` count and the "init fresh project" guidance. |
-| `21-agent-name-unknown.test.ts` | Connect with an MCP `clientInfo` payload missing `name`. First tool call audits `agent_name_unknown` once, then proceeds with `agentId = <oid>-unknown-<sessionId>`. Subsequent tool calls in the same session do **not** repeat the warn (warn-once-per-session). |
+| Test                                         | Scenario                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-init-write-read-list.test.ts`            | `session_init_project` → `collab_write` → `collab_read` → `collab_list_files`. Asserts sentinel created, frontmatter `doc_id` assigned, audit entries written. `collab_list_files` shows root files faithfully (no UNSUPPORTED bucket) and marks the authoritative file.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `02-two-agents-different-sections.test.ts`   | Two MCP clients against the same mock Graph. Each acquires a different section, writes, releases. No cTag conflicts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `03-cTag-mismatch-proposal-fallback.test.ts` | Agent A writes successfully; agent B writes with `conflictMode: "proposal"` and stale cTag. Asserts proposal file created in `/proposals/`, frontmatter updated, no body overwrite.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `04-frontmatter-stripped.test.ts`            | Direct mock-Graph write that wipes frontmatter (simulates the OneDrive web UI). Next `collab_read` returns defaults; `frontmatter_reset` audit entry written with `recoveredDocId: true`. Next `collab_write` re-injects with the **same `doc_id`** recovered from `<configDir>/projects/<projectId>.json`. Variant: also delete the local project metadata; next `collab_write` returns `DocIdRecoveryRequiredError` and instructs the human to restore from `/versions`.                                                                                                                                                                                                                                                             |
+| `05-source-external-reapproval.test.ts`      | `collab_write` with `source: "external"` triggers the re-prompt path. Browser spy approves; write completes. Audit records `external_source_approval`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `06-source-external-declined.test.ts`        | Same as above but spy declines; tool returns `ExternalSourceDeclinedError`. No write.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `07-destructive-apply-proposal.test.ts`      | Apply a proposal whose `target_section_slug` matches a current heading and whose authorship trail attributes the matching section to a human. Destructive re-prompt fires; on approve, write succeeds and destructive counter increments. **Variant A:** same slug with hash mismatch (an agent has already rewritten it) → still treated as destructive (conservative). **Variant B:** slug renamed in body but `section_content_hash_at_create` matches an existing section → `slug_drift_resolved` audited and apply proceeds. **Variant C:** neither slug nor hash matches → `SectionAnchorLostError` carrying old slug + current heading slugs.                                                                                   |
+| `08-scope-traversal-rejected.test.ts`        | One row per refusal reason in §4.6: `..`, `..%2f`, `%2e%2e/`, double-encoded `%252e%252e`, full-width `．．/`, leading `/`, drive-letter `C:/`, control char `\u0001`, dot-prefixed `.collab/foo`, layout `random/foo.md`, `proposals/foo.txt` (wrong extension), `proposals/sub/foo.md` (subfolder under flat group → `subfolder_in_flat_group`), `attachments/sub/sub2/foo.png` (allowed; recursive group), `proposals/foo.md` resolved to a `remoteItem` (shortcut/redirect), cross-drive item, case-aliased `Proposals/foo.md`. Each refusal returns `OutOfScopeError` with the matching reason; the attachments-recursive case succeeds. No Graph call should be issued for pre-resolution refusals (mock asserts zero requests). |
+| `09-budget-exhaustion.test.ts`               | Default 50 writes succeed; 51st returns `BudgetExhaustedError`. Reads continue to work.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `10-ttl-expiry.test.ts`                      | Use a fake clock helper; advance past TTL; next call returns `SessionExpiredError`. `session_renew` resets.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `11-renewal-caps.test.ts`                    | Cap-3-per-session: fourth `session_renew` returns `RenewalCapPerSessionError`. Cap-6-per-window: simulate 6 renewals across 23h then a 7th in the same window returns `RenewalCapPerWindowError`; advance to >24h, allowed again.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `12-throttle-surfaced.test.ts`               | Mock Graph returns 429 with `Retry-After: 1` to all writes. Verify exactly `maxRetries + 1 = 4` attempts (per `src/graph/client.ts:204`), then `GraphRequestError` surfaced as tool error. No infinite retry. **Plus form-wait isolation row:** open a destructive form that takes 5 seconds to submit; assert no retry counter ticks during the wait and that subsequent Graph calls are not delayed.                                                                                                                                                                                                                                                                                                                                 |
+| `13-form-xss-escaped.test.ts`                | `collab_write` with `intent: "<script>alert(1)</script>"` shown in the external-source re-prompt form. Assert form HTML contains `&lt;script&gt;` text, not raw tag. Repeat for `path`, `folderPath`, `authoritativeFileName`, and a diff body containing `<script>` markers.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `14-loopback-csrf-rejected.test.ts`          | Forge a `POST /submit` with missing CSRF token, wrong CSRF token, wrong `Host`, missing `Origin`, wrong `Content-Type`. Each must return 4xx and not advance form state. Audit records `csrfTokenMatched: false`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `15-sentinel-tamper-detected.test.ts`        | Open the project once (pin recorded). **Variant A (rename, allowed):** mutate sentinel `authoritativeFileName` while keeping the same `authoritativeFileId`. Re-open: succeeds, `displayAuthoritativeFileName` refreshed silently, no audit entry. **Variant B (real tamper):** mutate sentinel `authoritativeFileId`. Re-open: returns `SentinelTamperedError`; `sentinel_changed` audit entry written. "Forget project" then re-open: succeeds with new pin. **Variant C (folder moved):** move the project folder to a different parent in mock Graph; re-open succeeds and `folderPath` is silently refreshed in recents and local metadata.                                                                                       |
+| `16-multiple-root-md.test.ts`                | **N=1 variant:** init folder with single root `.md` `spec.md` — form pre-selects it; spy submits without changing selection; sentinel records `spec.md`. **N=3 variant:** folder with `README.md`, `NOTES.md`, `spec.md` — form has no default; spy attempts submit with no selection (rejected client-side); spy then selects `spec.md` and submits; sentinel records `spec.md`; the other two remain unmodified and are visible in `collab_list_files` ROOT group as ordinary entries.                                                                                                                                                                                                                                               |
+| `17-share-url-host-allowlist.test.ts`        | Paste `file:///etc/passwd`, `http://localhost`, `https://attacker.example`, `https://1drv.ms/foo` (allowed). First three return `InvalidShareUrlError` with no Graph call. Fourth proceeds to `/shares/u!…`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `18-form-busy-lock.test.ts`                  | Open the init form; while it's open, another tool call requests a destructive form. Second call returns `FormBusyError` carrying the URL of the in-flight form. After completing the first form, the second call succeeds. **Lock-release matrix:** the lock must release on every terminal outcome. Sub-tests cover submit, cancel (POST /cancel), timeout (form server's 120 s elapsed), transport abort (caller's signal aborted), and an uncaught exception thrown inside the form's submit handler. After each, a fresh form request must succeed.                                                                                                                                                                                |
+| `19-session-survives-reconnect.test.ts`      | Active session in process P. Drop the stdio transport without exiting P. Open a new transport against P. Active session is the same `sessionId`; budgets and destructive counter unchanged. Variant: kill P; restart; session is gone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `20-doc-id-recovery.test.ts`                 | Three variants. **A (success):** wipe both frontmatter and local `docId`, then call `session_recover_doc_id` — walks mock-Graph versions, finds an old version with parseable frontmatter, writes `doc_id` back to local cache, audits `doc_id_recovered`; subsequent `collab_write` succeeds. **B (already known):** call `session_recover_doc_id` when both live frontmatter and local cache hold the same `doc_id` — returns `DocIdAlreadyKnownError` informational, not isError. **C (unrecoverable):** wipe everything plus history; call returns `DocIdUnrecoverableError` with `versionsInspected` count and the "init fresh project" guidance.                                                                                 |
+| `21-agent-name-unknown.test.ts`              | Connect with an MCP `clientInfo` payload missing `name`. First tool call audits `agent_name_unknown` once, then proceeds with `agentId = <oid>-unknown-<sessionId>`. Subsequent tool calls in the same session do **not** repeat the warn (warn-once-per-session).                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ### 8.3 Helper additions
 
@@ -2309,6 +2403,20 @@ Folder: `test/integration/collab/`. Each test sets up a fresh
   the form URL, fetches the rendered HTML for assertion, extracts the
   embedded CSRF token, and lets tests POST a forged or genuine
   submit. Required by tests 05, 06, 07, 13, 14, 16, 17, 18.
+- **Add `GraphClient.stats` getter for test instrumentation.** Test
+  12's "form-wait isolation from retry budget" assertion needs a
+  way to observe that `GraphClient.performRequest`'s internal
+  retry counter does not advance during a 5-second form wait.
+  Approach: expose a read-only `stats: { totalRequests, totalRetries,
+lastRetryAt, lastRequestAt }` getter on `GraphClient` (zero
+  runtime overhead — already-tracked fields just made visible).
+  Snapshot before form wait, snapshot after, assert equality on
+  `totalRetries` and an unchanged `lastRetryAt`. Same getter
+  doubles as a debugging aid for §1.5 throttle behaviour. The
+  alternative — inspecting `test/mock-graph.ts` request-log timing
+  gaps — is rejected because it would couple the test to mock
+  internals and miss the case where retries happen _without_
+  hitting the mock (e.g. an aborted request retried locally).
 
 ### 8.4 Expectations on existing tests
 
@@ -2360,11 +2468,15 @@ inherits a hardened substrate.
 
 ### Week 1 — auth + scaffolding
 
-- **W1 Day 1 — `userOid` plumbing.** Surface `localAccountId` /
-  `oid` via `Authenticator.accountInfo`. Update `MockAuthenticator`,
+- **W1 Day 1 — `userOid` plumbing.** Surface `idTokenClaims.oid`
+  via `Authenticator.accountInfo` (per OQ-6 round-3 decision; lands
+  as ADR-002). Do **not** use `localAccountId` — they can differ in
+  multi-tenant and B2B-guest setups, and we don't want that
+  ambiguity in audit logs. Update `MockAuthenticator`,
   `account.json` persistence, `src/tools/status.ts`. DoD:
-  `test/auth.test.ts` extended; `userOid` reaches every collab
-  consumer via `ServerConfig`.
+  `test/auth.test.ts` extended with an explicit assertion that
+  `userOid === idTokenClaims.oid`; `userOid` reaches every collab
+  consumer via `ServerConfig`; ADR-002 merged in the same PR.
 - **W1 Day 2 — `ServerConfig` extensions + sentinel codec.** Add
   `now?: () => Date`. Sentinel reader/writer with Zod schema +
   `SentinelTamperedError` plumbing (no UI yet). DoD: sentinel
@@ -2401,7 +2513,7 @@ inherits a hardened substrate.
   passes.
 - **W2 Day 4 — `collab_read` + `collab_list_files`.** Faithful
   listing with `isAuthoritative` marker. DoD: `01-init-write-read-
-  list.test.ts` end-to-end happy path.
+list.test.ts` end-to-end happy path.
 - **W2 Day 5 — buffer.** Frontmatter determinism and scope are the
   two highest-risk surfaces in the doc. Catch overflow here, not
   by squeezing W3.
@@ -2412,19 +2524,19 @@ inherits a hardened substrate.
   `writeProjectFile` with `If-Match`/`conflictBehavior`. Reuses
   `requestRaw`. DoD: `test/graph/collab.test.ts` covers cTag
   mismatch, byPath create, byId replace.
-- **W3 Day 2 — `collab_write` tool registration + `source` parameter
-  + external re-prompt.** No shingle heuristic (cut). DoD: write
-  happy path + cTag mismatch + external-source approve + decline.
+- \*\*W3 Day 2 — `collab_write` tool registration + `source` parameter
+  - external re-prompt.\*\* No shingle heuristic (cut). DoD: write
+    happy path + cTag mismatch + external-source approve + decline.
 - **W3 Day 3 — Audit writer + redaction allow-list.** Atomic
   appends, ≤4096-byte cap, `_unscoped.jsonl` fallback,
   `Bearer`-substring rejection. DoD: `audit.test.ts` passes; kill-
   mid-write test produces a parseable file.
-- **W3 Day 4 — `collab_acquire_section` + `collab_release_section`
-  + leases sidecar codec.** Free (no budget cost). Lease state in
-  `.collab/leases.json` (§3.2.1), not in the authoritative-file
-  frontmatter — fixes the round-2 throughput concern (8 MiB lease
-  cycles). DoD: `02-two-agents-different-sections.test.ts` and
-  `test/collab/leases.test.ts` pass.
+- \*\*W3 Day 4 — `collab_acquire_section` + `collab_release_section`
+  - leases sidecar codec.\*\* Free (no budget cost). Lease state in
+    `.collab/leases.json` (§3.2.1), not in the authoritative-file
+    frontmatter — fixes the round-2 throughput concern (8 MiB lease
+    cycles). DoD: `02-two-agents-different-sections.test.ts` and
+    `test/collab/leases.test.ts` pass.
 - **W3 Day 5 — buffer.**
 
 ### Week 4 — proposals + open flow
@@ -2441,26 +2553,26 @@ inherits a hardened substrate.
   re-prompt).** Slug-first / hash-fallback lookup;
   `slug_drift_resolved` audit; `SectionAnchorLostError` only
   when both anchors fail. DoD: `07-destructive-apply-proposal
-  .test.ts` (all three variants) passes.
+.test.ts` (all three variants) passes.
 - **W4 Day 4 — `session_open_project` + sentinel pinning + silent
   folder-path refresh.** URL paste resolution (with host
   allow-list), shared-with-me listing, recents. Open form. DoD:
   `15-sentinel-tamper-detected.test.ts` (all three variants
   including folder-moved) and `17-share-url-host-allowlist
-  .test.ts` pass.
+.test.ts` pass.
 - **W4 Day 5 — `session_renew` + renewal caps.** Renewal counts
   file with rolling-window pruning. Fake-clock test infra. DoD:
   `11-renewal-caps.test.ts` passes.
 
 ### Week 5 — versions + delete + polish
 
-- **W5 Day 1 — `collab_list_versions` + `collab_restore_version`
-  + `session_recover_doc_id`.** Reuse `listDriveItemVersions`.
-  Destructive re-prompt for authoritative restore. The recovery
-  tool walks `/versions` for parseable frontmatter, capped at 50
-  versions (§2.2). DoD: integration tests for restore on
-  authoritative + on a draft file; `20-doc-id-recovery.test.ts`
-  (all three variants) passes.
+- \*\*W5 Day 1 — `collab_list_versions` + `collab_restore_version`
+  - `session_recover_doc_id`.\*\* Reuse `listDriveItemVersions`.
+    Destructive re-prompt for authoritative restore. The recovery
+    tool walks `/versions` for parseable frontmatter, capped at 50
+    versions (§2.2). DoD: integration tests for restore on
+    authoritative + on a draft file; `20-doc-id-recovery.test.ts`
+    (all three variants) passes.
 - **W5 Day 2 — `collab_delete_file`.** Always-destructive
   re-prompt; refuse authoritative and sentinel. DoD: integration
   test covers proposals, drafts, attachments, and explicit
@@ -2509,6 +2621,49 @@ Stated this way because the previous "5–6 weeks" summary was
 ambiguous — it didn't make clear whether W0 was inside or outside
 the band. It is **inside**: realistic = 6 weeks including W0;
 worst-case = 7 weeks including W6 reserve.
+
+**Productivity assumption (stated explicitly, not implied).** The
+6-week realistic figure assumes sustained throughput of roughly
+**1,000 LOC/day combined (src + tests)** for a single engineer
+working in this codebase. At ~12,000 LOC total (Appendix A: 5,920
+src + 6,020 tests), that's ~12 working days of pure-coding time
+plus the rest of the 30-day budget for design, debugging, code
+review iteration, and the W0 hardening test rows. This is
+**achievable but not casual**, and only achievable if:
+
+- The engineer is **fluent in this codebase's existing patterns**:
+  `GraphClient.request()`, `Zod` schemas, the picker/loopback
+  template substrate, `ServerConfig` injection, `MockAuthenticator`
+  conventions. A new engineer needs at least W0 to ramp up; they
+  hit ~1,000 LOC/day around W1 Day 3.
+- Heavily-templated code (tool registrations, Zod schemas, mock
+  Graph handlers, audit type definitions) compensates for the
+  algorithmically novel pieces (scope resolution algorithm,
+  slug+hash authorship anchoring, deterministic YAML emit, leases
+  sidecar CAS, doc-id recovery walk). These novel pieces will
+  consume disproportionate time per LOC.
+
+If the engineer is **not** fluent in this codebase, calendar
+expansion is reasonable: **realistic 8-10 weeks**, worst-case
+9-11 weeks. Set stakeholder expectations accordingly when staffing.
+
+**Re-baseline triggers (no more than twice).** Velocity is
+verified by progress-file evidence, not by feel:
+
+- **End of W1.** If W0 + W1 milestones (10 working days) landed on
+  schedule with passing CI, the 6-week calendar stands. If they
+  slipped by ≥2 days, re-estimate W2-W5 in the same proportion
+  and record the amendment as an ADR. Notify stakeholders of the
+  new expected ship date.
+- **End of W3.** Mid-point sanity check. If W2 + W3 added another
+  ≥2 days of slip beyond the W1 baseline, do a second
+  re-estimate. If the trend is worse than 2× the original
+  estimate at W3, escalate: scope cut (drop a tool from v1) or
+  add a second engineer to the W4 + W5 milestones.
+
+No re-baselining beyond W3 — the runway is too short and the
+overhead too high. After W3 we ship what's done at end of W5 +
+W6, and any unfinished tools become v1.1.
 
 ## 10. Open questions
 
@@ -2562,10 +2717,17 @@ threat model) are no longer listed as questions.
    returns `username`. To form the `agentId` prefix we need
    `localAccountId` from MSAL's `AuthenticationResult.account` or the
    `oid` claim from the id token. Both are accessible via `msal-node`
-   APIs not currently surfaced. Adding `userOid: string` to
+   APIs not currently surfaced. **Round-3 decision: use
+   `idTokenClaims.oid`.** Rationale: standard Entra object
+   identifier; matches `GET /me.id` in most cases; well-documented;
+   works the same way for OneDrive personal and (eventual v2)
+   business / B2B-guest scenarios. `localAccountId` _can_ differ
+   from `oid` in multi-tenant and B2B-guest setups, and we don't
+   want that ambiguity baked into agentIds that show up in audit
+   logs. This pin lands as ADR-002 at W1 Day 1; coordinate with
+   anyone touching `auth.ts`. Adding `userOid: string` to
    `AccountInfo` is a small change but spans `src/auth.ts`,
-   `src/tools/status.ts`, and the `MockAuthenticator`. Flag to
-   coordinate with anyone touching `auth.ts`.
+   `src/tools/status.ts`, and the `MockAuthenticator`.
 7. **OneDrive personal vs business cTag stability.** The brief
    constrains v1 to OneDrive personal drives. The cTag semantics
    ("content-only ETag") are documented for OneDrive personal and
@@ -2585,6 +2747,151 @@ threat model) are no longer listed as questions.
    returns 405. We pre-validate that `path` resolves to a file before
    issuing the PUT, mirroring the defence-in-depth checks in markdown
    tools (`src/tools/markdown.ts:551-575`).
+10. **Audit-append concurrency on Windows.** §3.6 documents that
+    `fs.appendFile` on Windows is not atomic against another
+    process. Two MCP instances appending to the same audit file
+    concurrently can interleave bytes mid-line. v1 accepts this
+    fringe scenario (typical user runs one MCP host per project at
+    a time) and relies on the parser's partial-line tolerance.
+    v2 mitigation candidates: `proper-lockfile` for cross-process
+    advisory locking, or routing audit through a dedicated child
+    process with a single appender. Promoted from §3.6 to keep
+    visible.
+
+## 12. Execution discipline
+
+This work is too large for one PR and too risky for direct merges
+to `main`. The discipline below is the contract under which W0
+starts.
+
+### 12.1 Branching strategy
+
+- **Long-lived integration branch: `feat/collab-v1`.** Branched off
+  `main` at the start of W0. **Never force-pushed.** `main` never
+  receives collab code directly during the build-out.
+- **Per-milestone branches: `feat/collab-v1/w<N>-d<M>-<slug>`**
+  branched off `feat/collab-v1`. Examples:
+  `feat/collab-v1/w0-d1-escape-html`,
+  `feat/collab-v1/w1-d1-user-oid`,
+  `feat/collab-v1/w2-d3-scope-resolution`.
+- Each per-milestone PR targets `feat/collab-v1`, **not `main`**.
+- When all of W0-W5 has merged into `feat/collab-v1` and the W6
+  reserve is either consumed or released, **a single final PR
+  merges `feat/collab-v1` into `main`**. This PR is a formality;
+  review happened milestone-by-milestone.
+
+### 12.2 Per-PR rules
+
+Every milestone PR follows the same shape so reviewers know what
+to expect:
+
+- **Scope: exactly one milestone from §9.** No sneaking W3 Day 2
+  work into a W3 Day 1 PR. If extra related work surfaces, file a
+  follow-up issue.
+- **Size budget: aim for ≤800 LOC changed (src + tests).** If a
+  milestone doesn't fit, split it and update §9 to match (via an
+  ADR — see §12.4). **Hard ceiling 1,500 LOC**; anything larger
+  blocks review.
+- **DoD checklist in the PR description**, copied verbatim from
+  the §9 milestone, with each item ticked before requesting
+  review.
+- **Progress-file update included in the same PR** (§12.3). The
+  PR cannot merge without the progress-file change.
+- **Every PR leaves `main` green.** Before each merge into
+  `feat/collab-v1`, rebase the integration branch onto `main` so
+  CI runs against current `main`. Use **merge commits, not
+  squash**, so milestone history stays readable in
+  `git log --first-parent`.
+- **No PR references unreleased scope.** If a milestone references
+  a schema field or tool that doesn't exist yet, either include
+  the skeleton for it in this PR or defer the reference.
+
+### 12.3 Progress tracking lives in the branch
+
+Two files at `docs/plans/` track state:
+
+1. **`docs/plans/collab-v1.md`** — the plan itself (this
+   document). **Frozen** at the state at which W0 starts; updates
+   only for decision amendments recorded as ADRs.
+2. **`docs/plans/collab-v1-progress.md`** — the **live** progress
+   file. Updated in the same PR as each milestone ships. Format
+   is a markdown file with three tables: Completed, In flight,
+   Not started. Each milestone row links to its PR and merge
+   date. The bootstrap version of this file lives in the branch
+   from day one with all milestones in Not started.
+
+This file is the single source of truth for "where are we?".
+Anyone picking up the work reads it first. It lives in the branch,
+so it's always the view appropriate to `feat/collab-v1` state.
+`main` never sees it until final merge.
+
+### 12.4 Decision amendments as ADRs
+
+The plan itself is frozen. Decisions that change during
+implementation land as short ADRs under `docs/adr/`, numbered
+sequentially. Each ADR:
+
+- States the decision in one sentence.
+- References the §N of the plan it amends.
+- Is created **in the same PR** as the code change that embodies
+  it.
+- Must be approved by the human reviewer.
+
+**Bootstrap ADR-001** at the start of W0 with the 20 locked
+decisions from the three review rounds. Subsequent ADRs number
+from 002. Minimum template: title, context (one paragraph),
+decision (one paragraph), consequences (one paragraph). No epic
+Nygard-style documents.
+
+Round-3 already pre-commits two future ADRs:
+
+- **ADR-002 at W1 Day 1:** `userOid = idTokenClaims.oid` (per OQ-6).
+- **ADR-003 at W2 Day 1:** `yaml` pinned at `~2.x.y` with
+  byte-exact snapshot test (per §6 dependency policy).
+
+### 12.5 Handoff contract when work pauses
+
+If the engineer pauses mid-milestone (illness, context switch, end
+of sprint), the next person picks up from the progress file.
+Handoff contract:
+
+- The in-flight branch is **pushed to origin** (even if the PR is
+  a draft).
+- `docs/plans/collab-v1-progress.md` on the in-flight branch is
+  updated with a note under "In flight" describing **exactly what
+  is done and what the next step is**. "Scope-resolution
+  pre-normalisation refusals complete; NFKC check in progress;
+  byId resolution and ancestry walk not started" beats "partway
+  through W2 Day 3."
+- The draft PR has a checklist of sub-items in the description,
+  ticked as they complete.
+
+### 12.6 Rebase or merge?
+
+- **Per-milestone PR → `feat/collab-v1`:** merge commit (not
+  squash), so each milestone is one mergeable unit visible in
+  history.
+- **`feat/collab-v1` → `main` (final PR):** merge commit, so the
+  full milestone history stays visible in `git log --first-parent`
+  on `main`.
+- **Rebase `feat/collab-v1` onto `main`** before each per-PR merge
+  so CI is honest. Never rewrite history after push.
+
+### 12.7 Green-light condition
+
+W0 starts when:
+
+- [ ] `feat/collab-v1` exists, branched from current `main`.
+- [ ] `docs/plans/collab-v1-progress.md` exists on
+      `feat/collab-v1` with all §9 milestones in Not started.
+- [ ] `docs/adr/0001-collab-v1-decision-log.md` exists on
+      `feat/collab-v1` with the 20 locked decisions.
+- [ ] `npm run check` is green on `feat/collab-v1`.
+
+The first three items land in a single bootstrap PR titled
+"docs(collab): bootstrap v1 progress + ADR-001 decision log"; the
+fourth is verified by CI on that PR. Only then does W0 Day 1
+begin.
 
 ## 11. Non-goals (verbatim)
 
@@ -2609,7 +2916,7 @@ threat model) are no longer listed as questions.
 
 Directory split. The tool-developer review pushed back on a freestanding
 `src/collab/` directory. The compromise: keep `src/collab/` for the
-*cross-cutting non-tool, non-Graph utilities* (session lifecycle, scope
+_cross-cutting non-tool, non-Graph utilities_ (session lifecycle, scope
 resolution algorithm, frontmatter codec, audit writer, sentinel codec,
 recents/renewal/destructive-counter persistence). Tool registration
 stays in `src/tools/`, Graph helpers stay in `src/graph/`, templates
@@ -2620,53 +2927,53 @@ stay in `src/templates/` (matches existing `login.ts`, `picker.ts`,
 
 Proposed new files:
 
-| File | LOC estimate |
-| --- | --- |
-| `src/collab/session.ts` (lifecycle, agentId with `clientInfo` slug + warn-once-unknown, currentSession, reconnect-survival) | 380 |
-| `src/collab/scope.ts` (§4.6 algorithm, all eight refusals + post-resolution checks + flat-vs-recursive group rules) | 380 |
-| `src/collab/frontmatter.ts` (yaml round-trip, deterministic emit, doc_id recovery) | 380 |
-| `src/collab/slug.ts` (GitHub-flavored slug + collision walk + preamble synthetic) | 100 |
-| `src/collab/authorship.ts` (slug + content-hash anchoring, slug-drift fallback) | 200 |
-| `src/collab/leases.ts` (sidecar codec, lazy-create, expired-lease cleanup, graceful 404 degradation) | 220 |
-| `src/collab/audit.ts` (writer, redaction, ≤4096-byte cap, Bearer-rejection) | 240 |
-| `src/collab/ulid.ts` (inlined) | 60 |
-| `src/collab/sentinel.ts` (read, write, rename-tolerant pinning, tamper detection, silent folder-path refresh) | 240 |
-| `src/collab/recents.ts` | 120 |
-| `src/collab/renewal.ts` | 160 |
-| `src/collab/destructive-counter.ts` (§3.7 persistence) | 100 |
-| `src/collab/doc-id-recovery.ts` (`/versions` walk, version cap, parseable-frontmatter detection) | 180 |
-| `src/graph/collab.ts` (sentinel/authoritative/leases I/O, shares with host allow-list, sharedWithMe + permissions filter, attachments recursive walk) | 540 |
-| `src/templates/collab.ts` (init/open/destructive/external form HTML; init form N=1 vs N≥2 default-selection logic) | 560 |
-| `src/templates/escape.ts` (`escapeHtml`) | 40 |
-| `src/tools/collab-forms.ts` (form factory + lock with finally-release contract + W0 hardening wrapper) | 420 |
-| `src/tools/session.ts` (5 session_* tools incl. `session_recover_doc_id`) | 540 |
-| `src/tools/collab.ts` (10 collab_* tools) | 1 060 |
+| File                                                                                                                                                  | LOC estimate |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `src/collab/session.ts` (lifecycle, agentId with `clientInfo` slug + warn-once-unknown, currentSession, reconnect-survival)                           | 380          |
+| `src/collab/scope.ts` (§4.6 algorithm, all eight refusals + post-resolution checks + flat-vs-recursive group rules)                                   | 380          |
+| `src/collab/frontmatter.ts` (yaml round-trip, deterministic emit, doc_id recovery)                                                                    | 380          |
+| `src/collab/slug.ts` (GitHub-flavored slug + collision walk + preamble synthetic)                                                                     | 100          |
+| `src/collab/authorship.ts` (slug + content-hash anchoring, slug-drift fallback)                                                                       | 200          |
+| `src/collab/leases.ts` (sidecar codec, lazy-create, expired-lease cleanup, graceful 404 degradation)                                                  | 220          |
+| `src/collab/audit.ts` (writer, redaction, ≤4096-byte cap, Bearer-rejection)                                                                           | 240          |
+| `src/collab/ulid.ts` (inlined)                                                                                                                        | 60           |
+| `src/collab/sentinel.ts` (read, write, rename-tolerant pinning, tamper detection, silent folder-path refresh)                                         | 240          |
+| `src/collab/recents.ts`                                                                                                                               | 120          |
+| `src/collab/renewal.ts`                                                                                                                               | 160          |
+| `src/collab/destructive-counter.ts` (§3.7 persistence)                                                                                                | 100          |
+| `src/collab/doc-id-recovery.ts` (`/versions` walk, version cap, parseable-frontmatter detection)                                                      | 180          |
+| `src/graph/collab.ts` (sentinel/authoritative/leases I/O, shares with host allow-list, sharedWithMe + permissions filter, attachments recursive walk) | 540          |
+| `src/templates/collab.ts` (init/open/destructive/external form HTML; init form N=1 vs N≥2 default-selection logic)                                    | 560          |
+| `src/templates/escape.ts` (`escapeHtml`)                                                                                                              | 40           |
+| `src/tools/collab-forms.ts` (form factory + lock with finally-release contract + W0 hardening wrapper)                                                | 420          |
+| `src/tools/session.ts` (5 session\_\* tools incl. `session_recover_doc_id`)                                                                           | 540          |
+| `src/tools/collab.ts` (10 collab\_\* tools)                                                                                                           | 1 060        |
 
 Test files:
 
-| File | LOC estimate |
-| --- | --- |
-| `test/graph/collab.test.ts` | 540 |
-| `test/collab/*.test.ts` (8 files: session, scope, audit, frontmatter, slug, authorship, leases, sentinel) | 1 460 |
-| `test/integration/collab/*.test.ts` (21 files) | 3 100 |
-| `test/picker.test.ts` extensions (W0 hardening: CSRF + Host + Origin + Content-Type + Sec-Fetch-Site + CSP rows) | 320 |
-| `test/templates/*.test.ts` extensions (XSS rows for every interpolation) | 180 |
-| `test/mock-graph.ts` extensions (sharedWithMe, shares, versions, permissions, request recording, leases.json byPath) | 420 |
+| File                                                                                                                 | LOC estimate |
+| -------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `test/graph/collab.test.ts`                                                                                          | 540          |
+| `test/collab/*.test.ts` (8 files: session, scope, audit, frontmatter, slug, authorship, leases, sentinel)            | 1 460        |
+| `test/integration/collab/*.test.ts` (21 files)                                                                       | 3 100        |
+| `test/picker.test.ts` extensions (W0 hardening: CSRF + Host + Origin + Content-Type + Sec-Fetch-Site + CSP rows)     | 320          |
+| `test/templates/*.test.ts` extensions (XSS rows for every interpolation)                                             | 180          |
+| `test/mock-graph.ts` extensions (sharedWithMe, shares, versions, permissions, request recording, leases.json byPath) | 420          |
 
 Modifications:
 
-| File | Δ LOC |
-| --- | --- |
-| `src/index.ts` (register new tools, `now`, `userOid`) | +50 |
-| `src/auth.ts` (`userOid` field, account.json plumbing) | +55 |
-| `src/picker.ts` (W0 CSRF/Origin/Host/CSP hardening) | +130 |
-| `src/loopback.ts` (W0 hardening parity) | +60 |
-| `src/tool-registry.ts` (`group` field, instructions block) | +35 |
-| `src/tools/status.ts` (collab section incl. `leasesCTag`) | +50 |
-| `src/tools/login.ts`, `src/tools/markdown.ts` (use form factory) | +50 |
-| `src/templates/{login,picker,logout}.ts` (escapeHtml plumbing) | +40 |
-| `manifest.json` (tool descriptions for 15 new tools) | +130 |
-| `README.md`, `CHANGELOG.md` (frontmatter-reformat note, multi-root-md note, leases sidecar note, doc_id-recovery flow, attachments-recursive note) | +360 |
+| File                                                                                                                                               | Δ LOC |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `src/index.ts` (register new tools, `now`, `userOid`)                                                                                              | +50   |
+| `src/auth.ts` (`userOid` field, account.json plumbing)                                                                                             | +55   |
+| `src/picker.ts` (W0 CSRF/Origin/Host/CSP hardening)                                                                                                | +130  |
+| `src/loopback.ts` (W0 hardening parity)                                                                                                            | +60   |
+| `src/tool-registry.ts` (`group` field, instructions block)                                                                                         | +35   |
+| `src/tools/status.ts` (collab section incl. `leasesCTag`)                                                                                          | +50   |
+| `src/tools/login.ts`, `src/tools/markdown.ts` (use form factory)                                                                                   | +50   |
+| `src/templates/{login,picker,logout}.ts` (escapeHtml plumbing)                                                                                     | +40   |
+| `manifest.json` (tool descriptions for 15 new tools)                                                                                               | +130  |
+| `README.md`, `CHANGELOG.md` (frontmatter-reformat note, multi-root-md note, leases sidecar note, doc_id-recovery flow, attachments-recursive note) | +360  |
 
 Rough total: **5 920 LOC src, 6 020 LOC tests** for v1. Up again
 from the previous round's 5 540/5 400 because of the round-2
@@ -2744,7 +3051,7 @@ than further W6 raids.
    asserting in tests that no audit line ever contains the substring
    `"Bearer "` (test `04 audit.test.ts`).
 2. **Frontmatter as the coordination substrate.** Putting leases and
-   proposal metadata in YAML inside the file means *every* CAS-write
+   proposal metadata in YAML inside the file means _every_ CAS-write
    round-trips the entire file body. For files near the 4 MiB cap,
    a chatty agent can burn the write budget on metadata. Byte-
    stability across our own writes is mandatory (deterministic
