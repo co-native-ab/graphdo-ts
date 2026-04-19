@@ -50,6 +50,19 @@ changing the OS setting.
    Resource Monitor on Windows).
 3. Confirm the test tenant + account is the one expected.
 
+### Host-specific note: GitHub Copilot CLI tool visibility
+
+GitHub Copilot CLI exposes the scope-gated tools (todo, mail,
+markdown) **only after** `login` completes — the dynamic tool
+list change is surfaced via a `tools_changed_notice`. When
+running this smoke matrix in Copilot CLI (or any host that
+re-renders its tool list dynamically), wait for the notice
+before assuming a scope-gated tool is callable, and re-check
+visibility after `logout`. Steps that interleave login/logout
+with todo / mail / markdown tools (notably S6 and S7a) should
+allow for this transition. This is intended behaviour, not a
+defect; it is surfaced here so future smoke runs do not flag it.
+
 ## Smoke matrix
 
 For **each** (host, OS) cell, run the steps below in order. Mark
@@ -144,6 +157,27 @@ the Host-pin is wired live.
    cleared.
 3. Trigger `login` again to confirm a fresh interactive sign-in
    is required.
+
+### S7a. Logout — form-busy lock (cross-tool)
+
+The `logout` tool participates in the §5.3 form-factory lock the
+same way `login` and `todo_select_list` do (it opens its branded
+confirmation page through the loopback). The check below mirrors
+S6 with `logout` as the second tool.
+
+1. Sign in (run S1 to completion if not already authenticated).
+2. Trigger `todo_select_list` and leave the picker page open
+   without clicking anything.
+3. From the host UI, immediately trigger `logout`.
+4. **Expect:** the second tool returns `FormBusyError` with the
+   in-flight `todo_select_list` URL embedded in the error text
+   (per `src/tools/collab-forms.ts`). No second browser tab
+   opens; cached tokens are **not** cleared.
+5. Cancel the picker (or complete the selection) to release the
+   slot.
+6. Re-trigger `logout`.
+7. **Expect:** the branded confirmation page renders normally;
+   tokens are cleared. Lock has been released.
 
 ### S8. Headless / no-browser fallback
 
