@@ -1,10 +1,12 @@
 // MCP tools for managing a collab v1 session lifecycle:
 //
 //   - `session_init_project` (W1 Day 3 + W1 Day 4) — originator flow.
+//   - `session_status` (W1 Day 5) — reports the active session's TTL,
+//     budget counters, and source breakdown. Read-only.
 //   - `session_open_project` (W4 Day 4) — collaborator flow.
-//   - `session_status`, `session_renew`, `session_recover_doc_id` — later
-//     milestones. Empty placeholders are NOT registered here — each
-//     tool is added in the milestone that ships its DoD.
+//   - `session_renew`, `session_recover_doc_id` — later milestones. Empty
+//     placeholders are NOT registered here — each tool is added in the
+//     milestone that ships its DoD.
 //
 // W1 Day 4 adds multi-root-md handling: after the folder picker resolves,
 // a second browser picker is opened to let the human pick the
@@ -14,6 +16,12 @@
 // continues to throw `NoMarkdownFileError`. Both pickers share the
 // W0 form-factory slot, so concurrent tools always see the URL of the
 // page the human is currently looking at in `FormBusyError`.
+//
+// W1 Day 5 wires `session_init_project` into the in-memory
+// `SessionRegistry` (see `src/collab/session.ts`) and persists the
+// destructive counter to `<configDir>/sessions/destructive-counts.json`
+// per §3.7 so the file format survives a process restart. `session_status`
+// is the first reader of the registry.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -51,6 +59,7 @@ import {
   type ProjectMetadata,
   type RecentEntry,
 } from "../collab/projects.js";
+import { NoActiveSessionError, SessionAlreadyActiveError } from "../collab/session.js";
 import { newUlid } from "../collab/ulid.js";
 import { listRootFolders } from "../graph/markdown.js";
 
@@ -77,7 +86,21 @@ const SESSION_INIT_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
-export const SESSION_TOOL_DEFS: readonly ToolDef[] = [SESSION_INIT_DEF];
+const SESSION_STATUS_DEF: ToolDef = {
+  name: "session_status",
+  title: "Collab Session Status",
+  description:
+    "Report the active collaboration session's project, agent identity, " +
+    "TTL, write/destructive/renewal counters, and per-source counters " +
+    "(chat / project / external). Read-only and free — no Graph calls, " +
+    "no destructive-budget cost. Returns a 'no active session' message " +
+    "(not isError) when nothing is active. When the session is past its " +
+    "TTL, returns 'expired: true' with the counters frozen so the agent " +
+    "knows to call session_renew.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
+export const SESSION_TOOL_DEFS: readonly ToolDef[] = [SESSION_INIT_DEF, SESSION_STATUS_DEF];
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -120,6 +143,33 @@ export function registerSessionTools(server: McpServer, config: ServerConfig): T
         }
       },
     ),
+    defineTool(
+      server,
+      SESSION_STATUS_DEF,
+      {
+        inputSchema: z.object({}).shape,
+        annotations: {
+          title: SESSION_STATUS_DEF.title,
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (_args, { signal }) => {
+        try {
+          // `signal` is part of the convention (every async tool takes
+          // one) even though `session_status` is pure in-memory today.
+          // Future readers (lease summaries, on-demand sentinel re-read)
+          // will need it; threading it now keeps the signature stable.
+          if (signal.aborted) throw signal.reason;
+          return runSessionStatus(config);
+        } catch (err: unknown) {
+          return formatError("session_status", err);
+        }
+      },
+    ),
   ];
 }
 
@@ -139,6 +189,15 @@ async function runInitProject(
 ): Promise<{ content: { type: "text"; text: string }[] }> {
   const client = config.graphClient;
   const now = config.now ?? ((): Date => new Date());
+
+  // Refuse early if a session is already active in this MCP instance —
+  // §2.2 limits the process to one active session at a time. Checking
+  // here (before opening any browser tab) keeps the failure mode
+  // cheap: no picker URL to clean up, no `.collab/` write half-done.
+  const existing = config.sessionRegistry.snapshot();
+  if (existing !== null) {
+    throw new SessionAlreadyActiveError(existing.projectId);
+  }
 
   // Display name comes from the signed-in account so the sentinel's
   // `createdBy.displayName` reflects the human who initialised the
@@ -356,6 +415,30 @@ async function runInitProject(
   };
   await upsertRecent(config.configDir, recent, signal);
 
+  // ------- Activate the in-memory session (W1 Day 5) -------
+  //
+  // Per `docs/plans/collab-v1.md` §2.2 the session is bound to this MCP
+  // server's OS process. The registry refuses (`SessionAlreadyActiveError`)
+  // when one is already active so the agent must end the existing session
+  // before starting a new one. Defaults for TTL / write budget /
+  // destructive budget come from §5.2.1 — the full slider form lands in
+  // a later milestone (the W1 Day 4 init UI only collects folder + file).
+  //
+  // `clientSlug` is hard-coded to `"unknown"` until W5 Day 3 ("agentId
+  // fallback") plumbs MCP `clientInfo.name` through the SDK; the resulting
+  // `agentId` still uniquely identifies this session via its `sessionId`
+  // suffix.
+  const sessionSnapshot = await config.sessionRegistry.start(
+    {
+      projectId,
+      userOid: account.userOid,
+      clientSlug: "unknown",
+      folderPath,
+      authoritativeFileName: authoritativeFile.name,
+    },
+    signal,
+  );
+
   // ------- Render success -------
 
   const opening = renderOpeningMessage({
@@ -376,10 +459,73 @@ async function runInitProject(
           `  folderPath: ${folderPath}\n` +
           `  authoritativeFile: ${authoritativeFile.name} (${authoritativeFile.id})\n` +
           `  sentinel: ${SENTINEL_FOLDER_NAME}/project.json (cTag ${sentinelCTag})\n\n` +
+          `Session active.\n` +
+          `  sessionId: ${sessionSnapshot.sessionId}\n` +
+          `  agentId: ${sessionSnapshot.agentId}\n` +
+          `  ttlSeconds: ${sessionSnapshot.ttlSeconds}\n` +
+          `  writeBudget: ${sessionSnapshot.writeBudgetTotal}\n` +
+          `  destructiveBudget: ${sessionSnapshot.destructiveBudgetTotal}\n\n` +
           "Local pin recorded — subsequent opens will detect a tampered sentinel.",
       },
     ],
   };
+}
+
+// ---------------------------------------------------------------------------
+// session_status
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the active session as a human-readable text envelope. Per §2.2
+ * `session_status`, an expired session is reported as `expired: true`
+ * (rather than `isError: true`) with the counters frozen so the agent
+ * can call `session_renew` without first calling another tool.
+ */
+function runSessionStatus(config: ServerConfig): {
+  content: { type: "text"; text: string }[];
+} {
+  const snap = config.sessionRegistry.snapshot();
+  if (snap === null) {
+    throw new NoActiveSessionError();
+  }
+  const expired = config.sessionRegistry.isExpired();
+  const secondsRemaining = expired ? 0 : config.sessionRegistry.secondsRemaining();
+  const lines: string[] = [];
+  lines.push(`Collab session: ${expired ? "expired" : "active"}`);
+  lines.push(`  projectId: ${snap.projectId}`);
+  lines.push(`  agentId: ${snap.agentId}`);
+  lines.push(`  userOid: ...${userOidSuffix(snap.userOid)}`);
+  lines.push(`  folderPath: ${snap.folderPath}`);
+  lines.push(`  authoritativeFile: ${snap.authoritativeFileName}`);
+  lines.push(`  startedAt: ${snap.startedAt}`);
+  lines.push(`  expiresAt: ${snap.expiresAt}`);
+  lines.push(`  secondsRemaining: ${secondsRemaining}`);
+  lines.push(`  expired: ${expired ? "true" : "false"}`);
+  lines.push(`  writes: ${snap.writesUsed} / ${snap.writeBudgetTotal}`);
+  lines.push(`  destructive approvals: ${snap.destructiveUsed} / ${snap.destructiveBudgetTotal}`);
+  lines.push(`  renewals (this session): ${snap.renewalsUsed} / 3`);
+  lines.push(
+    `  source counters: chat=${snap.sourceCounters.chat} ` +
+      `project=${snap.sourceCounters.project} ` +
+      `external=${snap.sourceCounters.external}`,
+  );
+  if (expired) {
+    lines.push("");
+    lines.push("Session is past its TTL. Use session_renew to reset the clock.");
+  }
+  return {
+    content: [{ type: "text", text: lines.join("\n") }],
+  };
+}
+
+/**
+ * Last 8 chars of an Entra `oid` UUID (with hyphens stripped) — only
+ * surfaced in `session_status` output to keep that text grep-friendly
+ * while reminding operators the full id lives in the audit log.
+ */
+function userOidSuffix(userOid: string): string {
+  const flat = userOid.replace(/-/g, "");
+  return flat.length <= 8 ? flat : flat.slice(-8);
 }
 
 /**
