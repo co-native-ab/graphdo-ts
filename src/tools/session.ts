@@ -1,16 +1,19 @@
 // MCP tools for managing a collab v1 session lifecycle:
 //
-//   - `session_init_project` (W1 Day 3) — originator flow.
+//   - `session_init_project` (W1 Day 3 + W1 Day 4) — originator flow.
 //   - `session_open_project` (W4 Day 4) — collaborator flow.
 //   - `session_status`, `session_renew`, `session_recover_doc_id` — later
 //     milestones. Empty placeholders are NOT registered here — each
 //     tool is added in the milestone that ships its DoD.
 //
-// The W1 Day 3 happy path covers single-`.md` folders only. Multi-md
-// resolution lands in W1 Day 4 (`16-multiple-root-md.test.ts`); for
-// now, a folder with more than one root `.md` file returns the same
-// `NoMarkdownFileError` as the zero-`.md` case but with the count in the
-// message so the human can see why.
+// W1 Day 4 adds multi-root-md handling: after the folder picker resolves,
+// a second browser picker is opened to let the human pick the
+// authoritative `.md` file. This picker is shown for every folder with
+// ≥1 root `.md` files (including the N=1 case, where it pre-selects the
+// only option for confirmation). A folder with zero root `.md` files
+// continues to throw `NoMarkdownFileError`. Both pickers share the
+// W0 form-factory slot, so concurrent tools always see the URL of the
+// page the human is currently looking at in `FormBusyError`.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -63,13 +66,14 @@ const SESSION_INIT_DEF: ToolDef = {
   title: "Initialise Collab Project",
   description:
     "Start a new collaboration project. Opens a browser form where the human " +
-    "selects the OneDrive folder and (when the folder contains more than one " +
-    "markdown file at the root) the authoritative markdown file. All " +
-    "parameters come from that form, not from this tool call. Writes a " +
-    ".collab/project.json sentinel into the chosen folder, records the " +
-    "project locally, and adds a recents entry. Returns the resulting " +
-    "projectId, folder path, and authoritative file name. Use " +
-    "session_open_project to join an existing project as a collaborator.",
+    "selects the OneDrive folder, then a second browser form to choose the " +
+    "authoritative markdown file at the root of that folder (auto-confirmed " +
+    "when the folder contains exactly one). All parameters come from those " +
+    "forms, not from this tool call. Writes a .collab/project.json sentinel " +
+    "into the chosen folder, records the project locally, and adds a recents " +
+    "entry. Returns the resulting projectId, folder path, and authoritative " +
+    "file name. Use session_open_project to join an existing project as a " +
+    "collaborator.",
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
@@ -221,25 +225,56 @@ async function runInitProject(
   // (which carries a synthetic leading `/` to render the path).
   const folderItem = await getDriveItem(client, chosenFolderId, signal);
 
-  // W1 Day 3 — single-md happy path. Multi-md resolution lands in W1 Day 4
-  // via the `16-multiple-root-md.test.ts` form. Until then, treat both the
-  // zero-md and the multi-md case as a hard error so the agent does not
-  // silently pick the wrong file.
-  if (markdownFiles.length !== 1) {
-    if (markdownFiles.length === 0) {
-      throw new NoMarkdownFileError(folderItem.name, chosenFolderId);
-    }
-    throw new NoMarkdownFileError(
-      `${folderItem.name} (found ${String(markdownFiles.length)} root .md files; multi-file selection lands in a future version)`,
-      chosenFolderId,
-    );
+  if (markdownFiles.length === 0) {
+    throw new NoMarkdownFileError(folderItem.name, chosenFolderId);
   }
-  const authoritativeFile = markdownFiles[0];
+
+  // ------- Browser picker: pick the authoritative .md file -------
+  //
+  // Always show a confirmation form, even for the N=1 case, so the
+  // human explicitly authorises which file becomes the project's
+  // authoritative source. The picker validates the selected id against
+  // the list of root `.md` files reported by Graph, so the agent
+  // cannot smuggle in a different drive item.
+
+  const fileOptionsById = new Map(markdownFiles.map((f) => [f.id, f] as const));
+  const fileSubtitle =
+    markdownFiles.length === 1
+      ? `Confirm "${markdownFiles[0]?.name ?? ""}" as the authoritative markdown file for "${folderItem.name}". This is the file collab tools will read and write.`
+      : `Choose which markdown file at the root of "${folderItem.name}" is the authoritative source for this project. The other root .md files remain in the folder unmodified.`;
+  const fileHandle = await startBrowserPicker(
+    {
+      title: "Select Authoritative Markdown File",
+      subtitle: fileSubtitle,
+      options: markdownFiles.map((f) => ({ id: f.id, label: f.name })),
+      filterPlaceholder: "Filter files...",
+      onSelect: async () => {
+        // The init flow does its work after the picker resolves so the
+        // slot's URL stays useful in FormBusyError messages until the
+        // sentinel + metadata + recents writes complete.
+      },
+    },
+    signal,
+  );
+  slot.setUrl(fileHandle.url);
+
+  let fileBrowserOpened = false;
+  try {
+    await config.openBrowser(fileHandle.url);
+    fileBrowserOpened = true;
+    logger.info("session_init_project file picker opened", { url: fileHandle.url });
+  } catch (err: unknown) {
+    logger.warn("could not open browser for session_init_project file picker", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const fileResult = await fileHandle.waitForSelection;
+  const authoritativeFile = fileOptionsById.get(fileResult.selected.id);
   if (!authoritativeFile) {
-    // Defensive — `length === 1` already ensures non-undefined, but
-    // typescript's `noUncheckedIndexedAccess` makes the explicit guard
-    // necessary.
-    throw new Error("internal: markdown file list mismatch");
+    // Defensive — `startBrowserPicker` validates `selected.id` against
+    // the option set it was given, so this branch should be unreachable.
+    throw new Error("internal: authoritative file selection not found in option set");
   }
 
   // ------- Resolve drive metadata + folderPath -------
@@ -323,9 +358,12 @@ async function runInitProject(
 
   // ------- Render success -------
 
-  const opening = browserOpened
-    ? "A browser window opened so you could pick the project folder."
-    : `Browser auto-open failed; you visited ${handle.url} manually.`;
+  const opening = renderOpeningMessage({
+    folderOpened: browserOpened,
+    folderUrl: handle.url,
+    fileOpened: fileBrowserOpened,
+    fileUrl: fileHandle.url,
+  });
 
   return {
     content: [
@@ -342,6 +380,27 @@ async function runInitProject(
       },
     ],
   };
+}
+
+/**
+ * Compose the human-facing "we opened these browser windows for you"
+ * preamble. Reports the folder picker and (W1 Day 4) the file picker
+ * separately so the human knows which URLs to visit if the auto-open
+ * fell back.
+ */
+function renderOpeningMessage(args: {
+  folderOpened: boolean;
+  folderUrl: string;
+  fileOpened: boolean;
+  fileUrl: string;
+}): string {
+  const folderLine = args.folderOpened
+    ? "A browser window opened so you could pick the project folder."
+    : `Browser auto-open failed for the folder picker; you visited ${args.folderUrl} manually.`;
+  const fileLine = args.fileOpened
+    ? "A second window opened so you could confirm the authoritative markdown file."
+    : `Browser auto-open failed for the file picker; you visited ${args.fileUrl} manually.`;
+  return `${folderLine}\n${fileLine}`;
 }
 
 // ---------------------------------------------------------------------------

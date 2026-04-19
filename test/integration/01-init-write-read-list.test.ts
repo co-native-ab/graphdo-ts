@@ -33,28 +33,56 @@ import { resetFormFactoryForTest } from "../../src/tools/collab-forms.js";
 let env: IntegrationEnv;
 
 /**
- * Build a browser spy that, on the first call, schedules a POST to
- * `<url>/select` for the supplied folder id. Captures the URL it was
- * given so tests can assert on it.
+ * Build a browser spy that drives the chained init pickers:
+ *
+ *   - first call (folder picker) — POST `/select` with `folderId`
+ *   - second call (file picker, W1 Day 4) — POST `/select` with the
+ *     supplied `fileId` so the init flow records that file as the
+ *     authoritative markdown.
+ *
+ * Subsequent calls beyond the second are ignored (defensive — the init
+ * flow only opens two pickers). The most recent URL the spy was given
+ * is captured so tests can assert on the loopback URL surface.
+ *
+ * For tests that only reach the folder picker (e.g. zero-md and
+ * already-initialised error paths), `fileId` is unused.
  */
 function pickerSpy(
   folderId: string,
   folderLabel: string,
+  fileId?: string,
+  fileLabel?: string,
 ): {
   spy: (url: string) => Promise<void>;
   captured: { url: string };
 } {
   const captured = { url: "" };
+  let call = 0;
   const spy = (url: string): Promise<void> => {
     captured.url = url;
+    const which = call++;
     setTimeout(() => {
       void (async () => {
         const csrfToken = await fetchCsrfToken(url);
-        await fetch(`${url}/select`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: folderId, label: folderLabel, csrfToken }),
-        });
+        if (which === 0) {
+          await fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: folderId, label: folderLabel, csrfToken }),
+          });
+          return;
+        }
+        if (which === 1 && fileId !== undefined) {
+          await fetch(`${url}/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: fileId,
+              label: fileLabel ?? fileId,
+              csrfToken,
+            }),
+          });
+        }
       })();
     }, 150);
     return Promise.resolve();
@@ -102,7 +130,7 @@ describe("01-init-write-read-list", () => {
 
   describe("session_init_project happy path (single root .md)", () => {
     it("writes the sentinel + pin block + recents entry", async () => {
-      const { spy, captured } = pickerSpy("folder-proj", "/Project Foo");
+      const { spy, captured } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
       const auth = new MockAuthenticator({
         token: "init-token",
         username: "alice@example.com",
