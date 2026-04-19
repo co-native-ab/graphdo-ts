@@ -6,7 +6,13 @@ import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
 export interface LoginPageOptions {
-  /** CSRF token embedded in a `<meta name="csrf-token">` tag for `/cancel`. */
+  /**
+   * CSRF token. Embedded in a `<meta name="csrf-token">` tag — the landing
+   * page reads it from the meta tag and includes it in the `POST /cancel`
+   * body. The success and error pages don't have any state-changing
+   * controls, so the token is unused there but is accepted for API
+   * symmetry across the three login templates.
+   */
   csrfToken?: string;
   /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
   nonce?: string;

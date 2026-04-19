@@ -771,7 +771,7 @@ describe("browser picker: §5.4 loopback hardening", () => {
     });
   });
 
-  it("HTML embeds the CSRF token in a <meta> tag and a per-request nonce on inline <script>", async () => {
+  it("HTML embeds the CSRF token in a <meta> tag and a per-request nonce on inline <script> and <style>", async () => {
     await withPicker(async ({ handle, csrfToken }) => {
       const html = await (await fetch(handle.url)).text();
       expect(html).toContain(`<meta name="csrf-token" content="${csrfToken}">`);
