@@ -7,6 +7,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Authenticator } from "./auth.js";
 import { MsalAuthenticator, StaticAuthenticator, DEFAULT_TENANT_ID } from "./auth.js";
 import { openBrowser } from "./browser.js";
+import { newUlid } from "./collab/ulid.js";
+import { SessionRegistry } from "./collab/session.js";
 import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
@@ -59,6 +61,16 @@ export interface ServerConfig {
    * milestones do not have to back-fill the parameter through every tool.
    */
   now?: () => Date;
+  /**
+   * In-memory holder for the single active collab session (see §2.2 of
+   * `docs/plans/collab-v1.md`). Created in `createMcpServer()` and shared
+   * across all session/collab tools so they all see the same TTL math,
+   * budget counters, and persisted destructive state. The registry mirrors
+   * counter mutations to `<configDir>/sessions/destructive-counts.json`
+   * (§3.7) so a future `session_open_project` rebinding by `sessionId`
+   * does not reset the budget within the same session window.
+   */
+  sessionRegistry: SessionRegistry;
   /** Set by createMcpServer() — login/logout tools call this to sync tool visibility. */
   onScopesChanged?: (grantedScopes: GraphScope[]) => void;
 }
@@ -69,7 +81,7 @@ export interface ServerConfig {
 
 /** Create a configured McpServer instance with all tools registered. */
 export async function createMcpServer(
-  opts: Omit<ServerConfig, "graphClient">,
+  opts: Omit<ServerConfig, "graphClient" | "sessionRegistry">,
   signal: AbortSignal,
 ): Promise<McpServer> {
   // Collect all static tool definitions for instruction generation
@@ -98,7 +110,18 @@ export async function createMcpServer(
     getToken: (s: AbortSignal) => opts.authenticator.token(s),
   });
 
-  const config: ServerConfig = { ...opts, graphClient };
+  // The session registry is server-scoped — one process, one active session
+  // (see §2.2). The injected `now` factory keeps TTL math deterministic in
+  // tests; the ULID generator is seeded from the same clock so a fake clock
+  // yields reproducible session ids too.
+  const now = opts.now ?? ((): Date => new Date());
+  const sessionRegistry = new SessionRegistry(
+    opts.configDir,
+    () => newUlid(() => now().getTime()),
+    now,
+  );
+
+  const config: ServerConfig = { ...opts, graphClient, sessionRegistry };
 
   // Register all tools and collect entries for dynamic state management
   const registry: ToolEntry[] = [

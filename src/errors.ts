@@ -105,3 +105,11 @@ export class ProjectAlreadyInitialisedError extends Error {
     this.name = "ProjectAlreadyInitialisedError";
   }
 }
+
+// Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
+// `src/collab/session.ts` next to the registry that throws them. They are
+// re-exported here for the rare consumer that wants a single import — but
+// the canonical location is the session module so the error and the
+// thrower travel together (mirrors the `ProjectMetadataParseError` /
+// `loadProjectMetadata` pairing in `src/collab/projects.ts`).
+export { NoActiveSessionError, SessionAlreadyActiveError } from "./collab/session.js";
