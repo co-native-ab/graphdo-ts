@@ -7,7 +7,6 @@ import {
   SUCCESS_STYLE,
   ERROR_STYLE,
   PICKER_STYLE,
-  escapeHtml,
 } from "../../src/templates/styles.js";
 import { purple, grey, complementary, fontFamily } from "../../src/templates/tokens.js";
 
@@ -89,33 +88,5 @@ describe("shared styles", () => {
     it("includes dark mode media query", () => {
       expect(PICKER_STYLE).toContain("prefers-color-scheme: dark");
     });
-  });
-});
-
-describe("escapeHtml", () => {
-  it("escapes ampersand", () => {
-    expect(escapeHtml("a&b")).toBe("a&amp;b");
-  });
-
-  it("escapes less-than", () => {
-    expect(escapeHtml("a<b")).toBe("a&lt;b");
-  });
-
-  it("escapes greater-than", () => {
-    expect(escapeHtml("a>b")).toBe("a&gt;b");
-  });
-
-  it("escapes double quotes", () => {
-    expect(escapeHtml('a"b')).toBe("a&quot;b");
-  });
-
-  it("escapes all special chars together", () => {
-    expect(escapeHtml('<script>"alert(1)&</script>')).toBe(
-      "&lt;script&gt;&quot;alert(1)&amp;&lt;/script&gt;",
-    );
-  });
-
-  it("leaves safe strings unchanged", () => {
-    expect(escapeHtml("hello world")).toBe("hello world");
   });
 });

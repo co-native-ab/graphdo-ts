@@ -162,5 +162,65 @@ describe("picker template", () => {
       expect(xssHtml).not.toContain("<img src=x");
       expect(xssHtml).toContain("&lt;img");
     });
+
+    it("escapes HTML in filterPlaceholder (attribute breakout)", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        filterPlaceholder: '" autofocus onfocus="alert(1)',
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      // Must not allow the attacker to close the placeholder attribute and
+      // inject new attributes on the <input> element.
+      expect(xssHtml).not.toContain('placeholder="" autofocus');
+      expect(xssHtml).toContain("&quot; autofocus onfocus=&quot;alert(1)");
+    });
+
+    it("escapes HTML in createLink.url (attribute breakout)", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: 'https://example.com/"><script>alert(1)</script>',
+          label: "Create",
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain('"><script>');
+      expect(xssHtml).toContain("&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    });
+
+    it("escapes HTML in createLink.label", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: "https://example.com",
+          label: "<b>Create</b>",
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain("<b>Create</b>");
+      expect(xssHtml).toContain("&lt;b&gt;Create&lt;/b&gt;");
+    });
+
+    it("escapes HTML in createLink.description", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: "https://example.com",
+          label: "Create",
+          description: '<img src=x onerror="alert(1)">',
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain("<img src=x");
+      expect(xssHtml).toContain("&lt;img");
+    });
   });
 });

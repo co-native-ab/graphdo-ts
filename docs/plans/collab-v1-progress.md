@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: _bootstrap — not yet started_
-Current milestone: _none — pending green-light per `collab-v1.md` §12.7_
-Next milestone: W0 Day 1 — `escapeHtml` helper + template audit
+Last updated: W0 Day 1 — `escapeHtml` helper + template audit (in flight)
+Current milestone: W0 Day 1
+Next milestone: W0 Day 2 — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -19,10 +19,9 @@ W0 Day 1 starts in the next PR.)_
 
 ## In flight
 
-| Milestone | Branch | PR  | Started | Sub-status |
-| --------- | ------ | --- | ------- | ---------- |
-
-_(Nothing in flight.)_
+| Milestone | Branch                              | PR  | Started    | Sub-status                                                                                                                                                                                          |
+| --------- | ----------------------------------- | --- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Day 1  | `copilot/initiate-collab-plan-work` | TBD | 2026-04-19 | `src/templates/escape.ts` added; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` added; picker XSS rows extended. Awaiting PR review. |
 
 ## Not started
 
@@ -31,7 +30,7 @@ back to its DoD in the plan.
 
 ### Week 0 (prerequisite hardening)
 
-- [ ] **W0 Day 1** — `escapeHtml` helper + template audit
+- [ ] **W0 Day 1** — `escapeHtml` helper + template audit _(in flight — see "In flight" table above)_
 - [ ] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
 - [ ] **W0 Day 3** — Form-factory module (`src/tools/collab-forms.ts`)
 - [ ] **W0 Days 4–5** — buffer (W0 hardening test rows; cross-host browser smoke)
