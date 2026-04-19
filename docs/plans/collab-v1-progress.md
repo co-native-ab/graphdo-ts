@@ -14,7 +14,7 @@ work reads this file first.
 | Milestone | PR  | Merged | Notes |
 | --------- | --- | ------ | ----- |
 
-_(No milestones complete. Bootstrap PR adds this file and ADR-001;
+_(No milestones complete. Bootstrap PR adds this file and ADR-005;
 W0 Day 1 starts in the next PR.)_
 
 ## In flight
@@ -38,7 +38,7 @@ back to its DoD in the plan.
 
 ### Week 1 — auth + scaffolding
 
-- [ ] **W1 Day 1** — `userOid` plumbing _(ADR-002 lands here: `userOid = idTokenClaims.oid`)_
+- [ ] **W1 Day 1** — `userOid` plumbing _(ADR-006 lands here: `userOid = idTokenClaims.oid`)_
 - [ ] **W1 Day 2** — `ServerConfig` extensions + sentinel codec
 - [ ] **W1 Day 3** — Module skeleton + `session_init_project` happy path
 - [ ] **W1 Day 4** — Multi-root-md handling (`16-multiple-root-md.test.ts`)
@@ -46,7 +46,7 @@ back to its DoD in the plan.
 
 ### Week 2 — read path + scope + frontmatter
 
-- [ ] **W2 Day 1** — Frontmatter codec _(ADR-003 lands here: `yaml ~2.x.y` + byte-exact snapshot)_
+- [ ] **W2 Day 1** — Frontmatter codec _(ADR-007 lands here: `yaml ~2.x.y` + byte-exact snapshot)_
 - [ ] **W2 Day 2** — `doc_id` recovery + `frontmatter_reset` audit
 - [ ] **W2 Day 3** — Scope resolution algorithm (§4.6 in full)
 - [ ] **W2 Day 4** — `collab_read` + `collab_list_files`
@@ -99,10 +99,10 @@ No re-baselining beyond W3 — runway is too short.
 
 ADRs accumulate under `docs/adr/`. The current set:
 
-- **ADR-001** — Decision log (the 20 locked decisions from the
+- **ADR-005** — Decision log (the 20 locked decisions from the
   three review rounds). Bootstrap; lands in this PR.
-- **ADR-002** _(pending W1 Day 1)_ — `userOid = idTokenClaims.oid`.
-- **ADR-003** _(pending W2 Day 1)_ — `yaml` pinned at `~2.x.y`
+- **ADR-006** _(pending W1 Day 1)_ — `userOid = idTokenClaims.oid`.
+- **ADR-007** _(pending W2 Day 1)_ — `yaml` pinned at `~2.x.y`
   with byte-exact snapshot test.
 
 Subsequent ADRs are added as decisions are made; each lands in the

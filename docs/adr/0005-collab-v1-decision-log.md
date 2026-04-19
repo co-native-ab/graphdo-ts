@@ -1,4 +1,4 @@
-# ADR-001: collab v1 decision log
+# ADR-005: collab v1 decision log
 
 - **Status:** Accepted
 - **Date:** 2026-04-19 (bootstrap of `feat/collab-v1`)
@@ -61,7 +61,7 @@ the section of `collab-v1.md` that elaborates on it.
 15. **`userOid = idTokenClaims.oid`.** Not `localAccountId` —
     they can differ in multi-tenant and B2B-guest setups, and we
     don't want that ambiguity in audit logs. (§10 OQ-6; W1 Day 1
-    DoD; codified by ADR-002 when W1 Day 1 lands.)
+    DoD; codified by ADR-006 when W1 Day 1 lands.)
 16. **Form approvals via browser loopback only.** No MCP
     elicitation. The agent cannot influence the form. (§5; §0)
 17. **Mid-session destructive and `source: "external"` ops trigger
@@ -80,15 +80,15 @@ the section of `collab-v1.md` that elaborates on it.
 
 - These decisions are **frozen** for v1. Any change requires a new
   ADR that explicitly references the item being amended (e.g. an
-  ADR titled "ADR-007: revisit decision 4 (leases location)").
+  ADR titled e.g. "ADR-0NN: revisit decision 4 (leases location)").
 - The plan body of `collab-v1.md` is also frozen as of the
   bootstrap of `feat/collab-v1`. Body updates land only via ADR
   amendment per §12.4.
 - Future ADRs (002, 003, …) record decisions made during
   implementation. Two are already pre-committed:
-  - **ADR-002** at W1 Day 1: codifies decision 15 with the actual
+  - **ADR-006** at W1 Day 1: codifies decision 15 with the actual
     code change that surfaces `idTokenClaims.oid`.
-  - **ADR-003** at W2 Day 1: pins `yaml` at `~2.x.y` and
+  - **ADR-007** at W2 Day 1: pins `yaml` at `~2.x.y` and
     introduces the byte-exact snapshot test (per §6 dependency
     policy).
 - The progress file (`docs/plans/collab-v1-progress.md`) tracks

@@ -2470,13 +2470,13 @@ inherits a hardened substrate.
 
 - **W1 Day 1 — `userOid` plumbing.** Surface `idTokenClaims.oid`
   via `Authenticator.accountInfo` (per OQ-6 round-3 decision; lands
-  as ADR-002). Do **not** use `localAccountId` — they can differ in
+  as ADR-006). Do **not** use `localAccountId` — they can differ in
   multi-tenant and B2B-guest setups, and we don't want that
   ambiguity in audit logs. Update `MockAuthenticator`,
   `account.json` persistence, `src/tools/status.ts`. DoD:
   `test/auth.test.ts` extended with an explicit assertion that
   `userOid === idTokenClaims.oid`; `userOid` reaches every collab
-  consumer via `ServerConfig`; ADR-002 merged in the same PR.
+  consumer via `ServerConfig`; ADR-006 merged in the same PR.
 - **W1 Day 2 — `ServerConfig` extensions + sentinel codec.** Add
   `now?: () => Date`. Sentinel reader/writer with Zod schema +
   `SentinelTamperedError` plumbing (no UI yet). DoD: sentinel
@@ -2724,7 +2724,7 @@ threat model) are no longer listed as questions.
    business / B2B-guest scenarios. `localAccountId` _can_ differ
    from `oid` in multi-tenant and B2B-guest setups, and we don't
    want that ambiguity baked into agentIds that show up in audit
-   logs. This pin lands as ADR-002 at W1 Day 1; coordinate with
+   logs. This pin lands as ADR-006 at W1 Day 1; coordinate with
    anyone touching `auth.ts`. Adding `userOid: string` to
    `AccountInfo` is a small change but spans `src/auth.ts`,
    `src/tools/status.ts`, and the `MockAuthenticator`.
@@ -2837,7 +2837,7 @@ sequentially. Each ADR:
   it.
 - Must be approved by the human reviewer.
 
-**Bootstrap ADR-001** at the start of W0 with the 20 locked
+**Bootstrap ADR-005** at the start of W0 with the 20 locked
 decisions from the three review rounds. Subsequent ADRs number
 from 002. Minimum template: title, context (one paragraph),
 decision (one paragraph), consequences (one paragraph). No epic
@@ -2845,8 +2845,8 @@ Nygard-style documents.
 
 Round-3 already pre-commits two future ADRs:
 
-- **ADR-002 at W1 Day 1:** `userOid = idTokenClaims.oid` (per OQ-6).
-- **ADR-003 at W2 Day 1:** `yaml` pinned at `~2.x.y` with
+- **ADR-006 at W1 Day 1:** `userOid = idTokenClaims.oid` (per OQ-6).
+- **ADR-007 at W2 Day 1:** `yaml` pinned at `~2.x.y` with
   byte-exact snapshot test (per §6 dependency policy).
 
 ### 12.5 Handoff contract when work pauses
@@ -2884,12 +2884,12 @@ W0 starts when:
 - [ ] `feat/collab-v1` exists, branched from current `main`.
 - [ ] `docs/plans/collab-v1-progress.md` exists on
       `feat/collab-v1` with all §9 milestones in Not started.
-- [ ] `docs/adr/0001-collab-v1-decision-log.md` exists on
+- [ ] `docs/adr/0005-collab-v1-decision-log.md` exists on
       `feat/collab-v1` with the 20 locked decisions.
 - [ ] `npm run check` is green on `feat/collab-v1`.
 
 The first three items land in a single bootstrap PR titled
-"docs(collab): bootstrap v1 progress + ADR-001 decision log"; the
+"docs(collab): bootstrap v1 progress + ADR-005 decision log"; the
 fourth is verified by CI on that PR. Only then does W0 Day 1
 begin.
 
