@@ -231,13 +231,31 @@ export interface DriveItem {
    */
   webUrl?: string;
   /**
-   * Reference to the item's parent folder. Only `path` is consumed by
-   * graphdo-ts (used to build the human-friendly SharePoint preview URL).
-   * The path is the drive-relative path of the parent, prefixed with
-   * `/drive/root:` (e.g. `/drive/root:/markdown` for an item in the
-   * top-level "markdown" folder).
+   * Reference to the item's parent folder.
+   *
+   * - `path`: drive-relative path of the parent, prefixed with
+   *   `/drive/root:` (e.g. `/drive/root:/markdown`). Used to build the
+   *   human-friendly SharePoint preview URL.
+   * - `id`: opaque identifier of the parent driveItem. Consumed by the
+   *   collab v1 §4.6 ancestry walk so the resolver can climb the parent
+   *   chain to verify a resolved item lives under the pinned project
+   *   folder.
+   * - `driveId`: opaque identifier of the parent's drive. Consumed by
+   *   the §4.6 cross-drive defence — a resolved item whose
+   *   `parentReference.driveId` differs from the pinned `driveId` is
+   *   refused with reason `"cross_drive"`.
    */
-  parentReference?: { path?: string };
+  parentReference?: { path?: string; id?: string; driveId?: string };
+  /**
+   * When present, the item is a shortcut/redirect that points at an
+   * item in another drive (or at a different location in the same
+   * drive). The collab v1 §4.6 scope resolver refuses any resolution
+   * that surfaces a populated `remoteItem` with reason
+   * `"shortcut_redirect"` — a malicious cooperator could otherwise drop
+   * a shortcut named e.g. `proposals/foo.md` inside the project folder
+   * that points at a file outside scope.
+   */
+  remoteItem?: Record<string, unknown>;
 }
 
 export const DriveItemSchema = z
@@ -251,7 +269,15 @@ export const DriveItemSchema = z
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),
     folder: z.object({ childCount: z.number().optional() }).loose().optional(),
     webUrl: z.string().optional(),
-    parentReference: z.object({ path: z.string().optional() }).loose().optional(),
+    parentReference: z
+      .object({
+        path: z.string().optional(),
+        id: z.string().optional(),
+        driveId: z.string().optional(),
+      })
+      .loose()
+      .optional(),
+    remoteItem: z.record(z.string(), z.unknown()).optional(),
   })
   .loose();
 
