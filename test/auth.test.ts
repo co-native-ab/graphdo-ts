@@ -92,7 +92,9 @@ function authResult(
       localAccountId: "local-1",
     },
     idToken: "id-token",
-    idTokenClaims: {},
+    // ADR-0006: include the `oid` claim by default so login flows succeed.
+    // Tests that need to exercise the missing-oid path override this.
+    idTokenClaims: { oid: "oid-aaaaaaaa-1111-2222-3333-444444444444" },
     accessToken: "access-token-123",
     fromCache: false,
     expiresOn: new Date(Date.now() + 3600 * 1000),
@@ -129,10 +131,13 @@ describe("StaticAuthenticator", () => {
     expect(await auth.isAuthenticated(testSignal())).toBe(true);
   });
 
-  it("accountInfo returns username 'static-token'", async () => {
+  it("accountInfo returns username 'static-token' with synthetic userOid", async () => {
     const auth = new StaticAuthenticator("t");
     const info = await auth.accountInfo(testSignal());
-    expect(info).toEqual({ username: "static-token" });
+    expect(info).toEqual({
+      username: "static-token",
+      userOid: "00000000-0000-0000-0000-000000000000",
+    });
   });
 });
 
@@ -205,6 +210,7 @@ describe("MsalAuthenticator.token", () => {
         tenantId: "tid-1",
         username: "user@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -241,6 +247,7 @@ describe("MsalAuthenticator.token", () => {
         tenantId: "tid-1",
         username: "user@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -266,6 +273,7 @@ describe("MsalAuthenticator.token", () => {
         tenantId: "tid-1",
         username: "user@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -386,6 +394,7 @@ describe("MsalAuthenticator.isAuthenticated", () => {
         tenantId: "tid-1",
         username: "user@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -421,6 +430,7 @@ describe("MsalAuthenticator.isAuthenticated", () => {
         tenantId: "tid-1",
         username: "user@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -450,6 +460,7 @@ describe("MsalAuthenticator.accountInfo", () => {
         tenantId: "tid-1",
         username: "alice@example.com",
         localAccountId: "local-1",
+        userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
       }),
     );
 
@@ -457,7 +468,68 @@ describe("MsalAuthenticator.accountInfo", () => {
     const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
 
     const info = await auth.accountInfo(testSignal());
-    expect(info).toEqual({ username: "alice@example.com" });
+    expect(info).toEqual({
+      username: "alice@example.com",
+      userOid: "oid-aaaaaaaa-1111-2222-3333-444444444444",
+    });
+  });
+
+  // ADR-0006 DoD: `userOid === idTokenClaims.oid`. The login flow extracts
+  // the `oid` claim from the MSAL `AuthenticationResult` and persists it as
+  // `userOid`; subsequent `accountInfo()` calls must return that exact value.
+  it("surfaces userOid === idTokenClaims.oid after login (ADR-0006)", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+
+    const fakePCA = installFakePCA();
+    const oid = "00000000-1234-5678-9abc-def012345678";
+    fakePCA.acquireTokenInteractive.mockResolvedValue(authResult({ idTokenClaims: { oid } }));
+
+    await auth.login(testSignal());
+
+    const info = await auth.accountInfo(testSignal());
+    expect(info?.userOid).toBe(oid);
+    // Explicit cross-check against the source claim — the assertion the DoD
+    // calls for in the W1 Day 1 milestone. The mock returns a Promise as
+    // its `value`, so we await it to inspect the resolved AuthenticationResult.
+    const resolved = (await fakePCA.acquireTokenInteractive.mock.results[0]
+      ?.value) as MsalTypes.AuthenticationResult;
+    const idTokenClaimsOid = (resolved.idTokenClaims as { oid?: string } | undefined)?.oid;
+    expect(info?.userOid).toBe(idTokenClaimsOid);
+  });
+
+  it("rejects login when id token has no oid claim (ADR-0006)", async () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+
+    const fakePCA = installFakePCA();
+    fakePCA.acquireTokenInteractive.mockResolvedValue(authResult({ idTokenClaims: {} }));
+
+    await expect(auth.login(testSignal())).rejects.toThrow(/oid/i);
+  });
+
+  it("returns null when persisted account is missing userOid (legacy file)", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    // Pre-ADR-0006 account file shape — no `userOid` field.
+    await fs.writeFile(
+      path.join(dir, "account.json"),
+      JSON.stringify({
+        homeAccountId: "home-1",
+        environment: "login.microsoftonline.com",
+        tenantId: "tid-1",
+        username: "user@example.com",
+        localAccountId: "local-1",
+      }),
+    );
+
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+
+    const info = await auth.accountInfo(testSignal());
+    expect(info).toBeNull();
   });
 
   it("returns null when no account file exists", async () => {
