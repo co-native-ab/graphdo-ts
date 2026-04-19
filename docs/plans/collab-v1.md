@@ -402,6 +402,14 @@ Error cases:
   matches a current scope.
 - `NoMarkdownFileError` — folder contains zero `.md` files at the
   root. (More than one is allowed and resolved by the form.)
+- `FormPayloadInvalidError` — the form server received a `POST
+  /submit` whose JSON body was missing `authoritativeFileId` (or
+  any other required field). The browser UI prevents this when
+  N≥2 by disabling Submit until a radio is chosen, but a forged
+  POST to the loopback could bypass the UI; this is the server-
+  side defence. Returns 400 to the form caller and translates to
+  a tool-level `FormPayloadInvalidError`. Audit
+  `csrf_or_payload_rejection`.
 - `SentinelAlreadyExistsError` — surface a hint that this is actually
   an open flow; the tool transparently re-routes through the open path.
 - `BrowserFormCancelledError`, `BrowserFormTimeoutError`.
@@ -504,8 +512,11 @@ Recovery tool for the case where both the live frontmatter and the
 local project metadata `doc_id` are gone (fresh machine + a human
 wiped the YAML block in OneDrive web). Without this the next
 `collab_write` to the authoritative file refuses with
-`DocIdRecoveryRequiredError` (§3.1) and the project is effectively
-dead because every alternative requires losing edits.
+`DocIdRecoveryRequiredError` (§3.1). That error is *recoverable* —
+this tool is the canonical recovery. The project is only
+"effectively dead" if `session_recover_doc_id` itself fails with
+`DocIdUnrecoverableError` (50 versions inspected, none parseable),
+at which point no automated recovery is possible.
 
 ```ts
 session_recover_doc_id(args: {}): Promise<ToolResult>
@@ -749,9 +760,15 @@ Lease on a section, recorded in the **leases sidecar**
 `.collab/leases.json` (§3.2.1), not the authoritative-file
 frontmatter. Acquire = read leases, ensure no active lease for this
 `sectionId`, write back updated leases using `If-Match` on the
-leases-file `cTag`. Section identity is anchored on a slug + a
-content-hash identity (§3.1 slug rules); the slug is normalised
-through the GitHub-flavored algorithm before any lookup. The
+leases-file `cTag`. Section identity is **slug-only** here: the
+caller passes a heading text or pre-computed slug, the tool
+normalises through the GitHub-flavored algorithm (§3.1) and looks
+for an exact match against the current headings of the authoritative
+body. Acquire deliberately does **not** support the slug-drift
+hash fallback used by `collab_apply_proposal` — leases are
+short-lived (default 600 s, max 3600 s) and a heading rename mid-
+lease is a rare-enough event that a hard refusal is the correct
+UX (the agent re-reads, sees the new slug, re-acquires). The
 authoritative file body and frontmatter are not touched.
 
 ```ts
@@ -1300,6 +1317,18 @@ the full file body (~8 MiB worst case for a 4 MiB file). Leases are
 coordination, not load-bearing for correctness, so a separate small
 file is the right shape.
 
+**Field-name convention across schemas.** The leases sidecar uses
+`sectionSlug` (no `target_` prefix); the authoritative-file
+frontmatter uses `target_section_slug` for `proposals[]` and
+`authorship[]` entries. Different prefixes are deliberate: in the
+leases sidecar each entry *is* the section being held, so the
+"target" qualifier adds no information; in the frontmatter
+`proposals[]`/`authorship[]` arrays, each entry describes an
+operation *targeting* a section, so the "target" prefix
+disambiguates from any future field describing the section
+metadata itself. Both forms slugify through the same `slug.ts`
+algorithm.
+
 ```json
 {
   "schemaVersion": 1,
@@ -1558,6 +1587,18 @@ fail the tool call (logged at `warn`).
 Persisted to disk so a crash-and-restart agent does not get a fresh
 budget within the same session window. Removed on `session_end`.
 User-editable; that is acceptable per §0.
+
+**Stale-session pruning.** Sessions are not always cleanly ended
+(process kill, OS reboot, transport drop without process exit),
+so the `sessions` object would otherwise accumulate orphan
+entries. On every read and every write of
+`destructive-counts.json`, entries with `expiresAt < now - 24h`
+are dropped from the in-memory view and the next persisted write
+omits them. The 24h grace window covers the maximum TTL (8h) plus
+a safety margin so a session paused mid-flight is not pruned.
+Same pattern as the leases sidecar's expired-lease cleanup
+(§3.2.1) — no background housekeeper, no migration, just
+lazy-cleanup-on-touch.
 
 ## 4. Graph call patterns
 
@@ -2668,8 +2709,28 @@ Compensating cuts vs the previous Appendix A:
   entirely. Net structural improvement at modest LOC cost.
 
 These cuts cancel ~250 LOC; the rest of the increase is honest
-re-budgeting. Calendar absorbs this within the W6 reserve — total
-still 6 weeks realistic / 7 weeks worst-case (§9).
+re-budgeting.
+
+**Calendar reconciliation.** Net change vs round 1: **+380 LOC src,
++620 LOC tests, ~+750 LOC total after cuts.** At the planned
+sustained pace of ~300 src LOC/day with ~1:1 test ratio (i.e. ~150
+src LOC/day net once tests are written alongside), the round-2
+addition costs roughly **5 working days**. Absorbed as follows:
+
+- **Within the existing buffer days** (W2 Day 5, W3 Day 5, W5 Day 5
+  = 3 buffer days inside W1–W5): ~3 days.
+- **W0 Days 4–5 buffer** is held for the ~300 LOC W0 hardening
+  test correction noted in the W0 section, not for round-2
+  scope.
+- **Remainder (~2 days)** dips into W6 reserve. W6 was always 5
+  days of reserve; consuming 2 of them for round-2 scope leaves
+  3 days for genuine slip. This is acceptable.
+
+**Bottom line: 6 weeks realistic stands; 7 weeks worst-case stands;
+the realistic estimate now has slightly less slack inside it (~2
+days instead of ~5) but is still believable.** If round 3 adds
+significant scope, the calendar will need re-baselining rather
+than further W6 raids.
 
 ## Appendix B: three biggest risks surfaced while writing
 
