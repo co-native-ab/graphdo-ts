@@ -46,6 +46,13 @@ export class MockState {
   driveItemVersions: Map<string, MockDriveItemVersion[]>;
   /** Metadata returned by `GET /me/drive`. */
   drive: { id: string; driveType: string; webUrl: string };
+  /**
+   * Append-only log of every authenticated request the mock has served,
+   * in arrival order. Lets tests assert on call patterns — e.g. the
+   * §4.6 scope-resolution rule that pre-resolution refusals issue zero
+   * Graph calls (test 08 in `docs/plans/collab-v1.md` §8.2).
+   */
+  requestLog: { method: string; path: string }[];
   private nextId: number;
   private nextVersionSeq: number;
   /** Per-item cTag sequence so cTags monotonically bump on every content write. */
@@ -68,6 +75,7 @@ export class MockState {
     this.nextId = 1;
     this.nextVersionSeq = 1;
     this.cTagSeq = new Map();
+    this.requestLog = [];
   }
 
   genId(): string {
@@ -247,6 +255,12 @@ async function handleRequest(
   const parsed = new URL(req.url ?? "/", "http://localhost");
   const segments = parseSegments(parsed.pathname);
   const method = req.method ?? "GET";
+
+  // Record every authenticated request (after the bearer-token gate
+  // above) so tests can assert on call patterns — e.g. the §4.6
+  // scope-resolution rule that pre-resolution refusals issue zero
+  // Graph calls.
+  state.requestLog.push({ method, path: `${parsed.pathname}${parsed.search}` });
 
   try {
     // GET /me
@@ -689,6 +703,65 @@ async function handleDriveRequest(
     return false;
   }
 
+  // GET by path: GET /me/drive/items/{folderId}:/{seg1}/{seg2}/.../{lastSeg}:
+  // Walks children from `folderId` matching each segment by exact name.
+  // Used by the collab v1 §4.6 scope-resolution algorithm. Returns the
+  // resolved drive item via `driveItemView` so `parentReference.id /
+  // .driveId / .path` plus optional `remoteItem` are populated.
+  if (
+    method === "GET" &&
+    segments.length >= 5 &&
+    segments[3]?.endsWith(":") &&
+    segments[segments.length - 1]?.endsWith(":")
+  ) {
+    const folderId = decodeURIComponent(segments[3].slice(0, -1));
+    const relativeSegments = segments.slice(4).map((s, i, arr) => {
+      const raw = i === arr.length - 1 ? s.slice(0, -1) : s;
+      return decodeURIComponent(raw);
+    });
+    const folderExists =
+      state.driveFolderChildren.has(folderId) ||
+      state.driveRootChildren.some((i) => i.id === folderId);
+    if (!folderExists) {
+      errorResponse(res, 404, "itemNotFound", `folder ${folderId} not found`);
+      return true;
+    }
+    let cursor = folderId;
+    let resolved: MockDriveFile | undefined;
+    for (let i = 0; i < relativeSegments.length; i++) {
+      const segName = relativeSegments[i] ?? "";
+      const segLower = segName.toLowerCase();
+      const children = state.driveFolderChildren.get(cursor) ?? [];
+      // Real OneDrive byPath resolution is case-insensitive — it returns
+      // the stored item even when the agent's path differs in case. The
+      // §4.6 case-aliasing defence in `src/collab/scope.ts` is what
+      // catches the resulting mismatch on the way back. We mirror that
+      // behaviour here so test 08's case-aliasing row exercises the
+      // post-resolution check rather than failing at lookup.
+      const match = children.find((c) => c.name.toLowerCase() === segLower);
+      if (match === undefined) {
+        errorResponse(
+          res,
+          404,
+          "itemNotFound",
+          `path segment "${segName}" not found under ${cursor}`,
+        );
+        return true;
+      }
+      if (i === relativeSegments.length - 1) {
+        resolved = match;
+      } else {
+        cursor = match.id;
+      }
+    }
+    if (resolved === undefined) {
+      errorResponse(res, 404, "itemNotFound", "empty relative path");
+      return true;
+    }
+    jsonResponse(res, 200, driveItemView(resolved, state));
+    return true;
+  }
+
   // Upload by path: PUT /me/drive/items/{folderId}:/{fileName}:/content
   // Segments look like: ["me","drive","items","{folderId}:","{fileName}:","content"]
   if (
@@ -728,10 +801,11 @@ async function handleDriveRequest(
       errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
       return true;
     }
-    // Route through driveItemView so the response matches the wire shape
-    // (no in-memory `content` field) and so any missing cTag is filled in.
-    const view = "file" in item ? driveItemView(item as MockDriveFile, state) : item;
-    jsonResponse(res, 200, view);
+    // Route through driveItemView for files AND folders so the response
+    // matches the wire shape (no in-memory `content` field) and so the
+    // §4.6 ancestry walk in `src/collab/scope.ts` gets a populated
+    // `parentReference.{id,driveId}` for the parent folders it climbs.
+    jsonResponse(res, 200, driveItemView(item as MockDriveFile, state));
     return true;
   }
 
@@ -947,23 +1021,41 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
   if (file.version === undefined && file.file !== undefined && state !== undefined) {
     file.version = state.genVersionId();
   }
-  // Compute parentReference.path the same way real Graph does: locate the
-  // folder this item belongs to and emit `/drive/root:/<folder name>`. Items
-  // that exist directly at the drive root yield `/drive/root:`.
-  let parentReference: { path: string } | undefined;
+  // Compute parentReference the same way real Graph does: locate the
+  // folder this item belongs to and emit `/drive/root:/<…>` plus the
+  // parent's opaque id and the drive id. Items that exist directly at
+  // the drive root yield `/drive/root:`. Nested folders walk back up
+  // the parent chain so deep paths (e.g. `attachments/sub/sub2/foo.png`)
+  // surface a correct path and `parentReference.id`.
+  //
+  // Test fixtures may set `file.parentReference` explicitly to simulate
+  // a cooperator-attacked or cross-drive item — those values win over
+  // the computed default so the §4.6 defence-in-depth checks
+  // (`cross_drive` etc.) can be exercised.
+  let parentReference: { path: string; id?: string; driveId?: string } | undefined;
   if (state !== undefined) {
     if (state.driveRootChildren.some((c) => c.id === file.id)) {
-      parentReference = { path: "/drive/root:" };
+      parentReference = { path: "/drive/root:", driveId: state.drive.id };
     } else {
       for (const [folderId, children] of state.driveFolderChildren) {
         if (children.some((c) => c.id === file.id)) {
-          const folder = state.driveRootChildren.find((c) => c.id === folderId);
-          if (folder !== undefined) {
-            parentReference = { path: `/drive/root:/${folder.name}` };
-          }
+          const ancestorPath = buildAncestorPath(state, folderId);
+          parentReference = {
+            path: ancestorPath,
+            id: folderId,
+            driveId: state.drive.id,
+          };
           break;
         }
       }
+    }
+    // Honour fixture-supplied overrides on top of the computed default
+    // so tests can simulate cross-drive / custom-parent items.
+    if (file.parentReference !== undefined) {
+      parentReference = {
+        ...(parentReference ?? { path: "" }),
+        ...file.parentReference,
+      };
     }
   }
   return {
@@ -977,7 +1069,38 @@ function driveItemView(file: MockDriveFile, state?: MockState): DriveItem {
     folder: file.folder,
     webUrl: file.webUrl,
     parentReference: parentReference ?? file.parentReference,
+    remoteItem: file.remoteItem,
   };
+}
+
+/**
+ * Walk the folder chain backwards from `folderId` until we hit a root-
+ * level folder (or run out). Returns the `/drive/root:/<a>/<b>` path
+ * real Graph populates on `parentReference.path`. Used by
+ * {@link driveItemView}.
+ */
+function buildAncestorPath(state: MockState, folderId: string): string {
+  const names: string[] = [];
+  let cursor: string | null = folderId;
+  // Bound the walk to defend against accidentally cyclic test fixtures.
+  for (let hop = 0; hop < 32 && cursor !== null; hop++) {
+    const rootMatch = state.driveRootChildren.find((c) => c.id === cursor);
+    if (rootMatch !== undefined) {
+      names.unshift(rootMatch.name);
+      return names.length === 0 ? "/drive/root:" : `/drive/root:/${names.join("/")}`;
+    }
+    let nextCursor: string | null = null;
+    for (const [parentId, children] of state.driveFolderChildren) {
+      const match = children.find((c) => c.id === cursor);
+      if (match !== undefined) {
+        names.unshift(match.name);
+        nextCursor = parentId;
+        break;
+      }
+    }
+    cursor = nextCursor;
+  }
+  return names.length === 0 ? "/drive/root:" : `/drive/root:/${names.join("/")}`;
 }
 
 function driveItemVersionView(v: MockDriveItemVersion): DriveItemVersion {

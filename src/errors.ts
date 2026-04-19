@@ -156,6 +156,63 @@ export class DocIdAlreadyKnownError extends Error {
   }
 }
 
+/**
+ * Refusal reasons emitted by the §4.6 scope resolution algorithm. Each
+ * value is a stable identifier so downstream callers (the `scope_denied`
+ * audit entry — §3.6, the agent-facing message, and post-hoc analysis)
+ * can pattern-match without parsing free-text. The strings appear
+ * verbatim in `docs/plans/collab-v1.md` §4.6 and §8.2 row 08.
+ */
+export type OutOfScopeReason =
+  // Pre-resolution refusals (§4.6 step 1)
+  | "empty_path"
+  | "path_too_long"
+  | "control_character"
+  | "backslash"
+  | "percent_in_raw_path"
+  | "absolute_path"
+  | "drive_letter"
+  // URL-decode (§4.6 step 2)
+  | "double_encoded"
+  // NFC/NFKC normalisation (§4.6 step 3)
+  | "homoglyph_or_compatibility_form"
+  // Segment validation (§4.6 step 4)
+  | "empty_segment"
+  | "dot_segment"
+  | "dotdot_segment"
+  | "dot_prefixed_segment"
+  // Layout enforcement (§4.6 step 5)
+  | "path_layout_violation"
+  | "subfolder_in_flat_group"
+  | "wrong_extension"
+  // Post-resolution defence-in-depth (§4.6 step 7)
+  | "shortcut_redirect"
+  | "cross_drive"
+  | "ancestry_escape"
+  | "case_aliasing";
+
+/**
+ * Raised by the §4.6 scope resolver when a scope-relative `path`
+ * argument from the agent does not name an in-scope item under the
+ * active project folder.
+ *
+ * Carries the `attemptedPath` (verbatim, as supplied by the caller) and
+ * a stable `reason` enum value so the `scope_denied` audit entry can
+ * record both. `resolvedItemId` is populated only when the refusal
+ * happens after a successful Graph resolution (the post-resolution
+ * defence-in-depth checks in step 7).
+ */
+export class OutOfScopeError extends Error {
+  constructor(
+    public readonly attemptedPath: string,
+    public readonly reason: OutOfScopeReason,
+    public readonly resolvedItemId?: string,
+  ) {
+    super(`Path "${attemptedPath}" is out of scope: ${reason}`);
+    this.name = "OutOfScopeError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but
