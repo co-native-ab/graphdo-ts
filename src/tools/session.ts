@@ -210,17 +210,21 @@ async function runInitProject(
   }
 
   const markdownFiles = await listRootMarkdownFiles(client, chosenFolderId, signal);
+  // Resolve the chosen folder up-front so error messages can use the
+  // authoritative `name` from Graph rather than munging the picker label
+  // (which carries a synthetic leading `/` to render the path).
+  const folderItem = await getDriveItem(client, chosenFolderId, signal);
+
   // W1 Day 3 — single-md happy path. Multi-md resolution lands in W1 Day 4
   // via the `16-multiple-root-md.test.ts` form. Until then, treat both the
   // zero-md and the multi-md case as a hard error so the agent does not
   // silently pick the wrong file.
   if (markdownFiles.length !== 1) {
-    const folderName = result.selected.label.replace(/^\//, "");
     if (markdownFiles.length === 0) {
-      throw new NoMarkdownFileError(folderName, chosenFolderId);
+      throw new NoMarkdownFileError(folderItem.name, chosenFolderId);
     }
     throw new NoMarkdownFileError(
-      `${folderName} (found ${String(markdownFiles.length)} root .md files; multi-file selection lands in a future version)`,
+      `${folderItem.name} (found ${String(markdownFiles.length)} root .md files; multi-file selection lands in a future version)`,
       chosenFolderId,
     );
   }
@@ -232,9 +236,8 @@ async function runInitProject(
     throw new Error("internal: markdown file list mismatch");
   }
 
-  // ------- Resolve the chosen folder so we can capture folderPath -------
+  // ------- Resolve drive metadata + folderPath -------
 
-  const folderItem = await getDriveItem(client, chosenFolderId, signal);
   const drive = await getMyDrive(client, signal);
   const driveId = drive.id;
   const folderPath = derivedFolderPath(folderItem.parentReference?.path, folderItem.name);

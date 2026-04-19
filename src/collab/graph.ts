@@ -94,7 +94,11 @@ function nextRelativePath(absoluteUrl: string | undefined): string | null {
   try {
     const u = new URL(absoluteUrl);
     return `${u.pathname}${u.search}`;
-  } catch {
+  } catch (err) {
+    logger.debug("ignored malformed @odata.nextLink", {
+      url: absoluteUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
