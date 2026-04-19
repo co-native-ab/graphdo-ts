@@ -99,9 +99,10 @@ No re-baselining beyond W3 — runway is too short.
 Append one row per cross-host browser smoke run. Reference:
 [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md).
 
-| Date       | Host               | OS    | Browser        | Result                   | Notes                                                                                                                                                                                                             |
-| ---------- | ------------------ | ----- | -------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-04-19 | GitHub Copilot CLI | Linux | system default | S1–S7 ✅, S8 ⏭️ deferred | Findings F1 + F2 below. DNS-rebinding sanity (S3) returned `403 Forbidden: invalid Host header` against the live loopback — §5.4 Host pin verified end-to-end. Picker port observed 46781 (login) / 46133 (todo). |
+| Date       | Host               | OS    | Browser        | Result                   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | ------------------ | ----- | -------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-04-19 | GitHub Copilot CLI | Linux | system default | S1–S7 ✅, S8 ⏭️ deferred | Findings F1 + F2 below. DNS-rebinding sanity (S3) returned `403 Forbidden: invalid Host header` against the live loopback — §5.4 Host pin verified end-to-end. Picker port observed 46781 (login) / 46133 (todo).                                                                                                                                                                                                                                                                                            |
+| 2026-04-19 | GitHub Copilot CLI | Linux | system default | S7a ✅ (both orderings)  | F1 fix verification re-run on the rebuilt bundle (commit `f9b2715`). Picker-in-flight → `logout` returned `Another approval form is already open at http://127.0.0.1:41291 (todo_select_list).`; logout-in-flight → `todo_select_list` returned `Another approval form is already open (still starting) (logout).` (the second tool fired before the logout loopback finished binding, confirming the slot is held during startup). Lock released cleanly after each in-flight form was completed/cancelled. |
 
 ### Open follow-ups from smoke runs
 
@@ -118,7 +119,10 @@ Append one row per cross-host browser smoke run. Reference:
   checklist gains S7a to exercise the cross-tool case
   manually. No ADR required — this is a straightforward
   consistency fix; the §5.3 single-in-flight contract already
-  documents the intent.
+  documents the intent. Verified end-to-end by the S7a smoke
+  on 2026-04-19 in both orderings (picker → logout and
+  logout → picker); see the smoke run log row for the exact
+  error strings observed.
 - **F2 — Conditional tool exposure in GitHub Copilot CLI.** _Documented._
   Captured in `cross-host-browser-smoke.md` under the
   pre-flight "GitHub Copilot CLI tool visibility" note so

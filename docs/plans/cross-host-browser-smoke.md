@@ -178,6 +178,16 @@ S6 with `logout` as the second tool.
 6. Re-trigger `logout`.
 7. **Expect:** the branded confirmation page renders normally;
    tokens are cleared. Lock has been released.
+8. **Reverse ordering (also verified by the F1 fix).** Trigger
+   `logout` and leave the confirmation page open without
+   clicking. Immediately trigger `todo_select_list`.
+9. **Expect:** the second tool returns `FormBusyError`
+   pointing at the in-flight `logout`. If the logout loopback
+   server has not finished binding yet, the URL portion is
+   replaced with `(still starting)` — that is correct
+   behaviour: the slot is held from the moment the form
+   factory starts the form, not only once the port is bound.
+   Cancel/confirm the logout page to release the slot.
 
 ### S8. Headless / no-browser fallback
 
