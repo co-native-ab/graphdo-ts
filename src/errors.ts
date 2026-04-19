@@ -26,6 +26,37 @@ export class UserCancelledError extends Error {
  * the form server is still starting). `kind` is a short identifier of
  * the active form for diagnostic context (e.g. "login", "todo_select_list").
  */
+/**
+ * Raised when a project's live sentinel (`.collab/project.json`) diverges
+ * from the locally pinned `authoritativeFileId` recorded on the first
+ * successful `session_open_project`.
+ *
+ * Per `docs/plans/collab-v1.md` §3.2 the sentinel is **untrusted on second
+ * and subsequent reads**; the rename-tolerant pin defends collaborators
+ * from a malicious cooperator silently re-pointing the project at a
+ * different file. Renames of the authoritative file (same `id`, different
+ * `name`) are explicitly allowed and never raise this error — see
+ * `verifySentinelAgainstPin` in `src/collab/sentinel.ts`.
+ *
+ * The error carries the pinned vs. live ids so callers (and the future
+ * `sentinel_changed` audit entry — §3.6) can record both sides.
+ */
+export class SentinelTamperedError extends Error {
+  constructor(
+    public readonly pinnedAuthoritativeFileId: string,
+    public readonly currentAuthoritativeFileId: string,
+    public readonly pinnedSentinelFirstSeenAt: string,
+  ) {
+    super(
+      `Sentinel tampered: pinned authoritativeFileId ${pinnedAuthoritativeFileId} ` +
+        `does not match current sentinel value ${currentAuthoritativeFileId} ` +
+        `(pinned at ${pinnedSentinelFirstSeenAt}). ` +
+        "Forget the project from recents and re-open it to re-pin.",
+    );
+    this.name = "SentinelTamperedError";
+  }
+}
+
 export class FormBusyError extends Error {
   constructor(
     public readonly url: string,
