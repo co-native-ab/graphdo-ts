@@ -5,31 +5,63 @@
 //   - `collab_read` — read any file inside project scope (§2.3).
 //   - `collab_list_files` — directory listing with `[authoritative]` marker.
 //
-// `collab_write` lands in W3 Day 2; section leases in W3 Day 4; proposals
-// and destructive apply in W4 Days 2–3.
+// W3 Day 2 lands:
+//   - `collab_write` — CAS write to authoritative or project-scoped files
+//     with `source` parameter and external-source re-prompt (§2.3, §5.2.4).
+//
+// Section leases land in W3 Day 4; proposals and destructive apply in
+// W4 Days 2–3.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { OutOfScopeError } from "../errors.js";
+import {
+  AuthenticationRequiredError,
+  BudgetExhaustedError,
+  CollabCTagMismatchError,
+  DocIdRecoveryRequiredError,
+  ExternalSourceDeclinedError,
+  OutOfScopeError,
+  UserCancelledError,
+} from "../errors.js";
 import type { ServerConfig } from "../index.js";
+import { logger } from "../logger.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
 import { GraphScope } from "../scopes.js";
-import { GraphRequestError } from "../graph/client.js";
-import { validateGraphId } from "../graph/ids.js";
+import { GraphClient, GraphRequestError } from "../graph/client.js";
+import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
 import { MarkdownFileTooLargeError } from "../graph/markdown.js";
 import { NoActiveSessionError } from "../collab/session.js";
-import { loadProjectMetadata } from "../collab/projects.js";
+import { loadProjectMetadata, saveProjectMetadata } from "../collab/projects.js";
+import { newUlid } from "../collab/ulid.js";
 import {
   getDriveItem,
   getDriveItemContent,
   listChildren,
   findChildFolderByName,
   walkAttachmentsTree,
+  createChildFolder,
+  writeAuthoritative,
+  writeProjectFile,
+  ProjectFileAlreadyExistsError,
+  COLLAB_CONTENT_TYPE_MARKDOWN,
+  COLLAB_CONTENT_TYPE_JSON,
+  COLLAB_CONTENT_TYPE_BINARY,
+  type WriteProjectFileTarget,
 } from "../collab/graph.js";
 import { resolveScopedPath, MAX_ANCESTRY_HOPS } from "../collab/scope.js";
-import { readMarkdownFrontmatter, type CollabFrontmatter } from "../collab/frontmatter.js";
+import {
+  CollabFrontmatterSchema,
+  joinFrontmatter,
+  readMarkdownFrontmatter,
+  serializeFrontmatter,
+  splitFrontmatter,
+  type CollabFrontmatter,
+} from "../collab/frontmatter.js";
+import { parse as yamlParseRaw } from "yaml";
+import { startBrowserPicker } from "../picker.js";
+import { acquireFormSlot } from "./collab-forms.js";
 import { formatError } from "./shared.js";
 import type { DriveItem } from "../graph/types.js";
 
@@ -91,8 +123,31 @@ const COLLAB_LIST_FILES_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+const COLLAB_WRITE_DEF: ToolDef = {
+  name: "collab_write",
+  title: "Write Collab File",
+  description:
+    "Create or update a file inside the active project's scope. Provide " +
+    "`path` (scope-relative — `<authoritativeFile>.md` for the authoritative " +
+    "file, `proposals/foo.md`, `drafts/scratch.md`, `attachments/img.png`), " +
+    "`content` (UTF-8 text, ≤ 4 MiB), and `source` (where the content came " +
+    "from: 'chat' = the human typed it this turn; 'project' = read via " +
+    "collab_read in this session; 'external' = anything else, which triggers " +
+    "a browser re-approval before the write is issued). For existing files " +
+    "supply the `cTag` returned by collab_read for optimistic concurrency. " +
+    "On the authoritative file the canonical YAML `collab:` frontmatter " +
+    "block is re-injected (recovering `doc_id` from local cache when the " +
+    "human stripped it); the body is taken from the supplied content (with " +
+    "the agent-supplied frontmatter winning when present and parseable).",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 /** Static tool metadata for collab tools. */
-export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [COLLAB_READ_DEF, COLLAB_LIST_FILES_DEF];
+export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
+  COLLAB_READ_DEF,
+  COLLAB_LIST_FILES_DEF,
+  COLLAB_WRITE_DEF,
+];
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -175,7 +230,6 @@ async function scopeCheckedResolve(
   signal: AbortSignal,
 ): Promise<DriveItem> {
   const token = await config.authenticator.token(signal);
-  const { GraphClient } = await import("../graph/client.js");
   const client = new GraphClient(config.graphBaseUrl, {
     getToken: () => Promise.resolve(token),
   });
@@ -243,6 +297,373 @@ function formatSize(bytes: number | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// collab_write helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick a Content-Type for a project file based on its leaf name. Used by
+ * the non-authoritative `collab_write` path so .md / .json / image /
+ * binary attachments all carry the right MIME on PUT. Authoritative
+ * writes are always `text/markdown` (`writeAuthoritative` hard-codes it).
+ *
+ * Common image extensions are recognised explicitly so OneDrive previews
+ * (and any downstream tool that reads `file.mimeType`) work without an
+ * extra round-trip. Anything unknown falls through to
+ * `application/octet-stream` — Graph re-detects from the bytes anyway,
+ * but a generic MIME is safer than guessing.
+ */
+function contentTypeForFileName(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
+    return COLLAB_CONTENT_TYPE_MARKDOWN;
+  }
+  if (lower.endsWith(".json")) {
+    return COLLAB_CONTENT_TYPE_JSON;
+  }
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  return COLLAB_CONTENT_TYPE_BINARY;
+}
+
+/**
+ * Split a scope-relative path into its parent folder segments and leaf
+ * name. The leading `/` (if any) is stripped first. Used by the
+ * non-authoritative `collab_write` path to locate the parent folder for
+ * a byPath create.
+ */
+function splitScopedPath(path: string): { parentSegments: string[]; leafName: string } {
+  const trimmed = path.startsWith("/") ? path.slice(1) : path;
+  const segments = trimmed.split("/").filter((s) => s.length > 0);
+  const leafName = segments.pop() ?? "";
+  return { parentSegments: segments, leafName };
+}
+
+/**
+ * Resolve (or lazily create) the parent folder for a non-authoritative
+ * write under one of the well-known group folders (`proposals`,
+ * `drafts`, `attachments`). The §4.6 scope resolver has already
+ * validated that the path's first segment is one of those names, so we
+ * walk a bounded number of levels and `mkdir -p` along the way.
+ *
+ * Returns the parent folder's drive id ready for a byPath
+ * `writeProjectFile({ kind: "create" })`.
+ */
+async function ensureParentFolder(
+  client: GraphClient,
+  rootFolderId: ValidatedGraphId,
+  parentSegments: string[],
+  signal: AbortSignal,
+): Promise<ValidatedGraphId> {
+  let cursor: ValidatedGraphId = rootFolderId;
+  for (const segment of parentSegments) {
+    const existing = await findChildFolderByName(client, cursor, segment, signal);
+    const child = existing ?? (await createChildFolder(client, cursor, segment, signal));
+    cursor = validateGraphId(`folder:${segment}`, child.id);
+  }
+  return cursor;
+}
+
+/**
+ * Open the §5.2.4 external-source re-approval form. Acquires the
+ * single-in-flight form-factory slot for the duration; resolves on
+ * approve, throws {@link ExternalSourceDeclinedError} on cancel /
+ * timeout / browser close.
+ */
+async function runExternalSourceReprompt(
+  config: ServerConfig,
+  args: {
+    path: string;
+    intent: string | undefined;
+    sourceCounters: { external: number };
+    isCreate: boolean;
+    bytes: number;
+  },
+  signal: AbortSignal,
+): Promise<void> {
+  const slot = acquireFormSlot("collab_write_external");
+  try {
+    const summaryLines = [
+      `path: ${args.path}`,
+      `intent: ${args.intent ?? "(not provided)"}`,
+      `kind: ${args.isCreate ? "first write (new file)" : "update existing file"}`,
+      `bytes: ${args.bytes}`,
+      `external-source writes used this session: ${args.sourceCounters.external}`,
+    ];
+    const handle = await startBrowserPicker(
+      {
+        title: "Approve External-Source Write",
+        subtitle:
+          "An MCP tool wants to write content that did NOT come from this " +
+          "chat or from a prior `collab_read`. Click Approve to allow the " +
+          "write, or Cancel to refuse it.\n\n" +
+          summaryLines.join("\n"),
+        options: [{ id: "approve", label: "Approve external-source write" }],
+        onSelect: async () => {
+          // Approval is recorded by the tool layer once the picker
+          // resolves; nothing to do here.
+        },
+      },
+      signal,
+    );
+    slot.setUrl(handle.url);
+    let browserOpened = false;
+    try {
+      await config.openBrowser(handle.url);
+      browserOpened = true;
+    } catch (err: unknown) {
+      logger.warn("could not open browser for external-source re-prompt", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (!browserOpened) {
+      logger.info("external-source re-prompt awaiting manual visit", { url: handle.url });
+    }
+
+    try {
+      await handle.waitForSelection;
+    } catch (err: unknown) {
+      if (err instanceof UserCancelledError) {
+        throw new ExternalSourceDeclinedError(args.path);
+      }
+      throw err;
+    }
+  } finally {
+    slot.release();
+  }
+}
+
+/**
+ * Pick (or mint) the canonical {@link CollabFrontmatter} block for a
+ * write to the authoritative file. Encodes the §3.1 doc_id stability
+ * rules:
+ *
+ * - Agent-supplied content already carries parseable frontmatter →
+ *   that frontmatter wins. Validates against the schema; a malformed
+ *   inner block falls through to the recovery path so the agent can
+ *   never sneak past the schema by attaching a broken envelope.
+ * - Otherwise look at the file's current live frontmatter:
+ *   - parses → reuse `{doc_id, created_at}` and reset the lists.
+ *   - reset (missing/malformed) → fall through to local cache.
+ * - Otherwise local cache `docId` is non-null → reuse it,
+ *   `created_at` defaults to `now()`.
+ * - Otherwise → throw {@link DocIdRecoveryRequiredError} so the agent
+ *   is directed at `session_recover_doc_id` (W5 Day 1).
+ *
+ * The returned `body` is the markdown body the caller should join the
+ * canonical frontmatter back onto (always LF-normalised).
+ *
+ * Note: this milestone (W3 Day 2) does not preserve the
+ * `sections`/`proposals`/`authorship` collections when the agent
+ * supplied content without a frontmatter envelope — those fields
+ * default to empty arrays. The fields are still preserved when the
+ * agent's own frontmatter carries them. Section-aware writes land with
+ * `collab_acquire_section` / `collab_create_proposal` in W3 Day 4 + W4.
+ */
+/**
+ * Where the `doc_id` for an authoritative write came from. Returned by
+ * {@link resolveAuthoritativeFrontmatter} so the W3 Day 3 audit writer
+ * can record the recovery path that fired (parsed → no audit, anything
+ * else → `frontmatter_reset` audit entry with `recoveredDocId: true`
+ * for `Cache` / `Live` / `Fresh`).
+ *
+ * A real enum (vs. a string union) keeps the comparator readable and
+ * matches the codebase convention set by {@link GraphScope},
+ * {@link import("../graph/client.js").HttpMethod}, and
+ * {@link import("../graph/markdown.js").MarkdownFolderEntryKind}.
+ */
+export enum DocIdSource {
+  /** Agent supplied a parseable `collab:` frontmatter envelope. */
+  Agent = "agent",
+  /** Live file's frontmatter parsed cleanly. */
+  Live = "live",
+  /** Live frontmatter was missing/malformed; recovered from local pin block. */
+  Cache = "cache",
+  /** No agent / live / cache value — fresh ULID minted (originator first-write). */
+  Fresh = "fresh",
+}
+
+function resolveAuthoritativeFrontmatter(args: {
+  agentContent: string;
+  liveContent: string;
+  cachedDocId: string | null;
+  projectId: string;
+  now: () => Date;
+}): {
+  frontmatter: CollabFrontmatter;
+  body: string;
+  docIdSource: DocIdSource;
+} {
+  const split = splitFrontmatter(args.agentContent);
+  if (split !== null) {
+    const parseAttempt = CollabFrontmatterSchema.safeParse(parseYamlForFrontmatter(split.yaml));
+    if (parseAttempt.success) {
+      return {
+        frontmatter: parseAttempt.data,
+        body: split.body,
+        docIdSource: DocIdSource.Agent,
+      };
+    }
+    // Fall through — agent's envelope was unparseable; treat the body
+    // alone as the new content and recover the doc_id from elsewhere.
+    logger.warn("agent supplied unparseable frontmatter; falling back to recovery", {
+      error: parseAttempt.error.message,
+    });
+  }
+  const body = split !== null ? split.body : args.agentContent.replace(/\r\n/g, "\n");
+
+  const liveRead = readMarkdownFrontmatter(args.liveContent);
+  if (liveRead.kind === "parsed") {
+    return {
+      frontmatter: {
+        collab: {
+          version: liveRead.frontmatter.collab.version,
+          doc_id: liveRead.frontmatter.collab.doc_id,
+          created_at: liveRead.frontmatter.collab.created_at,
+          sections: [],
+          proposals: [],
+          authorship: [],
+        },
+      },
+      body,
+      docIdSource: DocIdSource.Live,
+    };
+  }
+
+  if (args.cachedDocId !== null) {
+    return {
+      frontmatter: buildFreshCollabFrontmatter(args.cachedDocId, args.now()),
+      body,
+      docIdSource: DocIdSource.Cache,
+    };
+  }
+
+  // Originator's first write to a brand-new project: mint a fresh
+  // doc_id and persist it so subsequent writes resolve via cache.
+  // The §10 row-04 "fresh machine + wiped frontmatter + wiped cache"
+  // variant is differentiated by the presence of /versions history
+  // and is handled by `session_recover_doc_id` (W5 Day 1) — the
+  // helper above always treats no-history as first-write here.
+  const freshDocId = newUlid(() => args.now().getTime());
+  return {
+    frontmatter: buildFreshCollabFrontmatter(freshDocId, args.now()),
+    body,
+    docIdSource: DocIdSource.Fresh,
+  };
+}
+
+/**
+ * Mint a fresh canonical {@link CollabFrontmatter} for a brand-new
+ * doc_id. Used by the recovery path and by first-write where neither
+ * the agent nor the live file carry one.
+ */
+function buildFreshCollabFrontmatter(docId: string, now: Date): CollabFrontmatter {
+  return {
+    collab: {
+      version: 1,
+      doc_id: docId,
+      created_at: now.toISOString(),
+      sections: [],
+      proposals: [],
+      authorship: [],
+    },
+  };
+}
+
+/**
+ * Lightweight YAML parse for the agent-supplied frontmatter envelope.
+ * Returns `null` (so {@link CollabFrontmatterSchema.safeParse} fails)
+ * when the YAML cannot be parsed at all. The hardened parser used by
+ * `readMarkdownFrontmatter` is too strict for this path — it throws on
+ * malformed input — and we want to silently recover instead of
+ * surfacing a noisy parse error to the agent.
+ */
+function parseYamlForFrontmatter(yamlBody: string): unknown {
+  try {
+    return yamlParseRaw(yamlBody);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Execute the authoritative-file write path: fetch the live content
+ * (so we can recover `doc_id` / `created_at` if the agent's content
+ * lacks frontmatter), build the canonical frontmatter envelope per
+ * §3.1, and CAS-write via {@link writeAuthoritative}. Returns the
+ * updated DriveItem so the caller can record the new cTag/revision.
+ *
+ * The local cache `docId` (when non-null) is the authoritative source
+ * for recovery; the live file is consulted only as a secondary path
+ * (the cache is updated on every successful write so it should never
+ * be more stale than one write old).
+ */
+async function runAuthoritativeWrite(
+  config: ServerConfig,
+  client: GraphClient,
+  metadata: NonNullable<Awaited<ReturnType<typeof loadProjectMetadata>>>,
+  resolvedItem: DriveItem,
+  cTag: string,
+  agentContent: string,
+  signal: AbortSignal,
+): Promise<{ updated: DriveItem; writtenDocId: string }> {
+  const validatedItemId = validateGraphId("authoritativeItemId", resolvedItem.id);
+
+  // Read live content for doc_id/created_at recovery. A 404 here is a
+  // server-side race (the file vanished between scope resolution and
+  // this fetch); surface it as a Graph error so the caller's error
+  // formatter does the right thing.
+  const liveContent = await getDriveItemContent(client, validatedItemId, signal);
+
+  const now = config.now ?? ((): Date => new Date());
+  const { frontmatter, body } = resolveAuthoritativeFrontmatter({
+    agentContent,
+    liveContent,
+    cachedDocId: metadata.docId,
+    projectId: metadata.projectId,
+    now,
+  });
+
+  const yaml = serializeFrontmatter(frontmatter);
+  const newContent = joinFrontmatter(yaml, body);
+  const updated = await writeAuthoritative(client, validatedItemId, cTag, newContent, signal);
+  return { updated, writtenDocId: frontmatter.collab.doc_id };
+}
+
+/**
+ * After a successful authoritative write, refresh the local pin block
+ * with the new cTag/revision and (if not already cached) the doc_id.
+ * Atomic via {@link saveProjectMetadata}'s temp+rename pattern; a
+ * crash here leaves the previous metadata intact so the next session
+ * can still resolve the project.
+ *
+ * `freshDocId` carries the doc_id we just wrote into the file so the
+ * cache always matches the live frontmatter — never re-reads from
+ * Graph (avoids an extra round-trip and a race with concurrent
+ * writers).
+ */
+async function persistAuthoritativeMetadata(
+  config: ServerConfig,
+  metadata: NonNullable<Awaited<ReturnType<typeof loadProjectMetadata>>>,
+  updated: DriveItem,
+  writtenDocId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await saveProjectMetadata(
+    config.configDir,
+    {
+      ...metadata,
+      docId: writtenDocId,
+      lastSeenAuthoritativeCTag: updated.cTag ?? metadata.lastSeenAuthoritativeCTag,
+      lastSeenAuthoritativeRevision: updated.version ?? metadata.lastSeenAuthoritativeRevision,
+    },
+    signal,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -295,7 +716,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           const { metadata } = await requireActiveSession(config, signal);
 
           const token = await config.authenticator.token(signal);
-          const { GraphClient } = await import("../graph/client.js");
           const client = new GraphClient(config.graphBaseUrl, {
             getToken: () => Promise.resolve(token),
           });
@@ -436,7 +856,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           const { metadata } = await requireActiveSession(config, signal);
 
           const token = await config.authenticator.token(signal);
-          const { GraphClient } = await import("../graph/client.js");
           const client = new GraphClient(config.graphBaseUrl, {
             getToken: () => Promise.resolve(token),
           });
@@ -686,6 +1105,304 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           return { content: [{ type: "text", text: output }] };
         } catch (err) {
           return formatError("collab_list_files", err);
+        }
+      },
+    ),
+  );
+
+  // -------------------------------------------------------------------------
+  // collab_write
+  // -------------------------------------------------------------------------
+  entries.push(
+    defineTool(
+      server,
+      COLLAB_WRITE_DEF,
+      {
+        inputSchema: {
+          path: z
+            .string()
+            .min(1)
+            .describe(
+              "Scope-relative path inside the active project, e.g. " +
+                "'<authoritativeFile>.md' for the authoritative file, " +
+                "'proposals/p-foo.md', 'drafts/scratch.md', or " +
+                "'attachments/diagram.png'.",
+            ),
+          content: z.string().describe("UTF-8 file content. Must be ≤ 4 MiB after encoding."),
+          cTag: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Opaque cTag previously returned by collab_read or another " +
+                "collab write. Required for updates to existing files; " +
+                "omit only when creating a new non-authoritative file " +
+                "(`/proposals/`, `/drafts/`, `/attachments/`).",
+            ),
+          source: z
+            .enum(["chat", "project", "external"])
+            .describe(
+              "Where this content originated. 'chat' = the human typed it " +
+                "this turn; 'project' = read via collab_read in this session; " +
+                "'external' = anything else (web fetch, prior session, " +
+                "generated). Writes with source='external' trigger a browser " +
+                "re-approval before the write is issued.",
+            ),
+          conflictMode: z
+            .enum(["fail", "proposal"])
+            .default("fail")
+            .describe(
+              "Behaviour on cTag mismatch (HTTP 412). 'fail' returns an " +
+                "error with the current cTag and revision so the agent can " +
+                "re-read and reconcile. 'proposal' diverts the new content " +
+                "to /proposals/<ulid>.md (lands with collab_create_proposal " +
+                "in W4 Day 2 — currently rejected with a clear message).",
+            ),
+          intent: z
+            .string()
+            .max(2048)
+            .optional()
+            .describe(
+              "Free-text intent shown in re-prompt forms (external-source). " +
+                "Helps the human decide whether to approve.",
+            ),
+        },
+        annotations: {
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async ({ path, content, cTag, source, conflictMode, intent }, { signal }) => {
+        try {
+          if (conflictMode === "proposal") {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "conflictMode='proposal' is not yet supported in this " +
+                    "milestone (W3 Day 2). Use collab_create_proposal " +
+                    "directly once W4 Day 2 ships, or retry with " +
+                    "conflictMode='fail' to surface the cTag mismatch and " +
+                    "reconcile manually.",
+                },
+              ],
+            };
+          }
+
+          const { session, metadata } = await requireActiveSession(config, signal);
+
+          // Pre-check the write budget so external-source writes never
+          // open a browser tab the agent has no budget to honour. The
+          // §5.2 contract: writes count toward the budget on success or
+          // diversion; we surface BudgetExhaustedError before the
+          // re-prompt to keep the human's time uncontested.
+          if (session.writesUsed >= session.writeBudgetTotal) {
+            return formatError(
+              "collab_write",
+              new BudgetExhaustedError(session.writesUsed, session.writeBudgetTotal),
+            );
+          }
+
+          const token = await config.authenticator.token(signal);
+          const client = new GraphClient(config.graphBaseUrl, {
+            getToken: () => Promise.resolve(token),
+          });
+
+          // Resolve the target — this also enforces §4.6 scope before
+          // any external re-prompt opens or any write is issued.
+          let resolvedItem: DriveItem | null = null;
+          let isAuthoritative = false;
+          let writeIsCreate = false;
+          let parentFolderId: ValidatedGraphId | null = null;
+          let leafName = "";
+          try {
+            resolvedItem = await scopeCheckedResolve(config, metadata, path, signal);
+            isAuthoritative = resolvedItem.id === metadata.pinnedAuthoritativeFileId;
+          } catch (err) {
+            if (err instanceof OutOfScopeError) {
+              return formatError("collab_write", err);
+            }
+            // 404 from the scope resolver means the path-name does not
+            // exist yet. That's only legal for non-authoritative files
+            // (the authoritative file always exists post-init); the
+            // resolver itself rejects authoritative-name creates because
+            // the resolved item id wouldn't match the pinned id, but we
+            // double-check below by inspecting the path layout.
+            if (!(err instanceof GraphRequestError && err.statusCode === 404)) {
+              throw err;
+            }
+            writeIsCreate = true;
+            const split = splitScopedPath(path);
+            leafName = split.leafName;
+            if (leafName.length === 0) {
+              return formatError("collab_write", new Error(`Path "${path}" has no file name.`));
+            }
+            // The §4.6 scope resolver already validated the layout for
+            // resolvable paths; for create paths we re-derive the parent
+            // folder under the project root using the same group names
+            // the layout enforces.
+            const projectFolderId = validateGraphId("projectFolderId", metadata.folderId);
+            try {
+              parentFolderId = await ensureParentFolder(
+                client,
+                projectFolderId,
+                split.parentSegments,
+                signal,
+              );
+            } catch (parentErr) {
+              return formatError("collab_write", parentErr);
+            }
+          }
+
+          // Authoritative writes require a cTag — the file always
+          // exists, so omitting cTag would be a CAS-bypass attempt.
+          if (isAuthoritative && (cTag === undefined || cTag.length === 0)) {
+            return formatError(
+              "collab_write",
+              new Error(
+                "cTag is required when writing the authoritative file. " +
+                  "Re-read with collab_read to fetch the current cTag.",
+              ),
+            );
+          }
+          // Updates to non-authoritative files also require a cTag (the
+          // CAS contract). Only first-write byPath creates may skip it.
+          if (!isAuthoritative && !writeIsCreate && (cTag === undefined || cTag.length === 0)) {
+            return formatError(
+              "collab_write",
+              new Error(
+                `cTag is required when updating "${path}" (file already exists). ` +
+                  "Re-read with collab_read to fetch the current cTag.",
+              ),
+            );
+          }
+
+          // Pre-flight payload size guard so we surface a clear error
+          // before any external re-prompt asks the human about a write
+          // we know will fail.
+          const bytes = Buffer.byteLength(content, "utf-8");
+
+          // Open the external-source re-approval form before doing any
+          // Graph write so a "Cancel" returns ExternalSourceDeclinedError
+          // without side-effects (per §5.2.4).
+          if (source === "external") {
+            try {
+              await runExternalSourceReprompt(
+                config,
+                {
+                  path,
+                  intent,
+                  sourceCounters: session.sourceCounters,
+                  isCreate: writeIsCreate,
+                  bytes,
+                },
+                signal,
+              );
+            } catch (err) {
+              if (err instanceof ExternalSourceDeclinedError) {
+                return formatError("collab_write", err);
+              }
+              throw err;
+            }
+          }
+
+          let updated: DriveItem;
+          let writtenDocId: string | null = null;
+          try {
+            if (isAuthoritative) {
+              if (resolvedItem === null) {
+                throw new Error("internal: resolvedItem missing for authoritative write");
+              }
+              if (cTag === undefined) {
+                throw new Error("internal: cTag missing for authoritative write");
+              }
+              const auth = await runAuthoritativeWrite(
+                config,
+                client,
+                metadata,
+                resolvedItem,
+                cTag,
+                content,
+                signal,
+              );
+              updated = auth.updated;
+              writtenDocId = auth.writtenDocId;
+            } else if (writeIsCreate) {
+              if (parentFolderId === null) {
+                throw new Error("internal: parentFolderId missing for byPath create");
+              }
+              const target: WriteProjectFileTarget = {
+                kind: "create",
+                folderId: parentFolderId,
+                fileName: leafName,
+                contentType: contentTypeForFileName(leafName),
+              };
+              updated = await writeProjectFile(client, target, content, signal);
+            } else {
+              if (resolvedItem === null) {
+                throw new Error("internal: resolvedItem missing for byId replace");
+              }
+              if (cTag === undefined) {
+                throw new Error("internal: cTag missing for byId replace");
+              }
+              const validatedItemId = validateGraphId("resolvedItemId", resolvedItem.id);
+              const target: WriteProjectFileTarget = {
+                kind: "replace",
+                itemId: validatedItemId,
+                cTag: cTag,
+                contentType: contentTypeForFileName(resolvedItem.name),
+              };
+              updated = await writeProjectFile(client, target, content, signal);
+            }
+          } catch (err) {
+            if (
+              err instanceof MarkdownFileTooLargeError ||
+              err instanceof CollabCTagMismatchError ||
+              err instanceof ProjectFileAlreadyExistsError ||
+              err instanceof DocIdRecoveryRequiredError
+            ) {
+              return formatError("collab_write", err);
+            }
+            throw err;
+          }
+
+          // Persist counters + per-write cache updates atomically with
+          // each step so a crash mid-flow leaves a coherent state.
+          await config.sessionRegistry.incrementWrites(signal);
+          await config.sessionRegistry.incrementSource(source, signal);
+
+          if (isAuthoritative && writtenDocId !== null) {
+            await persistAuthoritativeMetadata(config, metadata, updated, writtenDocId, signal);
+          }
+
+          const lines = [
+            `wrote: ${updated.name} (${updated.id})`,
+            `bytes: ${updated.size ?? bytes}`,
+            `cTag: ${updated.cTag ?? "unknown"}`,
+            updated.version !== undefined ? `revision: ${updated.version}` : "revision: (unknown)",
+            `kind: ${writeIsCreate ? "created" : "replaced"}`,
+            `isAuthoritative: ${isAuthoritative ? "true" : "false"}`,
+            `source: ${source}`,
+          ];
+          const refreshed = config.sessionRegistry.snapshot();
+          if (refreshed !== null) {
+            lines.push(`writes: ${refreshed.writesUsed} / ${refreshed.writeBudgetTotal}`);
+            lines.push(
+              `source counters: chat=${refreshed.sourceCounters.chat} ` +
+                `project=${refreshed.sourceCounters.project} ` +
+                `external=${refreshed.sourceCounters.external}`,
+            );
+          }
+
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (err) {
+          if (err instanceof AuthenticationRequiredError) {
+            return formatError("collab_write", err);
+          }
+          return formatError("collab_write", err);
         }
       },
     ),

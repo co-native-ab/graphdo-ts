@@ -40,6 +40,7 @@ describe("integration: discovery & login", () => {
         "auth_status",
         "collab_list_files",
         "collab_read",
+        "collab_write",
         "login",
         "logout",
         "mail_send",
