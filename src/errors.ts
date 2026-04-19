@@ -213,6 +213,48 @@ export class OutOfScopeError extends Error {
   }
 }
 
+/**
+ * Raised by collab write helpers ({@link writeAuthoritative},
+ * {@link writeProjectFile} replace target) and by the lease writers
+ * (W3 Day 4) when a `PUT /content` returns HTTP 412 — the supplied
+ * `If-Match` cTag does not match the file's current cTag, so another
+ * agent's CAS write landed first.
+ *
+ * Per `docs/plans/collab-v1.md` §2.6 the error carries the file's
+ * **current** state so the agent can re-read, reconcile, and retry:
+ *
+ * - `currentCTag` — the file's live cTag, ready for the next attempt.
+ * - `currentRevision` — OneDrive's `version` id (string) of the
+ *   authoritative state on the server, surfaced as `revision:` in
+ *   agent-facing output (§3 audit envelope, §10 read view).
+ *   `undefined` when Graph did not return one (e.g. brand-new files
+ *   or backends that omit the field).
+ * - `currentItem` — the full {@link DriveItem} as last seen by Graph,
+ *   so the §3.6 audit envelope can record `cTagAfter` /
+ *   `revisionAfter` without re-fetching.
+ *
+ * Diversion to `/proposals/<ulid>.md` (the `conflictMode === "proposal"`
+ * branch of `collab_write`, §2.3) is the responsibility of the tool
+ * layer (W3 Day 2) — the helper always surfaces this error and lets
+ * the caller decide whether to fall back.
+ */
+export class CollabCTagMismatchError extends Error {
+  constructor(
+    public readonly itemId: string,
+    public readonly suppliedCTag: string,
+    public readonly currentCTag: string | undefined,
+    public readonly currentRevision: string | undefined,
+    public readonly currentItem: import("./graph/types.js").DriveItem,
+  ) {
+    super(
+      `cTag mismatch for item ${itemId}: supplied ${suppliedCTag}, ` +
+        `current ${currentCTag ?? "(unknown)"}` +
+        (currentRevision !== undefined ? ` (revision ${currentRevision})` : ""),
+    );
+    this.name = "CollabCTagMismatchError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but

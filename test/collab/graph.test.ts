@@ -15,7 +15,13 @@ import {
   getDriveItemContent,
   listChildren,
   walkAttachmentsTree,
+  writeAuthoritative,
+  writeProjectFile,
+  ProjectFileAlreadyExistsError,
+  COLLAB_CONTENT_TYPE_MARKDOWN,
+  COLLAB_CONTENT_TYPE_BINARY,
 } from "../../src/collab/graph.js";
+import { CollabCTagMismatchError } from "../../src/errors.js";
 import { MarkdownFileTooLargeError, MAX_DIRECT_CONTENT_BYTES } from "../../src/graph/markdown.js";
 
 let env: TestEnv;
@@ -207,6 +213,273 @@ describe("collab/graph helpers", () => {
       // Should stop at depth 8, so we get files from levels 0-7 (8 files)
       // but NOT from levels 8-9
       expect(result.entries.length).toBeLessThanOrEqual(8);
+    });
+  });
+
+  describe("writeAuthoritative", () => {
+    it("byId replace returns updated item with bumped cTag", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      // Ensure the file's cTag is materialised (lazily assigned on first GET).
+      const before = await getDriveItem(client, gid("file-spec"), testSignal());
+      expect(before.cTag).toBeDefined();
+      const cTag = before.cTag!;
+
+      const updated = await writeAuthoritative(
+        client,
+        gid("file-spec"),
+        cTag,
+        "# spec\nNew content.",
+        testSignal(),
+      );
+      expect(updated.id).toBe("file-spec");
+      expect(updated.cTag).toBeDefined();
+      expect(updated.cTag).not.toBe(cTag);
+      // Body actually updated.
+      const after = await getDriveItemContent(client, gid("file-spec"), testSignal());
+      expect(after).toBe("# spec\nNew content.");
+    });
+
+    it("throws CollabCTagMismatchError on 412 with current cTag + revision + item", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      // Materialise the cTag so the mock has a known value.
+      await getDriveItem(client, gid("file-spec"), testSignal());
+
+      const stale = "stale-ctag-value";
+      try {
+        await writeAuthoritative(
+          client,
+          gid("file-spec"),
+          stale,
+          "# spec\nWill not land.",
+          testSignal(),
+        );
+        throw new Error("expected CollabCTagMismatchError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(CollabCTagMismatchError);
+        const e = err as CollabCTagMismatchError;
+        expect(e.itemId).toBe("file-spec");
+        expect(e.suppliedCTag).toBe(stale);
+        expect(e.currentCTag).toBeDefined();
+        expect(e.currentCTag).not.toBe(stale);
+        // OneDrive's `version` field is surfaced as `currentRevision`. The
+        // mock mirrors real Graph in not always returning `version` on
+        // `GET /me/drive/items/{id}` — assert the wiring (`currentRevision`
+        // is read straight off `currentItem.version`) without forcing a
+        // value the mock won't provide.
+        expect(e.currentRevision).toBe(e.currentItem.version);
+        expect(e.currentItem.id).toBe("file-spec");
+        // Helpful error message includes the supplied cTag for diagnosis.
+        expect(e.message).toContain(stale);
+      }
+    });
+
+    it("rejects empty cTag (would defeat the CAS contract)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      await expect(
+        writeAuthoritative(client, gid("file-spec"), "", "body", testSignal()),
+      ).rejects.toThrow(/cTag must not be empty/);
+    });
+
+    it("throws MarkdownFileTooLargeError before issuing the upload when content exceeds 4 MiB", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      const oversized = "x".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
+      await expect(
+        writeAuthoritative(client, gid("file-spec"), "any-ctag", oversized, testSignal()),
+      ).rejects.toThrow(MarkdownFileTooLargeError);
+    });
+  });
+
+  describe("writeProjectFile", () => {
+    it("byPath create succeeds and returns new drive item (201 path)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      const created = await writeProjectFile(
+        client,
+        {
+          kind: "create",
+          folderId: gid("folder-proj"),
+          fileName: "draft-1.md",
+          contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+        },
+        "# draft body",
+        testSignal(),
+      );
+      expect(created.name).toBe("draft-1.md");
+      expect(created.id).toBeDefined();
+      expect(created.cTag).toBeDefined();
+
+      // The new file is now visible in the listing.
+      const children = await listChildren(client, gid("folder-proj"), testSignal());
+      const names = children.map((c) => c.name).sort();
+      expect(names).toContain("draft-1.md");
+    });
+
+    it("byPath create raises ProjectFileAlreadyExistsError on 409 (conflictBehavior=fail)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      // spec.md already exists at folder-proj root from beforeEach.
+      try {
+        await writeProjectFile(
+          client,
+          {
+            kind: "create",
+            folderId: gid("folder-proj"),
+            fileName: "spec.md",
+            contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+          },
+          "# overwrite attempt",
+          testSignal(),
+        );
+        throw new Error("expected ProjectFileAlreadyExistsError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ProjectFileAlreadyExistsError);
+        const e = err as ProjectFileAlreadyExistsError;
+        expect(e.folderId).toBe("folder-proj");
+        expect(e.fileName).toBe("spec.md");
+      }
+    });
+
+    it("byId replace succeeds and bumps cTag", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      const before = await getDriveItem(client, gid("file-spec"), testSignal());
+      const cTag = before.cTag!;
+
+      const replaced = await writeProjectFile(
+        client,
+        {
+          kind: "replace",
+          itemId: gid("file-spec"),
+          cTag,
+          contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+        },
+        "# replaced",
+        testSignal(),
+      );
+      expect(replaced.id).toBe("file-spec");
+      expect(replaced.cTag).not.toBe(cTag);
+      const after = await getDriveItemContent(client, gid("file-spec"), testSignal());
+      expect(after).toBe("# replaced");
+    });
+
+    it("byId replace raises CollabCTagMismatchError on stale cTag (412)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      await getDriveItem(client, gid("file-spec"), testSignal());
+
+      try {
+        await writeProjectFile(
+          client,
+          {
+            kind: "replace",
+            itemId: gid("file-spec"),
+            cTag: "stale",
+            contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+          },
+          "# will not land",
+          testSignal(),
+        );
+        throw new Error("expected CollabCTagMismatchError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(CollabCTagMismatchError);
+        const e = err as CollabCTagMismatchError;
+        expect(e.suppliedCTag).toBe("stale");
+        expect(e.currentCTag).toBeDefined();
+        expect(e.currentItem.id).toBe("file-spec");
+      }
+    });
+
+    it("byId replace rejects empty cTag", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      await expect(
+        writeProjectFile(
+          client,
+          {
+            kind: "replace",
+            itemId: gid("file-spec"),
+            cTag: "",
+            contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+          },
+          "x",
+          testSignal(),
+        ),
+      ).rejects.toThrow(/cTag must not be empty/);
+    });
+
+    it("accepts Uint8Array binary content (e.g. attachments)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      // ASCII-only bytes so the mock's string-decode path round-trips
+      // them faithfully (the mock reads upload bodies as UTF-8 strings;
+      // a real Graph backend would store the bytes verbatim).
+      const bytes = new TextEncoder().encode("PNG-DATA");
+      const created = await writeProjectFile(
+        client,
+        {
+          kind: "create",
+          folderId: gid("folder-proj"),
+          fileName: "diagram.png",
+          contentType: COLLAB_CONTENT_TYPE_BINARY,
+        },
+        bytes,
+        testSignal(),
+      );
+      expect(created.name).toBe("diagram.png");
+      expect(created.size).toBe(bytes.byteLength);
+    });
+
+    it("enforces 4 MiB cap for both create and replace targets", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      const oversized = "x".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
+      await expect(
+        writeProjectFile(
+          client,
+          {
+            kind: "create",
+            folderId: gid("folder-proj"),
+            fileName: "big.md",
+            contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+          },
+          oversized,
+          testSignal(),
+        ),
+      ).rejects.toThrow(MarkdownFileTooLargeError);
+      await expect(
+        writeProjectFile(
+          client,
+          {
+            kind: "replace",
+            itemId: gid("file-spec"),
+            cTag: "any",
+            contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+          },
+          oversized,
+          testSignal(),
+        ),
+      ).rejects.toThrow(MarkdownFileTooLargeError);
+    });
+
+    it("byPath create rejects unsafe file names (path separators, control chars, dot segments)", async () => {
+      const client = new GraphClient(env.graphUrl, staticToken("test-token"));
+      const target = (fileName: string): Parameters<typeof writeProjectFile>[1] => ({
+        kind: "create",
+        folderId: gid("folder-proj"),
+        fileName,
+        contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+      });
+      await expect(writeProjectFile(client, target(""), "x", testSignal())).rejects.toThrow(
+        /must not be empty/,
+      );
+      await expect(writeProjectFile(client, target("a/b.md"), "x", testSignal())).rejects.toThrow(
+        /path separators/,
+      );
+      await expect(writeProjectFile(client, target("a\\b.md"), "x", testSignal())).rejects.toThrow(
+        /path separators/,
+      );
+      await expect(writeProjectFile(client, target("."), "x", testSignal())).rejects.toThrow(
+        /'\.' or '\.\.'/,
+      );
+      await expect(writeProjectFile(client, target(".."), "x", testSignal())).rejects.toThrow(
+        /'\.' or '\.\.'/,
+      );
+      await expect(
+        writeProjectFile(client, target("bad\u0001name.md"), "x", testSignal()),
+      ).rejects.toThrow(/control characters/);
     });
   });
 });
