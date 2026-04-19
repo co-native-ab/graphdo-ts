@@ -318,7 +318,7 @@ export async function resolveScopedPath(
   // Ancestry walk: climb parentReference.id until we hit the pinned
   // project folder or run out of hops. The byId path resolution above
   // usually guarantees this, so the walk is defensive.
-  await assertAncestry(client, item, args.projectFolderId, signal);
+  await assertAncestry(client, item, args.projectFolderId, syntax.attemptedPath, signal);
 
   // Case-aliasing: the returned name (NFC) must equal the requested
   // last segment exactly. Catches Windows/OneDrive case folding, e.g.
@@ -338,11 +338,16 @@ export async function resolveScopedPath(
  *
  * `getDriveItem`-style calls are issued on demand so the common case
  * (item directly under `proposals/` etc.) costs at most one extra GET.
+ *
+ * `attemptedPath` is the agent's original path (verbatim) — used as the
+ * `OutOfScopeError.attemptedPath` so the audit entry joins on the same
+ * key the resolver caller would expect, not on the resolved item's name.
  */
 async function assertAncestry(
   client: GraphClient,
   item: DriveItem,
   projectFolderId: ValidatedGraphId,
+  attemptedPath: string,
   signal: AbortSignal,
 ): Promise<void> {
   // The item itself might be the project folder (e.g. a hypothetical
@@ -356,7 +361,7 @@ async function assertAncestry(
     if (cursorParentId === undefined) {
       // Can't climb further: the resolved item isn't anchored at the
       // pinned folder.
-      throw new OutOfScopeError(item.name, "ancestry_escape", item.id);
+      throw new OutOfScopeError(attemptedPath, "ancestry_escape", item.id);
     }
     if (cursorParentId === projectFolderId) {
       return;
@@ -370,11 +375,11 @@ async function assertAncestry(
       ancestor = await parseResponse(response, DriveItemSchema, HttpMethod.GET, ancestorPath);
     } catch (err) {
       if (err instanceof GraphRequestError && err.statusCode === 404) {
-        throw new OutOfScopeError(item.name, "ancestry_escape", item.id);
+        throw new OutOfScopeError(attemptedPath, "ancestry_escape", item.id);
       }
       throw err;
     }
     cursorParentId = ancestor.parentReference?.id;
   }
-  throw new OutOfScopeError(item.name, "ancestry_escape", item.id);
+  throw new OutOfScopeError(attemptedPath, "ancestry_escape", item.id);
 }
