@@ -48,6 +48,15 @@ export interface ServerConfig {
   graphClient: GraphClient;
   /** Opens a URL in the system browser. Injected for testability. */
   openBrowser: (url: string) => Promise<void>;
+  /**
+   * Wall-clock factory. Defaults to `() => new Date()` in production; tests
+   * inject a fake clock (`test/collab/clock.ts`, landing with W1 Day 5) so
+   * TTL math, audit timestamps, and renewal counters are deterministic.
+   * Required by the upcoming collab surfaces — no current consumer beyond
+   * tests, but plumbed here per `docs/plans/collab-v1.md` §8.3 so future
+   * milestones do not have to back-fill the parameter through every tool.
+   */
+  now?: () => Date;
   /** Set by createMcpServer() — login/logout tools call this to sync tool visibility. */
   onScopesChanged?: (grantedScopes: GraphScope[]) => void;
 }
@@ -162,6 +171,7 @@ async function main(): Promise<void> {
       graphBaseUrl,
       configDir: cfgDir,
       openBrowser,
+      now: () => new Date(),
     },
     shutdown.signal,
   );
