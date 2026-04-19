@@ -119,4 +119,4 @@ export { saveConfig, loadConfig } from "../../src/config.js";
 export { createMcpServer } from "../../src/index.js";
 export { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 export { Client } from "@modelcontextprotocol/sdk/client/index.js";
-export { testSignal } from "../helpers.js";
+export { fetchCsrfToken, testSignal } from "../helpers.js";

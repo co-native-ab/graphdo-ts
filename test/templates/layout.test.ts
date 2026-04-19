@@ -82,4 +82,42 @@ describe("layout template", () => {
   it("does not contain Co-native text", () => {
     expect(html.toLowerCase()).not.toContain("co-native");
   });
+
+  describe("nonce + extraHead (loopback hardening hooks)", () => {
+    it("emits no nonce attribute when nonce is omitted (legacy callers)", () => {
+      expect(html).not.toMatch(/<style nonce=/);
+      expect(html).not.toMatch(/<script nonce=/);
+    });
+
+    it("threads the nonce to the inline <style>", () => {
+      const out = layoutHtml({ title: "T", body: "<p></p>", nonce: "n1" });
+      expect(out).toContain('<style nonce="n1">');
+    });
+
+    it("threads the nonce to the inline <script>", () => {
+      const out = layoutHtml({
+        title: "T",
+        body: "<p></p>",
+        nonce: "n1",
+        script: "console.log('hi');",
+      });
+      expect(out).toContain('<script nonce="n1">');
+    });
+
+    it("appends extraHead inside <head>", () => {
+      const out = layoutHtml({
+        title: "T",
+        body: "<p></p>",
+        extraHead: '<meta name="csrf-token" content="abc">',
+      });
+      expect(out).toContain('<meta name="csrf-token" content="abc">');
+      // Must be inside <head>, before </head>.
+      const headIdx = out.indexOf("<head>");
+      const metaIdx = out.indexOf("csrf-token");
+      const headEndIdx = out.indexOf("</head>");
+      expect(headIdx).toBeGreaterThan(-1);
+      expect(metaIdx).toBeGreaterThan(headIdx);
+      expect(metaIdx).toBeLessThan(headEndIdx);
+    });
+  });
 });

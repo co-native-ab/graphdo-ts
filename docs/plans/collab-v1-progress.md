@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: W0 Day 1 — `escapeHtml` helper + template audit (complete, awaiting merge)
-Current milestone: _none — W0 Day 1 complete; W0 Day 2 starts in the next PR_
-Next milestone: W0 Day 2 — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
+Last updated: W0 Day 2 — Loopback hardening on `src/picker.ts` and `src/loopback.ts` (complete, awaiting merge)
+Current milestone: _none — W0 Day 2 complete; W0 Day 3 starts in the next PR_
+Next milestone: W0 Day 3 — Form-factory module (`src/tools/collab-forms.ts`)
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -11,9 +11,10 @@ work reads this file first.
 
 ## Completed
 
-| Milestone | PR                                                        | Merged  | Notes                                                                                                                                                                       |
-| --------- | --------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | pending | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added. |
+| Milestone | PR                                                        | Merged  | Notes                                                                                                                                                                                                                                                                                                                                                                |
+| --------- | --------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | merged  | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added.                                                                                                                                                                                          |
+| W0 Day 2  | [#34](https://github.com/co-native-ab/graphdo-ts/pull/34) | pending | `src/loopback-security.ts` (CSRF, header pins, hardened CSP); `picker.ts` + `loopback.ts` enforce Host/Origin/Sec-Fetch-Site/Content-Type pins + per-request CSP nonce; `landingPageHtml`/`pickerPageHtml`/`layoutHtml` thread `csrfToken` + `nonce`. New `test/loopback-security.test.ts` + §5.4 hardening rows on `test/picker.test.ts` + `test/loopback.test.ts`. |
 
 ## In flight
 
@@ -30,7 +31,7 @@ back to its DoD in the plan.
 ### Week 0 (prerequisite hardening)
 
 - [x] **W0 Day 1** — `escapeHtml` helper + template audit _(complete in [#33](https://github.com/co-native-ab/graphdo-ts/pull/33))_
-- [ ] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts`
+- [x] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts` _(complete in [#34](https://github.com/co-native-ab/graphdo-ts/pull/34))_
 - [ ] **W0 Day 3** — Form-factory module (`src/tools/collab-forms.ts`)
 - [ ] **W0 Days 4–5** — buffer (W0 hardening test rows; cross-host browser smoke)
 

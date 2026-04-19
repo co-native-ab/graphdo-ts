@@ -223,4 +223,33 @@ describe("picker template", () => {
       expect(xssHtml).toContain("&lt;img");
     });
   });
+
+  describe("loopback hardening", () => {
+    it("embeds the CSRF token in a <meta> tag when provided", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: "deadbeef".repeat(8) });
+      expect(out).toContain(`<meta name="csrf-token" content="${"deadbeef".repeat(8)}">`);
+    });
+
+    it("does not emit the CSRF meta tag when not provided", () => {
+      expect(html).not.toContain('<meta name="csrf-token"');
+    });
+
+    it("escapes the CSRF token (defense in depth)", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: '"><script>' });
+      expect(out).not.toContain('content=""><script>');
+      expect(out).toContain("&quot;&gt;&lt;script&gt;");
+    });
+
+    it("threads the CSP nonce through to inline <style> and <script>", () => {
+      const out = pickerPageHtml({ ...sampleConfig, nonce: "abc123" });
+      expect(out).toContain('<style nonce="abc123">');
+      expect(out).toContain('<script nonce="abc123">');
+    });
+
+    it("client-side handlers read the meta tag and send the token in JSON", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: "tok" });
+      expect(out).toContain("querySelector('meta[name=\"csrf-token\"]')");
+      expect(out).toContain("csrfToken: csrfToken");
+    });
+  });
 });

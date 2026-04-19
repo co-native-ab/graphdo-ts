@@ -13,10 +13,26 @@ export interface LayoutParams {
   body: string;
   /** Optional inline script placed before </body>. */
   script?: string;
+  /**
+   * Optional CSP nonce. When provided, both the inline `<style>` and the
+   * inline `<script>` are emitted with `nonce="..."` so they remain
+   * allowed under the strict nonce-based CSP used by hardened loopback
+   * servers (see `src/loopback-security.ts#buildLoopbackCsp`). When
+   * omitted, the legacy `<style>` / `<script>` form is used (still valid
+   * under the legacy `'unsafe-inline'` CSP). Optional head HTML (e.g. a
+   * CSRF meta tag) appended inside `<head>`.
+   */
+  nonce?: string;
+  /** Extra HTML appended inside `<head>` (after the stylesheet link). */
+  extraHead?: string;
 }
 
 export function layoutHtml(params: LayoutParams): string {
-  const scriptBlock = params.script ? `\n  <script>\n${params.script}\n  </script>` : "";
+  const nonceAttr = params.nonce ? ` nonce="${params.nonce}"` : "";
+  const scriptBlock = params.script
+    ? `\n  <script${nonceAttr}>\n${params.script}\n  </script>`
+    : "";
+  const extraHead = params.extraHead ? `\n  ${params.extraHead}` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -28,9 +44,9 @@ export function layoutHtml(params: LayoutParams): string {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="${googleFontsUrl}" rel="stylesheet">
-  <style>
+  <style${nonceAttr}>
     ${BASE_STYLE}${params.extraStyles ?? ""}
-  </style>
+  </style>${extraHead}
 </head>
 <body>
   ${params.body}${scriptBlock}

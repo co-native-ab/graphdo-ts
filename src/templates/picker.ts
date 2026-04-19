@@ -24,6 +24,15 @@ interface PickerPageConfig {
   refreshEnabled?: boolean;
   filterPlaceholder?: string;
   createLink?: PickerPageCreateLink;
+  /**
+   * CSRF token embedded in a `<meta name="csrf-token">` tag and required
+   * by the hardened POST handlers (see `src/loopback-security.ts`). When
+   * omitted, the meta tag is not emitted (legacy callers only — new
+   * call sites must always supply it).
+   */
+  csrfToken?: string;
+  /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
+  nonce?: string;
 }
 
 function renderOptionButton(opt: PickerPageOption): string {
@@ -53,6 +62,11 @@ export function pickerPageHtml(config: PickerPageConfig): string {
   return layoutHtml({
     title: `graphdo - ${escapeHtml(config.title)}`,
     extraStyles: PICKER_STYLE,
+    nonce: config.nonce,
+    extraHead:
+      config.csrfToken !== undefined
+        ? `<meta name="csrf-token" content="${escapeHtml(config.csrfToken)}">`
+        : "",
     body: `<div class="container">
     <div class="card" id="picker">
       <h1>${escapeHtml(config.title)}</h1>
@@ -90,6 +104,8 @@ export function pickerPageHtml(config: PickerPageConfig): string {
   </div>`,
     script: `    const refreshEnabled = ${String(config.refreshEnabled === true)};
     const PAGE_SIZE = 10;
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
     const list = document.getElementById('options-list');
     const noMatch = document.getElementById('no-match');
     const filterInput = document.getElementById('filter-input');
@@ -161,7 +177,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
             const res = await fetch('/select', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: id, label: label }),
+              body: JSON.stringify({ id: id, label: label, csrfToken: csrfToken }),
             });
             if (!res.ok) throw new Error(await res.text());
             document.getElementById('picker').style.display = 'none';
@@ -241,7 +257,11 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     document.getElementById('cancel-btn').addEventListener('click', async () => {
       document.getElementById('cancel-btn').disabled = true;
       list.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
-      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      await fetch('/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrfToken: csrfToken }),
+      }).catch(() => {});
       window.close();
     });`,
   });
