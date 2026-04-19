@@ -19,12 +19,22 @@
 //     resolve the chosen project folder so we can capture
 //     `parentReference.path` for the `folderPath` recents entry.
 //
+// W2 Day 4 adds:
+//
+//   - {@link getDriveItemContent} — download content as UTF-8 string,
+//     with the same 4 MiB markdown guard from `src/graph/markdown.ts`.
+//
+//   - {@link listChildren} — promoted to export for `collab_list_files`.
+//
+//   - {@link walkAttachmentsTree} — depth-bounded recursive tree for
+//     `attachments/` listing.
+//
 // Subsequent milestones will extend this module (read sentinel by path,
 // shared-with-me, share URL resolution).
 
 import type { GraphClient } from "../graph/client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "../graph/client.js";
-import type { ValidatedGraphId } from "../graph/ids.js";
+import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
 import type { DriveItem } from "../graph/types.js";
 import { DriveItemSchema, GraphListResponseSchema } from "../graph/types.js";
 import { logger } from "../logger.js";
@@ -70,8 +80,10 @@ export async function getDriveItem(
  * `markdown.listMarkdownFolderEntries` but returns the raw drive items
  * because the init flow has its own classification needs (find `.collab`,
  * find `.md` files at root). Pagination is followed via `@odata.nextLink`.
+ *
+ * Exported as of W2 Day 4 for use by `collab_list_files`.
  */
-async function listChildren(
+export async function listChildren(
   client: GraphClient,
   folderId: ValidatedGraphId,
   signal: AbortSignal,
@@ -219,4 +231,141 @@ export async function createChildFolder(
     throw err;
   }
   return parseResponse(response, CreateFolderResponseSchema, HttpMethod.POST, path);
+}
+
+// ---------------------------------------------------------------------------
+// W2 Day 4: Content download + tree walker for collab_read / collab_list_files
+// ---------------------------------------------------------------------------
+
+import { MAX_DIRECT_CONTENT_BYTES, MarkdownFileTooLargeError } from "../graph/markdown.js";
+import { MAX_ANCESTRY_HOPS } from "./scope.js";
+
+/**
+ * Download a drive item's content as a UTF-8 string.
+ *
+ * Uses the same 4 MiB cap as `downloadMarkdownContent` in `src/graph/markdown.ts`
+ * (re-uses {@link MAX_DIRECT_CONTENT_BYTES} and {@link MarkdownFileTooLargeError}
+ * from that module). The cap is a graphdo-ts policy limit, not a Graph API limit.
+ *
+ * Used by `collab_read` for both the authoritative file and other in-scope files.
+ */
+export async function getDriveItemContent(
+  client: GraphClient,
+  itemId: ValidatedGraphId,
+  signal: AbortSignal,
+): Promise<string> {
+  // Pre-flight size check via metadata fetch to fail fast on oversized files.
+  const item = await getDriveItem(client, itemId, signal);
+  if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
+    throw new MarkdownFileTooLargeError(item.size, MAX_DIRECT_CONTENT_BYTES);
+  }
+
+  const path = `/me/drive/items/${encodeURIComponent(itemId)}/content`;
+  logger.debug("downloading drive item content", { itemId });
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (buf.byteLength > MAX_DIRECT_CONTENT_BYTES) {
+    throw new MarkdownFileTooLargeError(buf.byteLength, MAX_DIRECT_CONTENT_BYTES);
+  }
+  return buf.toString("utf-8");
+}
+
+/**
+ * Represents a single entry in the recursive attachment tree returned by
+ * {@link walkAttachmentsTree}.
+ */
+export interface AttachmentEntry {
+  /** Drive item metadata (id, name, size, cTag, lastModifiedDateTime, etc). */
+  item: DriveItem;
+  /** Slash-separated path relative to `attachments/`, e.g. `"diagrams/arch.png"`. */
+  relativePath: string;
+}
+
+/**
+ * Recursively enumerate the contents of the `attachments/` folder.
+ *
+ * Per `docs/plans/collab-v1.md` §4.6 step 5, the attachments group allows
+ * arbitrary nesting up to {@link MAX_ANCESTRY_HOPS} depth (= 8). The walker
+ * performs breadth-first traversal and collects files at every level. If
+ * the folder does not exist (404), returns an empty array — the folder is
+ * created on-demand by `collab_write`.
+ *
+ * The caller is responsible for enforcing the 500-entry breadth cap (done
+ * in `collab_list_files`). The walker stops early when the provided
+ * `budget` is exhausted and sets `truncated` in the result.
+ *
+ * Newest-first ordering within each folder is **not** guaranteed by this
+ * helper (Graph returns children in an undefined order). The tool layer
+ * sorts by `lastModifiedDateTime` descending if the spec requires it;
+ * the walker simply returns entries in traversal order.
+ */
+export async function walkAttachmentsTree(
+  client: GraphClient,
+  attachmentsFolderId: ValidatedGraphId,
+  signal: AbortSignal,
+  budget: number,
+): Promise<{ entries: AttachmentEntry[]; truncated: boolean }> {
+  const entries: AttachmentEntry[] = [];
+  let truncated = false;
+
+  // Queue entries are (folderId, pathPrefix). pathPrefix is the relative
+  // path to that folder from the attachments root, e.g. "" for the root,
+  // "diagrams/" for a direct child folder, "diagrams/v2/" for deeper.
+  interface QueueEntry {
+    folderId: ValidatedGraphId;
+    pathPrefix: string;
+    depth: number;
+  }
+  const queue: QueueEntry[] = [{ folderId: attachmentsFolderId, pathPrefix: "", depth: 0 }];
+
+  while (queue.length > 0 && entries.length < budget) {
+    const current = queue.shift();
+    if (current === undefined) break;
+    if (current.depth >= MAX_ANCESTRY_HOPS) {
+      // Depth cap reached — skip this folder's children.
+      continue;
+    }
+
+    let children: DriveItem[];
+    try {
+      children = await listChildren(client, current.folderId, signal);
+    } catch (err) {
+      // 404 means the folder doesn't exist — stop walking this branch.
+      if (err instanceof GraphRequestError && err.statusCode === 404) {
+        continue;
+      }
+      throw err;
+    }
+
+    for (const child of children) {
+      if (entries.length >= budget) {
+        truncated = true;
+        break;
+      }
+
+      const childPath = `${current.pathPrefix}${child.name}`;
+
+      if (child.folder !== undefined) {
+        // It's a subfolder — enqueue for recursive traversal.
+        const childId = validateGraphId("attachmentChildFolderId", child.id);
+        queue.push({
+          folderId: childId,
+          pathPrefix: `${childPath}/`,
+          depth: current.depth + 1,
+        });
+      } else {
+        // It's a file — add to entries.
+        entries.push({ item: child, relativePath: childPath });
+      }
+    }
+
+    if (truncated) break;
+  }
+
+  // If there are still queued folders after hitting the budget, mark truncated.
+  if (queue.length > 0 && entries.length >= budget) {
+    truncated = true;
+  }
+
+  return { entries, truncated };
 }

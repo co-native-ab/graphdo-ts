@@ -309,10 +309,106 @@ describe("08-scope-traversal-rejected", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Downstream tool-layer rows land alongside `collab_read` (W2 Day 4).
+  // Tool-layer scope rejection (W2 Day 4)
   // -------------------------------------------------------------------------
 
-  it.todo(
-    "after `collab_read` lands (W2 Day 4): each refusal reason surfaces as an `OutOfScopeError` from the tool with a matching `scope_denied` audit entry",
-  );
+  describe("collab_read rejects out-of-scope paths", () => {
+    it("returns OutOfScopeError for dotdot traversal via tool call", async () => {
+      // We need to initialize a project first so there's an active session
+      const { setupIntegrationEnv, teardownIntegrationEnv, createTestClient } =
+        await import("./helpers.js");
+      const { MockAuthenticator } = await import("../mock-auth.js");
+      const { resetFormFactoryForTest } = await import("../../src/tools/collab-forms.js");
+
+      resetFormFactoryForTest();
+      const toolEnv = await setupIntegrationEnv();
+      try {
+        // Copy the project setup
+        toolEnv.graphState.drive = {
+          id: PROJECT_DRIVE_ID,
+          driveType: "business",
+          webUrl: "https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents",
+        };
+        toolEnv.graphState.driveRootChildren = [
+          {
+            id: PROJECT_FOLDER_ID,
+            name: "Project Foo",
+            folder: {},
+            lastModifiedDateTime: "2026-04-19T05:00:00Z",
+          },
+        ];
+        toolEnv.graphState.driveFolderChildren.set(PROJECT_FOLDER_ID, [
+          {
+            id: AUTHORITATIVE_FILE_ID,
+            name: AUTHORITATIVE_FILE_NAME,
+            size: 12,
+            lastModifiedDateTime: "2026-04-19T05:00:00Z",
+            file: { mimeType: "text/markdown" },
+            content: "# spec\n",
+          },
+        ]);
+
+        // Set up browser spy for the pickers
+        const { fetchCsrfToken } = await import("../helpers.js");
+        let callCount = 0;
+        const openBrowser = (url: string): Promise<void> => {
+          setTimeout(() => {
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              if (callCount === 0) {
+                await fetch(`${url}/select`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    id: PROJECT_FOLDER_ID,
+                    label: "/Project Foo",
+                    csrfToken,
+                  }),
+                });
+              } else {
+                await fetch(`${url}/select`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    id: AUTHORITATIVE_FILE_ID,
+                    label: AUTHORITATIVE_FILE_NAME,
+                    csrfToken,
+                  }),
+                });
+              }
+              callCount++;
+            })();
+          }, 150);
+          return Promise.resolve();
+        };
+
+        const auth = new MockAuthenticator({
+          token: "tool-test-token",
+          username: "test@example.com",
+        });
+        const mcpClient = await createTestClient(toolEnv, auth, { openBrowser });
+
+        // Initialize project
+        const initResult = await mcpClient.callTool({
+          name: "session_init_project",
+          arguments: {},
+        });
+        expect((initResult as { isError?: boolean }).isError).toBeFalsy();
+
+        // Now try collab_read with an out-of-scope path
+        const readResult = await mcpClient.callTool({
+          name: "collab_read",
+          arguments: { path: "../escape.md" },
+        });
+        expect((readResult as { isError?: boolean }).isError).toBe(true);
+        const content = (readResult as { content: { text: string }[] }).content;
+        // The error message format is "Path X is out of scope: reason"
+        expect(content[0]?.text).toContain("out of scope");
+        expect(content[0]?.text).toContain("dotdot_segment");
+      } finally {
+        resetFormFactoryForTest();
+        await teardownIntegrationEnv(toolEnv);
+      }
+    });
+  });
 });
