@@ -13,6 +13,7 @@ import { UserCancelledError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
+import { acquireFormSlot } from "./collab-forms.js";
 import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
@@ -48,6 +49,11 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
         },
       },
       async (_args, { signal }) => {
+        // Acquire the form-factory slot before doing any work that can
+        // open a browser tab. If another form is already open, the
+        // FormBusyError from acquireFormSlot surfaces back to the agent
+        // with the URL of the in-flight form so it can guide the user.
+        const slot = acquireFormSlot("todo_select_list");
         try {
           const client = config.graphClient;
           const lists = await listTodoLists(client, signal);
@@ -89,6 +95,9 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
             },
             signal,
           );
+          // Publish the URL on the slot so any concurrent form request
+          // gets a useful FormBusyError message.
+          slot.setUrl(handle.url);
 
           let browserOpened = false;
           try {
@@ -131,6 +140,8 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
             : "\n\nYou can call this tool again if the user would like to retry.";
 
           return formatError("todo_select_list", err, { suffix: retryHint });
+        } finally {
+          slot.release();
         }
       },
     ),

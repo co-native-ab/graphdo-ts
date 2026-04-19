@@ -6,9 +6,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerConfig } from "../index.js";
-import { UserCancelledError } from "../errors.js";
+import { UserCancelledError, FormBusyError } from "../errors.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
+import type { FormSlot } from "./collab-forms.js";
+import { acquireFormSlot } from "./collab-forms.js";
 import { formatError } from "./shared.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
@@ -54,6 +56,9 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
         },
       },
       async (_args, { signal }) => {
+        // Cheap pre-check: don't hold the form slot if the user is
+        // already signed in (the login tool short-circuits in that
+        // case and never opens a browser).
         try {
           if (await config.authenticator.isAuthenticated(signal)) {
             return {
@@ -65,7 +70,26 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
               ],
             };
           }
+        } catch (error: unknown) {
+          return formatError("login", error, {
+            prefix: "Login failed: ",
+            suffix: "\n\nYou can call this tool again if the user would like to retry.",
+          });
+        }
 
+        // Acquire the form-factory slot before kicking off the MSAL
+        // browser flow so a concurrent picker / collab form cannot open
+        // a second browser tab on top of the login page.
+        let slot: FormSlot;
+        try {
+          slot = acquireFormSlot("login");
+        } catch (error: unknown) {
+          if (error instanceof FormBusyError) {
+            return formatError("login", error);
+          }
+          throw error;
+        }
+        try {
           const loginResult = await config.authenticator.login(signal);
           config.onScopesChanged?.(loginResult.grantedScopes);
 
@@ -83,6 +107,8 @@ export function registerLoginTools(server: McpServer, config: ServerConfig): Too
             prefix: "Login failed: ",
             suffix: "\n\nYou can call this tool again if the user would like to retry.",
           });
+        } finally {
+          slot.release();
         }
       },
     ),
