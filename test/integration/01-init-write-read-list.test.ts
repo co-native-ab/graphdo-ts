@@ -259,7 +259,72 @@ describe("01-init-write-read-list", () => {
   it.todo(
     "after `collab_write` lands (W3 Day 2): writing the authoritative file injects frontmatter `doc_id`, bumps cTag, appends an audit entry",
   );
-  it.todo(
-    "after `collab_read` + `collab_list_files` land (W2 Day 4): reading echoes the written body with cTag, listing surfaces the authoritative file marker",
-  );
+
+  describe("collab_read + collab_list_files (W2 Day 4)", () => {
+    it("reading echoes the written body with cTag, listing surfaces the authoritative file marker", async () => {
+      // First, initialize the project
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({
+        token: "init-token",
+        username: "alice@example.com",
+      });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      const initResult = (await c.callTool({
+        name: "session_init_project",
+        arguments: {},
+      })) as ToolResult;
+      expect(initResult.isError).toBeFalsy();
+
+      // Seed the authoritative file with frontmatter for the read test
+      const authoritativeContent = `---
+collab:
+  version: 1
+  doc_id: "01JTEST0000000000000000000"
+  created_at: "2026-04-19T05:00:00Z"
+  sections: []
+  proposals: []
+  authorship: []
+---
+# Spec Document
+
+This is the body content.
+`;
+      const specFile = env.graphState.driveFolderChildren
+        .get("folder-proj")
+        ?.find((f) => f.id === "file-spec");
+      if (specFile) {
+        specFile.content = authoritativeContent;
+        specFile.size = Buffer.byteLength(authoritativeContent, "utf-8");
+      }
+
+      // Test collab_read for the authoritative file
+      const readResult = (await c.callTool({
+        name: "collab_read",
+        arguments: { path: "spec.md" },
+      })) as ToolResult;
+      expect(readResult.isError).toBeFalsy();
+      const readText = firstText(readResult);
+      expect(readText).toContain("file: spec.md (file-spec)");
+      expect(readText).toContain("isAuthoritative: true");
+      expect(readText).toContain("---FRONTMATTER (parsed)---");
+      expect(readText).toContain("doc_id");
+      expect(readText).toContain("01JTEST0000000000000000000");
+      expect(readText).toContain("---BODY---");
+      expect(readText).toContain("This is the body content.");
+
+      // Test collab_list_files
+      const listResult = (await c.callTool({
+        name: "collab_list_files",
+        arguments: {},
+      })) as ToolResult;
+      expect(listResult.isError).toBeFalsy();
+      const listText = firstText(listResult);
+      expect(listText).toContain("ROOT");
+      expect(listText).toContain("spec.md");
+      expect(listText).toContain("[authoritative]");
+      // .collab folder should NOT appear in listing
+      expect(listText).not.toContain(".collab");
+    });
+  });
 });
