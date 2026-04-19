@@ -29,7 +29,7 @@ import { logger } from "../logger.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
 import { GraphScope } from "../scopes.js";
-import { GraphRequestError } from "../graph/client.js";
+import { GraphClient, GraphRequestError } from "../graph/client.js";
 import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
 import { MarkdownFileTooLargeError } from "../graph/markdown.js";
 import { NoActiveSessionError } from "../collab/session.js";
@@ -230,7 +230,6 @@ async function scopeCheckedResolve(
   signal: AbortSignal,
 ): Promise<DriveItem> {
   const token = await config.authenticator.token(signal);
-  const { GraphClient } = await import("../graph/client.js");
   const client = new GraphClient(config.graphBaseUrl, {
     getToken: () => Promise.resolve(token),
   });
@@ -303,9 +302,15 @@ function formatSize(bytes: number | undefined): string {
 
 /**
  * Pick a Content-Type for a project file based on its leaf name. Used by
- * the non-authoritative `collab_write` path so .md / .json / binary
- * attachments all carry the right MIME on PUT. Authoritative writes are
- * always `text/markdown` (`writeAuthoritative` hard-codes it).
+ * the non-authoritative `collab_write` path so .md / .json / image /
+ * binary attachments all carry the right MIME on PUT. Authoritative
+ * writes are always `text/markdown` (`writeAuthoritative` hard-codes it).
+ *
+ * Common image extensions are recognised explicitly so OneDrive previews
+ * (and any downstream tool that reads `file.mimeType`) work without an
+ * extra round-trip. Anything unknown falls through to
+ * `application/octet-stream` — Graph re-detects from the bytes anyway,
+ * but a generic MIME is safer than guessing.
  */
 function contentTypeForFileName(fileName: string): string {
   const lower = fileName.toLowerCase();
@@ -315,6 +320,11 @@ function contentTypeForFileName(fileName: string): string {
   if (lower.endsWith(".json")) {
     return COLLAB_CONTENT_TYPE_JSON;
   }
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
   return COLLAB_CONTENT_TYPE_BINARY;
 }
 
@@ -342,7 +352,7 @@ function splitScopedPath(path: string): { parentSegments: string[]; leafName: st
  * `writeProjectFile({ kind: "create" })`.
  */
 async function ensureParentFolder(
-  client: import("../graph/client.js").GraphClient,
+  client: GraphClient,
   rootFolderId: ValidatedGraphId,
   parentSegments: string[],
   signal: AbortSignal,
@@ -452,6 +462,29 @@ async function runExternalSourceReprompt(
  * agent's own frontmatter carries them. Section-aware writes land with
  * `collab_acquire_section` / `collab_create_proposal` in W3 Day 4 + W4.
  */
+/**
+ * Where the `doc_id` for an authoritative write came from. Returned by
+ * {@link resolveAuthoritativeFrontmatter} so the W3 Day 3 audit writer
+ * can record the recovery path that fired (parsed → no audit, anything
+ * else → `frontmatter_reset` audit entry with `recoveredDocId: true`
+ * for `Cache` / `Live` / `Fresh`).
+ *
+ * A real enum (vs. a string union) keeps the comparator readable and
+ * matches the codebase convention set by {@link GraphScope},
+ * {@link import("../graph/client.js").HttpMethod}, and
+ * {@link import("../graph/markdown.js").MarkdownFolderEntryKind}.
+ */
+export enum DocIdSource {
+  /** Agent supplied a parseable `collab:` frontmatter envelope. */
+  Agent = "agent",
+  /** Live file's frontmatter parsed cleanly. */
+  Live = "live",
+  /** Live frontmatter was missing/malformed; recovered from local pin block. */
+  Cache = "cache",
+  /** No agent / live / cache value — fresh ULID minted (originator first-write). */
+  Fresh = "fresh",
+}
+
 function resolveAuthoritativeFrontmatter(args: {
   agentContent: string;
   liveContent: string;
@@ -461,13 +494,17 @@ function resolveAuthoritativeFrontmatter(args: {
 }): {
   frontmatter: CollabFrontmatter;
   body: string;
-  docIdSource: "agent" | "live" | "cache" | "fresh";
+  docIdSource: DocIdSource;
 } {
   const split = splitFrontmatter(args.agentContent);
   if (split !== null) {
     const parseAttempt = CollabFrontmatterSchema.safeParse(parseYamlForFrontmatter(split.yaml));
     if (parseAttempt.success) {
-      return { frontmatter: parseAttempt.data, body: split.body, docIdSource: "agent" };
+      return {
+        frontmatter: parseAttempt.data,
+        body: split.body,
+        docIdSource: DocIdSource.Agent,
+      };
     }
     // Fall through — agent's envelope was unparseable; treat the body
     // alone as the new content and recover the doc_id from elsewhere.
@@ -491,7 +528,7 @@ function resolveAuthoritativeFrontmatter(args: {
         },
       },
       body,
-      docIdSource: "live",
+      docIdSource: DocIdSource.Live,
     };
   }
 
@@ -499,7 +536,7 @@ function resolveAuthoritativeFrontmatter(args: {
     return {
       frontmatter: buildFreshCollabFrontmatter(args.cachedDocId, args.now()),
       body,
-      docIdSource: "cache",
+      docIdSource: DocIdSource.Cache,
     };
   }
 
@@ -513,7 +550,7 @@ function resolveAuthoritativeFrontmatter(args: {
   return {
     frontmatter: buildFreshCollabFrontmatter(freshDocId, args.now()),
     body,
-    docIdSource: "fresh",
+    docIdSource: DocIdSource.Fresh,
   };
 }
 
@@ -565,7 +602,7 @@ function parseYamlForFrontmatter(yamlBody: string): unknown {
  */
 async function runAuthoritativeWrite(
   config: ServerConfig,
-  client: import("../graph/client.js").GraphClient,
+  client: GraphClient,
   metadata: NonNullable<Awaited<ReturnType<typeof loadProjectMetadata>>>,
   resolvedItem: DriveItem,
   cTag: string,
@@ -679,7 +716,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           const { metadata } = await requireActiveSession(config, signal);
 
           const token = await config.authenticator.token(signal);
-          const { GraphClient } = await import("../graph/client.js");
           const client = new GraphClient(config.graphBaseUrl, {
             getToken: () => Promise.resolve(token),
           });
@@ -820,7 +856,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           const { metadata } = await requireActiveSession(config, signal);
 
           const token = await config.authenticator.token(signal);
-          const { GraphClient } = await import("../graph/client.js");
           const client = new GraphClient(config.graphBaseUrl, {
             getToken: () => Promise.resolve(token),
           });
@@ -1172,7 +1207,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           }
 
           const token = await config.authenticator.token(signal);
-          const { GraphClient } = await import("../graph/client.js");
           const client = new GraphClient(config.graphBaseUrl, {
             getToken: () => Promise.resolve(token),
           });
