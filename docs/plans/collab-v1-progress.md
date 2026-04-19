@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: W0 Day 3 — Form-factory module on `src/tools/collab-forms.ts` (complete, awaiting merge)
-Current milestone: _none — W0 Day 3 complete; W0 Days 4–5 (buffer) start in the next PR_
-Next milestone: W0 Days 4–5 — buffer (W0 hardening test rows; cross-host browser smoke)
+Last updated: W0 Days 4–5 — buffer in flight; cross-host browser smoke checklist published at [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md)
+Current milestone: W0 Days 4–5 — buffer (cross-host browser smoke checklist; absorb any leftover hardening test rows)
+Next milestone: W1 Day 1 — `userOid` plumbing (lands ADR-006)
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -11,18 +11,17 @@ work reads this file first.
 
 ## Completed
 
-| Milestone | PR                                                        | Merged  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------- | --------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | merged  | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added.                                                                                                                                                                                                                                                                                                  |
-| W0 Day 2  | [#34](https://github.com/co-native-ab/graphdo-ts/pull/34) | merged  | `src/loopback-security.ts` (CSRF, header pins, hardened CSP); `picker.ts` + `loopback.ts` enforce Host/Origin/Sec-Fetch-Site/Content-Type pins + per-request CSP nonce; `landingPageHtml`/`pickerPageHtml`/`layoutHtml` thread `csrfToken` + `nonce`. New `test/loopback-security.test.ts` + §5.4 hardening rows on `test/picker.test.ts` + `test/loopback.test.ts`.                                                                                                         |
-| W0 Day 3  | [#35](https://github.com/co-native-ab/graphdo-ts/pull/35) | pending | `src/tools/collab-forms.ts` form-factory with module-level single-flight slot + `try { ... } finally { slot.release() }` contract; `FormBusyError` (`src/errors.ts`) carries the in-flight URL + kind. `login` and `todo_select_list` migrated to acquire the slot around their browser flows. New `test/tools/collab-forms.test.ts` covers the §8 row-18 lock-release matrix (submit / cancel / timeout / transport abort / uncaught exception) against an early-stub form. |
+| Milestone | PR                                                        | Merged | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------- | --------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Day 1  | [#33](https://github.com/co-native-ab/graphdo-ts/pull/33) | merged | `src/templates/escape.ts` extracted; `login.ts` and `picker.ts` re-pointed; `escapeHtml` removed from `styles.ts`; `test/templates/escape.test.ts` + picker XSS rows added.                                                                                                                                                                                                                                                                                                  |
+| W0 Day 2  | [#34](https://github.com/co-native-ab/graphdo-ts/pull/34) | merged | `src/loopback-security.ts` (CSRF, header pins, hardened CSP); `picker.ts` + `loopback.ts` enforce Host/Origin/Sec-Fetch-Site/Content-Type pins + per-request CSP nonce; `landingPageHtml`/`pickerPageHtml`/`layoutHtml` thread `csrfToken` + `nonce`. New `test/loopback-security.test.ts` + §5.4 hardening rows on `test/picker.test.ts` + `test/loopback.test.ts`.                                                                                                         |
+| W0 Day 3  | [#35](https://github.com/co-native-ab/graphdo-ts/pull/35) | merged | `src/tools/collab-forms.ts` form-factory with module-level single-flight slot + `try { ... } finally { slot.release() }` contract; `FormBusyError` (`src/errors.ts`) carries the in-flight URL + kind. `login` and `todo_select_list` migrated to acquire the slot around their browser flows. New `test/tools/collab-forms.test.ts` covers the §8 row-18 lock-release matrix (submit / cancel / timeout / transport abort / uncaught exception) against an early-stub form. |
 
 ## In flight
 
-| Milestone | Branch | PR  | Started | Sub-status |
-| --------- | ------ | --- | ------- | ---------- |
-
-_(Nothing in flight.)_
+| Milestone   | Branch                                   | PR        | Started    | Sub-status                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------- | ---------------------------------------- | --------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0 Days 4–5 | `copilot/continue-collab-implementation` | _this PR_ | 2026-04-19 | Buffer days. The §5.4 hardening test rows landed in PRs #34 and #35 are already at the `~320 LOC` figure called for in `collab-v1.md` §11 (W0 hardening test correction), so the buffer is being consumed by publishing [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md) — the manual checklist that gates the W0 → W1 transition (and is re-used at W5 Day 5). No source/behavioural code changes in this PR. |
 
 ## Not started
 
@@ -34,7 +33,7 @@ back to its DoD in the plan.
 - [x] **W0 Day 1** — `escapeHtml` helper + template audit _(complete in [#33](https://github.com/co-native-ab/graphdo-ts/pull/33))_
 - [x] **W0 Day 2** — Loopback hardening on `src/picker.ts` and `src/loopback.ts` _(complete in [#34](https://github.com/co-native-ab/graphdo-ts/pull/34))_
 - [x] **W0 Day 3** — Form-factory module (`src/tools/collab-forms.ts`) _(complete in [#35](https://github.com/co-native-ab/graphdo-ts/pull/35))_
-- [ ] **W0 Days 4–5** — buffer (W0 hardening test rows; cross-host browser smoke)
+- [ ] **W0 Days 4–5** — buffer (cross-host browser smoke per [`cross-host-browser-smoke.md`](./cross-host-browser-smoke.md); absorb any leftover hardening test rows)
 
 ### Week 1 — auth + scaffolding
 
