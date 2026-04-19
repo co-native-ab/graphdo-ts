@@ -31,6 +31,7 @@ import { z } from "zod";
 
 import type { GraphClient } from "../graph/client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "../graph/client.js";
+import type { ValidatedGraphId } from "../graph/ids.js";
 import type { DriveItem } from "../graph/types.js";
 import { DriveItemSchema } from "../graph/types.js";
 import { SentinelTamperedError } from "../errors.js";
@@ -247,13 +248,9 @@ export class SentinelAlreadyExistsError extends Error {
  */
 export async function readSentinel(
   client: GraphClient,
-  projectFolderId: string,
+  projectFolderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<{ sentinel: ProjectSentinel; item: DriveItem }> {
-  if (projectFolderId.length === 0) {
-    throw new Error("projectFolderId must not be empty");
-  }
-
   const folderPart = encodeURIComponent(projectFolderId);
   const filePath = encodeURI(`${SENTINEL_FOLDER_NAME}/${SENTINEL_FILE_NAME}`);
   const itemPath = `/me/drive/items/${folderPart}:/${filePath}`;
@@ -300,14 +297,10 @@ export async function readSentinel(
  */
 export async function writeSentinel(
   client: GraphClient,
-  collabFolderId: string,
+  collabFolderId: ValidatedGraphId,
   sentinel: ProjectSentinel,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  if (collabFolderId.length === 0) {
-    throw new Error("collabFolderId must not be empty");
-  }
-
   const body = serializeSentinel(sentinel);
   const path =
     `/me/drive/items/${encodeURIComponent(collabFolderId)}:/` +

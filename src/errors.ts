@@ -70,3 +70,38 @@ export class FormBusyError extends Error {
     this.name = "FormBusyError";
   }
 }
+
+/**
+ * Raised by `session_init_project` when the human picks a folder that
+ * contains zero `.md` files at its root. The tool surfaces the folder
+ * name in the message so the human knows which folder to fix.
+ */
+export class NoMarkdownFileError extends Error {
+  constructor(
+    public readonly folderName: string,
+    public readonly folderId: string,
+  ) {
+    super(
+      `Folder "${folderName}" contains no markdown (.md) files at its root. ` +
+        "Create one (e.g. spec.md) in OneDrive web, then run session_init_project again.",
+    );
+    this.name = "NoMarkdownFileError";
+  }
+}
+
+/**
+ * Raised by `session_init_project` when the chosen folder already
+ * contains a `.collab/` subfolder. The tool surfaces this as a
+ * dedicated error so the agent can re-route to `session_open_project`
+ * (which lands in W4 Day 4) without overwriting an existing project's
+ * sentinel.
+ */
+export class ProjectAlreadyInitialisedError extends Error {
+  constructor(public readonly folderId: string) {
+    super(
+      `Folder ${folderId} already contains a .collab/ subfolder, so a project ` +
+        "is already initialised here. Use session_open_project to join it.",
+    );
+    this.name = "ProjectAlreadyInitialisedError";
+  }
+}

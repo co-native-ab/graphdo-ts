@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { loadAndValidateMarkdownConfig, updateConfig } from "../config.js";
 import { UserCancelledError } from "../errors.js";
+import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
 import {
   createMarkdownFile,
   deleteDriveItem,
@@ -271,12 +272,13 @@ const idOrNameShape = {
 
 async function resolveDriveItem(
   client: ServerConfig["graphClient"],
-  folderId: string,
+  folderId: ValidatedGraphId,
   args: { itemId?: string; fileName?: string },
   signal: AbortSignal,
 ): Promise<DriveItem> {
   if (args.itemId) {
-    return getDriveItem(client, args.itemId, signal);
+    const itemId = validateGraphId("itemId", args.itemId);
+    return getDriveItem(client, itemId, signal);
   }
   if (!args.fileName) {
     throw new Error("Either itemId or fileName must be provided.");
@@ -574,7 +576,8 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
-          const content = await downloadMarkdownContent(client, item.id, signal);
+          const itemId = validateGraphId("item.id", item.id);
+          const content = await downloadMarkdownContent(client, itemId, signal);
           const revision = await resolveCurrentRevision(client, item, signal);
 
           const header =
@@ -744,7 +747,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
 
           const updated = await updateMarkdownFile(
             client,
-            item.id,
+            validateGraphId("item.id", item.id),
             args.cTag,
             args.content,
             signal,
@@ -863,7 +866,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
-          await deleteDriveItem(client, item.id, signal);
+          await deleteDriveItem(client, validateGraphId("item.id", item.id), signal);
 
           return {
             content: [
@@ -934,7 +937,11 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
-          const versions = await listDriveItemVersions(client, item.id, signal);
+          const versions = await listDriveItemVersions(
+            client,
+            validateGraphId("item.id", item.id),
+            signal,
+          );
 
           const header = `Versions of "${item.name}" (${item.id}) — newest first:`;
           if (versions.length === 0) {
@@ -1037,7 +1044,7 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
           const { content, isCurrent } = await getRevisionContent(
             client,
             item,
-            args.versionId,
+            validateGraphId("versionId", args.versionId),
             signal,
           );
 
@@ -1150,9 +1157,11 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
             };
           }
 
+          const fromVersionId = validateGraphId("fromVersionId", args.fromVersionId);
+          const toVersionId = validateGraphId("toVersionId", args.toVersionId);
           const [from, to] = await Promise.all([
-            getRevisionContent(client, item, args.fromVersionId, signal),
-            getRevisionContent(client, item, args.toVersionId, signal),
+            getRevisionContent(client, item, fromVersionId, signal),
+            getRevisionContent(client, item, toVersionId, signal),
           ]);
           const fromContent = from.content;
           const toContent = to.content;

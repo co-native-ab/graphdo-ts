@@ -1,10 +1,21 @@
 import type { MockState } from "./mock-graph.js";
 import { createMockGraphServer, MockState as MockStateClass } from "./mock-graph.js";
+import { validateGraphId, type ValidatedGraphId } from "../src/graph/ids.js";
 
 export interface TestEnv {
   state: MockState;
   graphUrl: string;
   cleanup: () => Promise<void>;
+}
+
+/**
+ * Test-only shorthand that brands a string as a {@link ValidatedGraphId}
+ * by running it through {@link validateGraphId}. Lets fixture code keep
+ * passing string literals like `"list-1"` while still satisfying the
+ * helper signatures introduced by ADR-0007.
+ */
+export function gid(value: string): ValidatedGraphId {
+  return validateGraphId("test-id", value);
 }
 
 /**

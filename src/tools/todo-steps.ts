@@ -10,6 +10,7 @@ import {
   deleteChecklistItem,
 } from "../graph/todo.js";
 import { loadAndValidateTodoConfig } from "../config.js";
+import { validateGraphId } from "../graph/ids.js";
 import type { ServerConfig } from "../index.js";
 import { formatError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
@@ -74,14 +75,10 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-          const items = await listChecklistItems(
-            client,
-            todoConfig.todoListId,
-            args.taskId,
-            signal,
-          );
+          const items = await listChecklistItems(client, todoConfig.todoListId, taskId, signal);
 
           if (items.length === 0) {
             return {
@@ -122,12 +119,13 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           const item = await createChecklistItem(
             client,
             todoConfig.todoListId,
-            args.taskId,
+            taskId,
             args.displayName,
             signal,
           );
@@ -179,13 +177,15 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
         }
 
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
+          const stepId = validateGraphId("stepId", args.stepId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
           const item = await updateChecklistItem(
             client,
             todoConfig.todoListId,
-            args.taskId,
-            args.stepId,
+            taskId,
+            stepId,
             {
               displayName: args.displayName,
               isChecked: args.isChecked,
@@ -228,15 +228,11 @@ export function registerStepTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
+          const stepId = validateGraphId("stepId", args.stepId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-          await deleteChecklistItem(
-            client,
-            todoConfig.todoListId,
-            args.taskId,
-            args.stepId,
-            signal,
-          );
+          await deleteChecklistItem(client, todoConfig.todoListId, taskId, stepId, signal);
 
           return {
             content: [

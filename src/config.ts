@@ -6,6 +6,7 @@ import * as crypto from "node:crypto";
 import { z } from "zod";
 
 import { isNodeError } from "./errors.js";
+import { validateGraphId, type ValidatedGraphId } from "./graph/ids.js";
 import { logger } from "./logger.js";
 
 export interface MarkdownConfig {
@@ -191,16 +192,31 @@ export function hasMarkdownConfig(
  * Loads config from disk and validates that a todo list is configured.
  * Throws a user-friendly error if missing or invalid (e.g. picker has not
  * been run yet — in which case the user is directed to re-run the picker).
+ *
+ * Returns the validated config with `todoListId` re-typed as
+ * {@link ValidatedGraphId} so it can be passed straight to Graph helpers
+ * without an additional validation step. A persisted-but-corrupted
+ * `todoListId` (hand-edited config.json) fails loudly here rather than
+ * splicing into a Graph URL downstream.
  */
 export async function loadAndValidateTodoConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { todoListId: string; todoListName: string }> {
+): Promise<Config & { todoListId: ValidatedGraphId; todoListName: string }> {
   const config = await loadConfig(dir, signal);
   if (!hasTodoConfig(config)) {
     throw new Error("todo list not configured - use the todo_select_list tool to select one");
   }
-  return config;
+  let validatedListId: ValidatedGraphId;
+  try {
+    validatedListId = validateGraphId("todoListId", config.todoListId);
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `todo list configuration is corrupted (${reason}) - use the todo_select_list tool to re-select one`,
+    );
+  }
+  return { ...config, todoListId: validatedListId };
 }
 
 /**
@@ -208,11 +224,17 @@ export async function loadAndValidateTodoConfig(
  * Throws a user-friendly error if missing or invalid (e.g. empty, `/`, or
  * containing path separators — in which case the user is directed to re-run
  * the picker, which always writes a single-folder opaque ID).
+ *
+ * Re-types `markdown.rootFolderId` as {@link ValidatedGraphId} so callers
+ * can pass it straight into Graph helpers without re-validating. A
+ * persisted value that fails {@link validateGraphId} (a hand-edited
+ * config.json) raises the same "use the picker" error as the missing
+ * case, rather than splicing into a Graph URL downstream.
  */
 export async function loadAndValidateMarkdownConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { markdown: { rootFolderId: string } & MarkdownConfig }> {
+): Promise<Config & { markdown: { rootFolderId: ValidatedGraphId } & MarkdownConfig }> {
   const config = await loadConfig(dir, signal);
   const rootFolderId = config?.markdown?.rootFolderId;
   const err = markdownRootFolderIdError(rootFolderId);
@@ -225,7 +247,19 @@ export async function loadAndValidateMarkdownConfig(
       `markdown root folder ${detail} - use the markdown_select_root_folder tool to choose one`,
     );
   }
-  return config;
+  let validatedRootId: ValidatedGraphId;
+  try {
+    validatedRootId = validateGraphId("markdown.rootFolderId", config.markdown.rootFolderId);
+  } catch (cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `markdown root folder is corrupted (${reason}) - use the markdown_select_root_folder tool to re-select one`,
+    );
+  }
+  return {
+    ...config,
+    markdown: { ...config.markdown, rootFolderId: validatedRootId },
+  };
 }
 
 /**
