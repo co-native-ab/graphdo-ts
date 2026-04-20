@@ -410,6 +410,92 @@ export class SectionAnchorLostError extends Error {
 }
 
 /**
+ * Raised by `collab_apply_proposal` (W4 Day 3) when the supplied
+ * `proposalId` is not present in the authoritative file's
+ * `frontmatter.collab.proposals[]`. Carries the id so the agent can
+ * surface it back to the human; either the proposal was never created
+ * or a cooperator already removed it.
+ */
+export class ProposalNotFoundError extends Error {
+  constructor(public readonly proposalId: string) {
+    super(
+      `Proposal ${proposalId} is not present in the authoritative file's ` +
+        "frontmatter proposals[]. Re-read the file with collab_read and " +
+        "verify the proposalId.",
+    );
+    this.name = "ProposalNotFoundError";
+  }
+}
+
+/**
+ * Raised by `collab_apply_proposal` (W4 Day 3) when the proposal's
+ * `status` is not `open` — i.e. it was already applied, superseded, or
+ * withdrawn. Per `docs/plans/collab-v1.md` §3.1 only `open` proposals
+ * are considered for application; re-applying a terminal proposal is a
+ * programming error rather than a coordination error.
+ */
+export class ProposalAlreadyAppliedError extends Error {
+  constructor(
+    public readonly proposalId: string,
+    public readonly status: string,
+  ) {
+    super(
+      `Proposal ${proposalId} cannot be applied: status is "${status}", ` +
+        'not "open". Only open proposals can be applied; create a fresh ' +
+        "proposal if you want to retry.",
+    );
+    this.name = "ProposalAlreadyAppliedError";
+  }
+}
+
+/**
+ * Raised by `collab_apply_proposal` (W4 Day 3) — and forthcoming
+ * destructive tools (`collab_restore_version`, `collab_delete_file`) —
+ * when the active session has exhausted its destructive-approval
+ * budget (`destructiveUsed >= destructiveBudgetTotal`).
+ *
+ * Per `docs/plans/collab-v1.md` §5.2 the destructive budget is enforced
+ * by the tool layer and is independent of the write budget. The error
+ * carries the current state so the agent can surface the numbers
+ * verbatim and direct the human at starting a new session
+ * (`session_renew` resets the TTL but **not** the counters per §2.2).
+ */
+export class DestructiveBudgetExhaustedError extends Error {
+  constructor(
+    public readonly destructiveUsed: number,
+    public readonly destructiveBudgetTotal: number,
+  ) {
+    super(
+      `Destructive-approval budget exhausted: ${destructiveUsed} / ` +
+        `${destructiveBudgetTotal} destructive operations used in this session. ` +
+        "Stop the MCP server (or wait for TTL expiry) and start a new session " +
+        "to continue.",
+    );
+    this.name = "DestructiveBudgetExhaustedError";
+  }
+}
+
+/**
+ * Raised by `collab_apply_proposal` (W4 Day 3) — and forthcoming
+ * destructive tools — when a destructive re-approval form is dismissed
+ * by the human (cancel button, browser close, timeout). Per
+ * `docs/plans/collab-v1.md` §5.2.3 the write is **not** issued in this
+ * case — no Graph round-trip, no counter increments.
+ */
+export class DestructiveApprovalDeclinedError extends Error {
+  constructor(
+    public readonly tool: string,
+    public readonly subject: string,
+  ) {
+    super(
+      `Destructive ${tool} on "${subject}" was declined at the browser ` +
+        "approval form. Re-issue the tool only if you genuinely want to proceed.",
+    );
+    this.name = "DestructiveApprovalDeclinedError";
+  }
+}
+
+/**
  * Raised by `collab_create_proposal` (W4 Day 2) when the helper cannot
  * find an unused proposal id (`/proposals/<ulid>.md`) inside its retry
  * budget. ULIDs are randomised in the rightmost 80 bits, so a true

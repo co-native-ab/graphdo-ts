@@ -19,11 +19,15 @@ import {
   AuthenticationRequiredError,
   BudgetExhaustedError,
   CollabCTagMismatchError,
+  DestructiveApprovalDeclinedError,
+  DestructiveBudgetExhaustedError,
   DocIdRecoveryRequiredError,
   ExternalSourceDeclinedError,
   LeaseNotHeldError,
   OutOfScopeError,
+  ProposalAlreadyAppliedError,
   ProposalIdCollisionError,
+  ProposalNotFoundError,
   SectionAlreadyLeasedError,
   SectionAnchorLostError,
   SectionNotFoundError,
@@ -74,6 +78,7 @@ import { headingSlugSet, normaliseSectionId, PREAMBLE_SYNTHETIC_SLUG } from "../
 import { resolveScopedPath, MAX_ANCESTRY_HOPS } from "../collab/scope.js";
 import {
   computeSectionContentHash,
+  classifyAuthorshipMatch,
   findSectionByAnchor,
   walkSectionsWithHashes,
 } from "../collab/authorship.js";
@@ -92,8 +97,10 @@ import {
   AuditApprovalOutcome,
   AuditConflictMode,
   AuditFrontmatterResetReason,
+  AuditMatchedBy,
   AuditResult,
   AuditWriteSource,
+  hashDiffSummary,
   type AuditInputSummary,
 } from "../collab/audit.js";
 
@@ -125,6 +132,7 @@ function toAuditConflictMode(mode: "fail" | "proposal"): AuditConflictMode {
   return mode === "fail" ? AuditConflictMode.Fail : AuditConflictMode.Proposal;
 }
 import { parse as yamlParseRaw } from "yaml";
+import { createTwoFilesPatch } from "diff";
 import { startBrowserPicker } from "../picker.js";
 import { acquireFormSlot } from "./collab-forms.js";
 import { formatError } from "./shared.js";
@@ -227,6 +235,30 @@ const COLLAB_CREATE_PROPOSAL_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+const COLLAB_APPLY_PROPOSAL_DEF: ToolDef = {
+  name: "collab_apply_proposal",
+  title: "Apply Section Proposal",
+  description:
+    "Merge a previously-created proposal into the authoritative file. " +
+    "Locates the target section by slug first, falling back to the " +
+    "content hash recorded at create time (so a rename between create " +
+    "and apply is recovered automatically and audited as " +
+    "slug_drift_resolved). The §3.1 authorship trail is consulted to " +
+    "decide whether the apply is destructive — if any prior author of " +
+    "the target section is a human or a different agent, a browser " +
+    "re-approval form is opened showing a unified diff of the change. " +
+    "On approve, the section body is replaced, an `authorship[]` entry " +
+    "is appended, and the matching `proposals[]` entry is marked " +
+    "`applied`; the file is CAS-written with the supplied " +
+    "`authoritativeCTag`. Counts toward the write budget always and " +
+    "toward the destructive-approval budget when the apply was " +
+    "destructive. Errors: ProposalNotFoundError, " +
+    "ProposalAlreadyAppliedError, SectionAnchorLostError, " +
+    "CollabCTagMismatchError, BudgetExhaustedError, " +
+    "DestructiveBudgetExhaustedError, DestructiveApprovalDeclinedError.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 const COLLAB_ACQUIRE_SECTION_DEF: ToolDef = {
   name: "collab_acquire_section",
   title: "Acquire Section Lease",
@@ -263,6 +295,7 @@ export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_LIST_FILES_DEF,
   COLLAB_WRITE_DEF,
   COLLAB_CREATE_PROPOSAL_DEF,
+  COLLAB_APPLY_PROPOSAL_DEF,
   COLLAB_ACQUIRE_SECTION_DEF,
   COLLAB_RELEASE_SECTION_DEF,
 ];
@@ -545,6 +578,89 @@ async function runExternalSourceReprompt(
     } catch (err: unknown) {
       if (err instanceof UserCancelledError) {
         throw new ExternalSourceDeclinedError(args.path);
+      }
+      throw err;
+    }
+  } finally {
+    slot.release();
+  }
+}
+
+/**
+ * Open the §5.2.3 destructive re-approval form. Acquires the
+ * single-in-flight form-factory slot for the duration; resolves on
+ * approve, throws {@link DestructiveApprovalDeclinedError} on cancel /
+ * timeout / browser close.
+ *
+ * The form shows a unified diff of the section that would be replaced
+ * (current vs. proposed), the list of prior authors that triggered the
+ * destructive classification, and the destructive-budget counters so
+ * the human can decide whether to approve.
+ */
+async function runDestructiveReprompt(
+  config: ServerConfig,
+  args: {
+    tool: string;
+    proposalId: string;
+    sectionSlug: string;
+    diff: string;
+    priorAuthors: readonly string[];
+    intent: string | undefined;
+    destructiveUsed: number;
+    destructiveBudgetTotal: number;
+  },
+  signal: AbortSignal,
+): Promise<void> {
+  const slot = acquireFormSlot("collab_apply_proposal_destructive");
+  try {
+    const authorList =
+      args.priorAuthors.length === 0 ? "(none recorded)" : args.priorAuthors.join(", ");
+    const summaryLines = [
+      `tool: ${args.tool}`,
+      `proposalId: ${args.proposalId}`,
+      `targetSectionSlug: ${args.sectionSlug}`,
+      `intent: ${args.intent ?? "(not provided)"}`,
+      `prior authors: ${authorList}`,
+      `destructive operations used this session: ${args.destructiveUsed} / ${args.destructiveBudgetTotal}`,
+      ``,
+      `--- diff ---`,
+      args.diff,
+    ];
+    const handle = await startBrowserPicker(
+      {
+        title: "Approve Destructive Apply",
+        subtitle:
+          "An MCP tool wants to overwrite a section that was last " +
+          "edited by a human or a different agent. Click Approve to " +
+          "allow the apply, or Cancel to refuse it.\n\n" +
+          summaryLines.join("\n"),
+        options: [{ id: "approve", label: "Approve destructive apply" }],
+        onSelect: async () => {
+          // Approval is recorded by the tool layer once the picker
+          // resolves; nothing to do here.
+        },
+      },
+      signal,
+    );
+    slot.setUrl(handle.url);
+    let browserOpened = false;
+    try {
+      await config.openBrowser(handle.url);
+      browserOpened = true;
+    } catch (err: unknown) {
+      logger.warn("could not open browser for destructive re-prompt", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (!browserOpened) {
+      logger.info("destructive re-prompt awaiting manual visit", { url: handle.url });
+    }
+
+    try {
+      await handle.waitForSelection;
+    } catch (err: unknown) {
+      if (err instanceof UserCancelledError) {
+        throw new DestructiveApprovalDeclinedError(args.tool, args.sectionSlug);
       }
       throw err;
     }
@@ -1093,6 +1209,29 @@ function buildLeaseEntry(
     acquiredAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
   };
+}
+
+/**
+ * Build a deduplicated list of human-readable labels for the prior
+ * authors that triggered a destructive classification. Used by
+ * {@link runDestructiveReprompt} so the form summary tells the human
+ * who last touched the section. The label format is
+ * `<kind>:<display_name>` (e.g. `human:alice@example.com`,
+ * `agent:graphdo-ts-anthropic-12345`); we keep the kind so a human
+ * reviewer can spot agent-vs-human authorship at a glance.
+ */
+function uniqueAuthorLabels(
+  authors: readonly { author_kind: string; author_display_name: string }[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const a of authors) {
+    const label = `${a.author_kind}:${a.author_display_name}`;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
 }
 
 /** Compose the agent-facing acquire/release output. */
@@ -2339,6 +2478,419 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           return { content: [{ type: "text", text: lines.join("\n") }] };
         } catch (err) {
           return formatError("collab_create_proposal", err);
+        }
+      },
+    ),
+  );
+
+  // -------------------------------------------------------------------------
+  // collab_apply_proposal (W4 Day 3)
+  // -------------------------------------------------------------------------
+  entries.push(
+    defineTool(
+      server,
+      COLLAB_APPLY_PROPOSAL_DEF,
+      {
+        inputSchema: {
+          proposalId: z
+            .string()
+            .min(1)
+            .describe(
+              "ULID of the proposal to apply (matches a `collab.proposals[].id` " +
+                "entry in the authoritative frontmatter, status: 'open').",
+            ),
+          authoritativeCTag: z
+            .string()
+            .min(1)
+            .describe(
+              "Opaque cTag for the authoritative file, from the most recent " +
+                "collab_read. Required — the merge is a CAS write.",
+            ),
+          intent: z
+            .string()
+            .max(2048)
+            .optional()
+            .describe(
+              "Free-text intent shown on the destructive re-prompt form (when " +
+                "the apply would clobber another author's work).",
+            ),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async ({ proposalId, authoritativeCTag, intent }, { signal }) => {
+        try {
+          const { session, metadata } = await requireActiveSession(config, signal);
+
+          // Pre-flight write-budget check (mirrors collab_write — the
+          // destructive-budget check fires later, after we know whether
+          // the apply is destructive).
+          if (session.writesUsed >= session.writeBudgetTotal) {
+            return formatError(
+              "collab_apply_proposal",
+              new BudgetExhaustedError(session.writesUsed, session.writeBudgetTotal),
+            );
+          }
+
+          const token = await config.authenticator.token(signal);
+          const client = new GraphClient(config.graphBaseUrl, {
+            getToken: () => Promise.resolve(token),
+          });
+
+          // 1. Read the live authoritative file: needed to look up the
+          //    proposal entry, locate the target section, and CAS-write
+          //    the merged result.
+          const authoritativeItemId = validateGraphId(
+            "authoritativeItemId",
+            metadata.pinnedAuthoritativeFileId,
+          );
+          const liveAuthoritativeItem = await getDriveItem(client, authoritativeItemId, signal);
+          const liveContent = await getDriveItemContent(client, authoritativeItemId, signal);
+          const liveSplit = splitFrontmatter(liveContent);
+          const liveBody = liveSplit !== null ? liveSplit.body : liveContent;
+          const liveRead = readMarkdownFrontmatter(liveContent);
+          if (liveRead.kind !== "parsed") {
+            // Frontmatter missing / malformed → no proposals[] to read.
+            // Force the agent through collab_write first to recover the
+            // envelope; we cannot apply a proposal against a stripped file.
+            return formatError("collab_apply_proposal", new ProposalNotFoundError(proposalId));
+          }
+          const baseFrontmatter: CollabFrontmatter = liveRead.frontmatter;
+
+          // 2. Look up the proposal entry in frontmatter.proposals[].
+          const proposalEntry = baseFrontmatter.collab.proposals.find((p) => p.id === proposalId);
+          if (proposalEntry === undefined) {
+            return formatError("collab_apply_proposal", new ProposalNotFoundError(proposalId));
+          }
+          if (proposalEntry.status !== "open") {
+            return formatError(
+              "collab_apply_proposal",
+              new ProposalAlreadyAppliedError(proposalId, proposalEntry.status),
+            );
+          }
+
+          // 3. Read the proposal body file. The proposal entry's
+          //    body_path is scope-relative under the project folder
+          //    (typically `proposals/<id>.md`); resolve via the scope
+          //    algorithm so a malicious cooperator cannot point
+          //    body_path elsewhere.
+          let proposalItem: DriveItem;
+          try {
+            proposalItem = await scopeCheckedResolve(
+              config,
+              metadata,
+              proposalEntry.body_path,
+              signal,
+            );
+          } catch (err) {
+            if (err instanceof OutOfScopeError) {
+              return formatError("collab_apply_proposal", err);
+            }
+            if (err instanceof GraphRequestError && err.statusCode === 404) {
+              return formatError(
+                "collab_apply_proposal",
+                new FileNotFoundError(proposalEntry.body_path),
+              );
+            }
+            throw err;
+          }
+          let proposalBody: string;
+          try {
+            proposalBody = await getDriveItemContent(
+              client,
+              validateGraphId("proposalItemId", proposalItem.id),
+              signal,
+            );
+          } catch (err) {
+            if (err instanceof MarkdownFileTooLargeError) {
+              return formatError("collab_apply_proposal", err);
+            }
+            if (err instanceof GraphRequestError && err.statusCode === 404) {
+              return formatError(
+                "collab_apply_proposal",
+                new FileNotFoundError(proposalEntry.body_path, proposalItem.id),
+              );
+            }
+            throw err;
+          }
+
+          // 4. Locate the target section in the current authoritative
+          //    body using the slug-first / hash-fallback algorithm
+          //    (§2.3 step 2). The hash check uses the snapshot recorded
+          //    at proposal create time, so a heading rename between
+          //    create and apply is recovered automatically.
+          const anchorResult = findSectionByAnchor(
+            liveBody,
+            proposalEntry.target_section_slug,
+            proposalEntry.target_section_content_hash_at_create,
+          );
+          if (anchorResult.kind === "anchor_lost") {
+            return formatError(
+              "collab_apply_proposal",
+              new SectionAnchorLostError(
+                proposalId,
+                proposalEntry.target_section_slug,
+                proposalEntry.target_section_content_hash_at_create,
+                anchorResult.currentSlugs,
+              ),
+            );
+          }
+          const targetSection = anchorResult.section;
+
+          // 5. Audit `slug_drift_resolved` when the hash anchor saved us.
+          if (anchorResult.kind === "slug_drift_resolved") {
+            await writeAudit(
+              config,
+              {
+                sessionId: session.sessionId,
+                agentId: session.agentId,
+                userOid: session.userOid,
+                projectId: metadata.projectId,
+                tool: "collab_apply_proposal",
+                result: AuditResult.Success,
+                type: "slug_drift_resolved",
+                details: {
+                  proposalId,
+                  oldSlug: anchorResult.oldSlug,
+                  newSlug: anchorResult.newSlug,
+                  matchedBy: AuditMatchedBy.ContentHash,
+                },
+              },
+              signal,
+            );
+          }
+
+          // 6. Compute the current section's content hash and walk the
+          //    authorship trail to detect destructive overwrites.
+          const currentSectionBody = liveBody.slice(targetSection.bodyStart, targetSection.bodyEnd);
+          const currentSectionHash = computeSectionContentHash(currentSectionBody);
+          const classification = classifyAuthorshipMatch(
+            baseFrontmatter.collab.authorship,
+            targetSection.slug,
+            currentSectionHash,
+            session.agentId,
+          );
+
+          // 7. Destructive path: budget pre-check, then re-approval form.
+          //    The diff is computed once and reused for both the form
+          //    summary and the §3.6 `destructive_approval` audit.
+          let diffText = "";
+          if (classification.destructive) {
+            if (session.destructiveUsed >= session.destructiveBudgetTotal) {
+              return formatError(
+                "collab_apply_proposal",
+                new DestructiveBudgetExhaustedError(
+                  session.destructiveUsed,
+                  session.destructiveBudgetTotal,
+                ),
+              );
+            }
+            diffText = createTwoFilesPatch(
+              `section:${targetSection.slug} (current)`,
+              `section:${targetSection.slug} (proposed)`,
+              currentSectionBody,
+              proposalBody,
+            );
+            const priorAuthors = uniqueAuthorLabels(classification.matches.map((m) => m.entry));
+            try {
+              await runDestructiveReprompt(
+                config,
+                {
+                  tool: "collab_apply_proposal",
+                  proposalId,
+                  sectionSlug: targetSection.slug,
+                  diff: diffText,
+                  priorAuthors,
+                  intent,
+                  destructiveUsed: session.destructiveUsed,
+                  destructiveBudgetTotal: session.destructiveBudgetTotal,
+                },
+                signal,
+              );
+            } catch (err) {
+              if (err instanceof DestructiveApprovalDeclinedError) {
+                await writeAudit(
+                  config,
+                  {
+                    sessionId: session.sessionId,
+                    agentId: session.agentId,
+                    userOid: session.userOid,
+                    projectId: metadata.projectId,
+                    tool: "collab_apply_proposal",
+                    result: AuditResult.Failure,
+                    intent,
+                    type: "destructive_approval",
+                    details: {
+                      tool: "collab_apply_proposal",
+                      outcome: AuditApprovalOutcome.Declined,
+                      diffSummaryHash: hashDiffSummary(diffText),
+                      csrfTokenMatched: true,
+                    },
+                  },
+                  signal,
+                );
+                return formatError("collab_apply_proposal", err);
+              }
+              throw err;
+            }
+            await writeAudit(
+              config,
+              {
+                sessionId: session.sessionId,
+                agentId: session.agentId,
+                userOid: session.userOid,
+                projectId: metadata.projectId,
+                tool: "collab_apply_proposal",
+                result: AuditResult.Success,
+                intent,
+                type: "destructive_approval",
+                details: {
+                  tool: "collab_apply_proposal",
+                  outcome: AuditApprovalOutcome.Approved,
+                  diffSummaryHash: hashDiffSummary(diffText),
+                  csrfTokenMatched: true,
+                },
+              },
+              signal,
+            );
+          }
+
+          // 8. Build the merged authoritative body: replace the target
+          //    section's body with the proposal body, leaving the
+          //    heading line and the rest of the file intact.
+          const newBody =
+            liveBody.slice(0, targetSection.bodyStart) +
+            proposalBody +
+            liveBody.slice(targetSection.bodyEnd);
+
+          // 9. Compute the post-merge content hash (the section body is
+          //    now exactly the proposal body — the heading line stays,
+          //    and the next equal-or-higher heading is unchanged).
+          const newSectionContentHash = computeSectionContentHash(proposalBody);
+
+          // 10. Append a fresh authorship[] entry and mark the proposal
+          //     as applied. The new revision number is the live
+          //     revision + 1 (best-effort — the actual server revision
+          //     is the cTag suffix; we record a monotonically-increasing
+          //     index so the trail can be re-ordered locally).
+          const now = (config.now ?? ((): Date => new Date()))();
+          const newAuthorship: CollabFrontmatter["collab"]["authorship"][number] = {
+            target_section_slug: targetSection.slug,
+            section_content_hash: newSectionContentHash,
+            author_kind: "agent",
+            author_agent_id: session.agentId,
+            author_display_name: session.agentId,
+            written_at: now.toISOString(),
+            revision: extractRevisionFromCTag(liveAuthoritativeItem.cTag) + 1,
+          };
+          const nextProposals = baseFrontmatter.collab.proposals.map((p) =>
+            p.id === proposalId ? { ...p, status: "applied" as const } : p,
+          );
+          const nextFrontmatter: CollabFrontmatter = {
+            collab: {
+              ...baseFrontmatter.collab,
+              proposals: nextProposals,
+              authorship: [...baseFrontmatter.collab.authorship, newAuthorship],
+            },
+          };
+          const yaml = serializeFrontmatter(nextFrontmatter);
+          const newContent = joinFrontmatter(yaml, newBody);
+
+          // 11. CAS-write the authoritative file.
+          const cTagBefore = liveAuthoritativeItem.cTag ?? null;
+          let updated: DriveItem;
+          try {
+            updated = await writeAuthoritative(
+              client,
+              authoritativeItemId,
+              authoritativeCTag,
+              newContent,
+              signal,
+            );
+          } catch (err) {
+            if (
+              err instanceof CollabCTagMismatchError ||
+              err instanceof MarkdownFileTooLargeError
+            ) {
+              return formatError("collab_apply_proposal", err);
+            }
+            throw err;
+          }
+
+          // 12. Counters: writes always; destructive only when classified.
+          await config.sessionRegistry.incrementWrites(signal);
+          if (classification.destructive) {
+            await config.sessionRegistry.incrementDestructive(signal);
+          }
+
+          // 13. Persist pin block (new cTag/revision; doc_id is
+          //     unchanged but we re-write it for cache freshness).
+          await persistAuthoritativeMetadata(
+            config,
+            metadata,
+            updated,
+            nextFrontmatter.collab.doc_id,
+            signal,
+          );
+
+          // 14. §3.6 tool_call audit.
+          const inputSummary: AuditInputSummary = {
+            path: liveAuthoritativeItem.name,
+            sectionId: targetSection.slug,
+            proposalId,
+          };
+          await writeAudit(
+            config,
+            {
+              sessionId: session.sessionId,
+              agentId: session.agentId,
+              userOid: session.userOid,
+              projectId: metadata.projectId,
+              tool: "collab_apply_proposal",
+              result: AuditResult.Success,
+              intent,
+              type: "tool_call",
+              details: {
+                inputSummary,
+                cTagBefore,
+                cTagAfter: updated.cTag ?? null,
+                revisionAfter: updated.version ?? null,
+                resolvedItemId: updated.id,
+              },
+            },
+            signal,
+          );
+
+          // 15. Compose the agent-facing output.
+          const lines = [
+            `applied: proposal ${proposalId}`,
+            `targetSectionSlug: ${targetSection.slug}`,
+            `destructive: ${classification.destructive ? "true" : "false"}`,
+            `slugDriftResolved: ${anchorResult.kind === "slug_drift_resolved" ? "true" : "false"}`,
+            `cTag: ${updated.cTag ?? "unknown"}`,
+            updated.version !== undefined ? `revision: ${updated.version}` : "revision: (unknown)",
+            `bytes: ${updated.size ?? Buffer.byteLength(newContent, "utf-8")}`,
+          ];
+          if (anchorResult.kind === "slug_drift_resolved") {
+            lines.push(`oldSlug: ${anchorResult.oldSlug}`);
+            lines.push(`newSlug: ${anchorResult.newSlug}`);
+          }
+          const refreshed = config.sessionRegistry.snapshot();
+          if (refreshed !== null) {
+            lines.push(`writes: ${refreshed.writesUsed} / ${refreshed.writeBudgetTotal}`);
+            if (classification.destructive) {
+              lines.push(
+                `destructive: ${refreshed.destructiveUsed} / ${refreshed.destructiveBudgetTotal}`,
+              );
+            }
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (err) {
+          return formatError("collab_apply_proposal", err);
         }
       },
     ),
