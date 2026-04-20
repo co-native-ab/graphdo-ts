@@ -856,7 +856,11 @@ async function runOpenProject(
   }
 
   // Check write permission
-  const driveId = folderItem.parentReference?.driveId ?? "";
+  // Validate `driveId` before splicing into a Graph URL (ADR-0007).
+  // `parentReference?.driveId` is response data — Zod confirms it is a
+  // string, but we re-validate to defend against a buggy mock or a
+  // future Graph response shape change leaking an empty / malformed id.
+  const driveId = validateGraphId("driveId", folderItem.parentReference?.driveId ?? "");
   const permissions = await getDriveItemPermissions(client, driveId, chosenFolderId, signal);
   const hasWrite = permissions.some((p) => p.roles?.some((r) => r === "write" || r === "owner"));
   if (!hasWrite) {
@@ -913,16 +917,20 @@ async function runOpenProject(
       if (err instanceof SentinelTamperedError) {
         // Write audit entry before throwing
         await writeAudit(
-          config.configDir,
-          sentinel.projectId,
+          config,
           {
+            sessionId: "",
+            agentId: "",
+            userOid: account.userOid,
+            projectId: sentinel.projectId,
+            tool: "session_open_project",
             result: AuditResult.Failure,
             type: "sentinel_changed",
-            timestamp: toIsoOffset(now()),
             details: {
               pinnedAuthoritativeFileId: err.pinnedAuthoritativeFileId,
               currentAuthoritativeFileId: err.currentAuthoritativeFileId,
-              pinnedSentinelFirstSeenAt: err.pinnedSentinelFirstSeenAt,
+              pinnedAtFirstSeenCTag: existingMetadata.pinnedAtFirstSeenCTag,
+              currentSentinelCTag: sentinelData.item.cTag ?? "",
             },
           },
           signal,
@@ -959,8 +967,7 @@ async function runOpenProject(
   // Activate session
   const sessionInput: SessionStartInput = {
     projectId: sentinel.projectId,
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    userOid: account.oid,
+    userOid: account.userOid,
     clientSlug: "unknown", // W5 Day 3 wires the real MCP clientInfo
     folderPath: refreshed.folderPath,
     authoritativeFileName: sentinel.authoritativeFileName,
@@ -969,19 +976,21 @@ async function runOpenProject(
 
   // Write audit
   await writeAudit(
-    config.configDir,
-    sentinel.projectId,
+    config,
     {
+      sessionId: session.sessionId,
+      agentId: session.agentId,
+      userOid: account.userOid,
+      projectId: sentinel.projectId,
+      tool: "session_open_project",
       result: AuditResult.Success,
       type: "session_start",
-      timestamp: toIsoOffset(now()),
       details: {
-        sessionId: session.sessionId,
-        agentId: session.agentId,
-        role: "collaborator",
         ttlSeconds: session.ttlSeconds,
-        writeBudgetTotal: session.writeBudgetTotal,
-        destructiveBudgetTotal: session.destructiveBudgetTotal,
+        writeBudget: session.writeBudgetTotal,
+        destructiveBudget: session.destructiveBudgetTotal,
+        clientName: null,
+        clientVersion: null,
       },
     },
     signal,

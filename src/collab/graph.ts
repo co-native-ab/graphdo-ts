@@ -720,8 +720,8 @@ export async function listSharedWithMe(
  */
 export async function getDriveItemPermissions(
   client: GraphClient,
-  driveId: string,
-  itemId: string,
+  driveId: ValidatedGraphId,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<Permission[]> {
   const path = `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/permissions`;
@@ -736,6 +736,14 @@ export async function getDriveItemPermissions(
  * must already be in the `u!<base64url>` format (see
  * `src/collab/share-url.ts`). Maps 404 → ShareNotFoundError, 403 →
  * ShareAccessDeniedError.
+ *
+ * Note: `encodedShareId` is intentionally `string`, not `ValidatedGraphId`.
+ * It is a `u!<base64url>` share token (per RFC 4648 §5), produced by
+ * `src/collab/share-url.ts` after the host allow-list check rejects
+ * attacker-controlled URLs. It contains characters (`!`, `-`, `_`) that
+ * `validateGraphId` rejects, and it is not an opaque Graph identifier
+ * (per ADR-0007's "Out of scope"). The wire-layer `encodeURIComponent`
+ * remains as defence in depth.
  */
 export async function resolveShareUrl(
   client: GraphClient,
@@ -767,8 +775,8 @@ export async function resolveShareUrl(
  */
 export async function refreshFolderMetadata(
   client: GraphClient,
-  driveId: string,
-  folderId: string,
+  driveId: ValidatedGraphId,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<{ name: string; folderPath: string }> {
   const path = `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}?$select=parentReference,name`;

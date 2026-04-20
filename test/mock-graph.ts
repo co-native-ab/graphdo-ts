@@ -774,6 +774,13 @@ async function handleDriveRequest(
   }
 
   if (segments[2] !== "items" || segments.length < 4) {
+    // GET /me/drive/sharedWithMe (W4 Day 4) — handled here because the
+    // `items`-or-bail guard below would otherwise short-circuit it.
+    if (method === "GET" && segments.length === 3 && segments[2] === "sharedWithMe") {
+      const entries = state.sharedWithMe ?? [];
+      jsonResponse(res, 200, { value: entries });
+      return true;
+    }
     return false;
   }
 
@@ -1137,13 +1144,8 @@ async function handleDriveRequest(
     return true;
   }
 
-  // GET /me/drive/sharedWithMe (W4 Day 4)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (method === "GET" && segments.length === 3 && segments[2] === "sharedWithMe") {
-    const entries = state.sharedWithMe ?? [];
-    jsonResponse(res, 200, { value: entries });
-    return true;
-  }
+  // GET /me/drive/sharedWithMe relocated above the `items`-or-bail guard
+  // (was unreachable here).
 
   return false;
 }

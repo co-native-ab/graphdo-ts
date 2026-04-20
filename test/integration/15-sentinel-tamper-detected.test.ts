@@ -117,7 +117,7 @@ describe("15-sentinel-tamper-detected", () => {
       "after session_open_project lands: writes sentinel_changed audit entry before throwing, and Forget project clears the pin so subsequent open re-pins cleanly",
     );
 
-    it("writes a sentinel_changed audit entry before throwing, and removing metadata clears the pin", async () => {
+    it("writes a sentinel_changed audit entry before throwing, and removing metadata clears the pin", () => {
       const { pin, sentinelOnDisk, pinnedAt } = openProjectFirstTime(initial);
 
       // Simulate a tampered sentinel (authoritativeFileId changed)
