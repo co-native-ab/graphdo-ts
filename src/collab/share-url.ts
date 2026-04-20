@@ -19,6 +19,42 @@
 import { InvalidShareUrlError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
+// EncodedShareId — branded `string` newtype
+// ---------------------------------------------------------------------------
+
+/**
+ * A `u!<base64url>` Microsoft Graph share token, produced exclusively by
+ * {@link encodeShareUrl} after the URL has cleared {@link validateShareUrl}'s
+ * host allow-list. The brand makes "this string is safe to splice into
+ * `/shares/{id}`" a compile-time guarantee instead of a comment.
+ *
+ * Mirrors `ValidatedGraphId` from `src/graph/ids.ts`. We keep a separate
+ * brand because the value sets do not overlap: a `ValidatedGraphId` is an
+ * opaque ASCII identifier (no `!`, no base64url chars), whereas an
+ * `EncodedShareId` always starts with `u!` and may contain `-` / `_`.
+ * Per ADR-0007 "Out of scope", share tokens deliberately live outside the
+ * `ValidatedGraphId` domain.
+ *
+ * The brand symbol is module-private; the only ways to obtain a value are
+ * {@link encodeShareUrl} (the normal path) or
+ * {@link unsafeAssumeEncodedShareId} (loud-named escape hatch for tests
+ * and decoded-from-trusted-storage cases — every use site MUST carry a
+ * one-line rationale comment, mirroring `unsafeAssumeValidatedGraphId`).
+ */
+declare const encodedShareIdBrand: unique symbol;
+export type EncodedShareId = string & { readonly [encodedShareIdBrand]: true };
+
+/**
+ * Escape hatch for the rare case where an `EncodedShareId`-shaped value
+ * arrives as a plain `string` (e.g. a test fixture, a value re-read from
+ * trusted local storage). Prefer {@link encodeShareUrl}. Grep for this
+ * function name to audit every bypass site.
+ */
+export function unsafeAssumeEncodedShareId(value: string): EncodedShareId {
+  return value as EncodedShareId;
+}
+
+// ---------------------------------------------------------------------------
 // Host allow-list
 // ---------------------------------------------------------------------------
 
@@ -116,9 +152,9 @@ export function validateShareUrl(url: string): string {
  * This helper does **not** re-validate — it assumes the input is a
  * well-formed `https://` URL.
  */
-export function encodeShareUrl(url: string): string {
+export function encodeShareUrl(url: string): EncodedShareId {
   const utf8 = Buffer.from(url, "utf-8");
   const base64 = utf8.toString("base64");
   const base64url = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `u!${base64url}`;
+  return `u!${base64url}` as EncodedShareId;
 }

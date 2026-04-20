@@ -1,3 +1,5 @@
+import type { EncodedShareId } from "./collab/share-url.js";
+
 export function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
@@ -626,7 +628,7 @@ export class InvalidShareUrlError extends Error {
 }
 
 export class ShareNotFoundError extends Error {
-  constructor(public readonly encodedShareId: string) {
+  constructor(public readonly encodedShareId: EncodedShareId) {
     super(
       `The share link could not be found (${encodedShareId}) — ` +
         "the link may be revoked, or you may not have access.",
@@ -636,7 +638,7 @@ export class ShareNotFoundError extends Error {
 }
 
 export class ShareAccessDeniedError extends Error {
-  constructor(public readonly encodedShareId: string) {
+  constructor(public readonly encodedShareId: EncodedShareId) {
     super(
       `Access denied to share ${encodedShareId} — ` +
         "the link is valid but you do not have access. " +

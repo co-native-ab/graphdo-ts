@@ -55,6 +55,7 @@ import {
 } from "../graph/types.js";
 import { logger } from "../logger.js";
 import { ShareNotFoundError, ShareAccessDeniedError } from "../errors.js";
+import type { EncodedShareId } from "./share-url.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -733,21 +734,20 @@ export async function getDriveItemPermissions(
 
 /**
  * Resolve a OneDrive sharing URL to a drive item. The `encodedShareId`
- * must already be in the `u!<base64url>` format (see
- * `src/collab/share-url.ts`). Maps 404 → ShareNotFoundError, 403 →
- * ShareAccessDeniedError.
+ * must be an {@link EncodedShareId} produced by {@link encodeShareUrl}
+ * (which only runs after the host allow-list check in
+ * {@link validateShareUrl} has passed). Maps 404 → ShareNotFoundError,
+ * 403 → ShareAccessDeniedError.
  *
- * Note: `encodedShareId` is intentionally `string`, not `ValidatedGraphId`.
- * It is a `u!<base64url>` share token (per RFC 4648 §5), produced by
- * `src/collab/share-url.ts` after the host allow-list check rejects
- * attacker-controlled URLs. It contains characters (`!`, `-`, `_`) that
- * `validateGraphId` rejects, and it is not an opaque Graph identifier
- * (per ADR-0007's "Out of scope"). The wire-layer `encodeURIComponent`
+ * Note: `EncodedShareId` is a separate brand from `ValidatedGraphId`
+ * (per ADR-0007 "Out of scope"). A share token is a `u!<base64url>`
+ * value with characters (`!`, `-`, `_`) that `validateGraphId` rejects,
+ * so they cannot share a brand. The wire-layer `encodeURIComponent`
  * remains as defence in depth.
  */
 export async function resolveShareUrl(
   client: GraphClient,
-  encodedShareId: string,
+  encodedShareId: EncodedShareId,
   signal: AbortSignal,
 ): Promise<DriveItem> {
   const path = `/shares/${encodeURIComponent(encodedShareId)}/driveItem?$select=id,parentReference,folder,name,remoteItem`;
