@@ -1,8 +1,8 @@
 # Collab v1 progress
 
-Last updated: W5 Day 2 — `collab_delete_file` MCP tool
-Current milestone: W5 Day 2 — `collab_delete_file` MCP tool (this PR)
-Next milestone: W5 Day 3 — `19-session-survives-reconnect.test.ts` + scope-gate polish + agentId fallback
+Last updated: W5 Day 3 — `19-session-survives-reconnect.test.ts` + scope-gate polish + agentId fallback
+Current milestone: W5 Day 3 — `19-session-survives-reconnect.test.ts` + scope-gate polish + agentId fallback (this PR)
+Next milestone: W5 Day 4 — Documentation (README, CHANGELOG, manifest.json, user-facing notes)
 
 This file is the single source of truth for "where are we?" in the
 collab v1 build-out. It is updated **in the same PR as each
@@ -95,7 +95,7 @@ back to its DoD in the plan.
 
 - [x] **W5 Day 1** — `collab_list_versions` + `collab_restore_version` + `session_recover_doc_id` _(this PR)_
 - [x] **W5 Day 2** — `collab_delete_file` _(this PR; always-destructive MCP tool with authoritative + sentinel refusals; `test/integration/18-collab-delete-file.test.ts` covers proposals/drafts/attachments + cancel + refusal matrix; tool counts 39 → 40; 1095 → 1100 tests)_
-- [ ] **W5 Day 3** — `19-session-survives-reconnect.test.ts` + scope-gate polish + agentId fallback
+- [x] **W5 Day 3** — `19-session-survives-reconnect.test.ts` + scope-gate polish + agentId fallback _(this PR; `ServerConfig.getClientInfo` lazy reader wired to `mcpServer.server.getClientVersion()`; `SessionStartInput.clientName`/`clientVersion` (raw, slugified by the registry) replace the hard-coded `"unknown"` in `session_init_project` + `session_open_project`, real values land on `session_start` audit envelopes; `SessionRegistry.tryMarkAgentNameUnknownEmitted` guards the warn-once-per-session `agent_name_unknown` audit; `buildInstructions` gains collab behaviour rule + `COLLAB WORKFLOW:` line; `NoActiveSessionError` message now tells the agent to retry after starting a session; `test/integration/19-session-survives-reconnect.test.ts` (same-process reconnect keeps `sessionId` + budgets; fresh-registry variant reports no active session) + `test/integration/21-agent-name-unknown.test.ts` (warn-once row + non-repeat on follow-up calls + happy-path slug); integration helper accepts `clientInfo` + `sessionRegistry` overrides; 1100 → 1105 tests)_
 - [ ] **W5 Day 4** — Documentation (README, CHANGELOG, manifest.json, user-facing notes)
 - [ ] **W5 Day 5** — End-to-end `npm run check` + cross-host browser smoke + buffer
 

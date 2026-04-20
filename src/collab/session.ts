@@ -91,12 +91,18 @@ export interface SessionStartInput {
   projectId: string;
   userOid: string;
   /**
-   * Slugified MCP `clientInfo.name` (or `"unknown"` per §2.2 fallback).
-   * Used purely as the middle segment of `agentId`. Plumbing through the
-   * MCP SDK lands with the warn-once `agent_name_unknown` audit in W5
-   * Day 3; for now callers may pass `"unknown"`.
+   * Raw `clientInfo.name` reported by the connected MCP client (or `null`
+   * when the client sent no `clientInfo` at all). The registry slugifies
+   * this internally via {@link slugifyClientName} to derive the middle
+   * segment of {@link SessionSnapshot.agentId}; an empty / missing /
+   * all-non-slug value falls back to `"unknown"` per §2.2 / §10 question 4
+   * and arms the per-session warn-once flag tracked via
+   * {@link SessionRegistry.tryMarkAgentNameUnknownEmitted}. Also surfaced
+   * verbatim on the `session_start` audit envelope.
    */
-  clientSlug: string;
+  clientName: string | null;
+  /** Raw `clientInfo.version` (audit only; not used in `agentId`). */
+  clientVersion: string | null;
   folderPath: string;
   authoritativeFileName: string;
   ttlSeconds?: number;
@@ -117,7 +123,8 @@ export class NoActiveSessionError extends Error {
   constructor() {
     super(
       "No active collab session in this MCP instance. " +
-        "Call session_init_project (originator) or session_open_project (collaborator) first.",
+        "Call session_init_project (originator) or session_open_project " +
+        "(collaborator) first. After starting a session, retry this tool.",
     );
     this.name = "NoActiveSessionError";
   }
@@ -204,6 +211,7 @@ export type SessionIdFactory = () => string;
  */
 export class SessionRegistry {
   private active: InternalSession | null = null;
+  private agentNameUnknownEmitted = false;
 
   constructor(
     private readonly configDir: string,
@@ -215,6 +223,21 @@ export class SessionRegistry {
   snapshot(): SessionSnapshot | null {
     if (this.active === null) return null;
     return cloneSnapshot(this.active);
+  }
+
+  /**
+   * Try to mark the per-session warn-once `agent_name_unknown` flag.
+   *
+   * Returns `true` when this is the first call in the current session
+   * (caller should emit the audit), or `false` when a previous call has
+   * already claimed the slot. No-op (returns `false`) when no session is
+   * active. Resets to `false` on every {@link start} / {@link end}.
+   */
+  tryMarkAgentNameUnknownEmitted(): boolean {
+    if (this.active === null) return false;
+    if (this.agentNameUnknownEmitted) return false;
+    this.agentNameUnknownEmitted = true;
+    return true;
   }
 
   /**
@@ -256,9 +279,11 @@ export class SessionRegistry {
     const startedAt = startedAtDate.toISOString();
     const expiresAt = computeExpiresAt(startedAtDate, ttlSeconds);
 
+    const clientSlug = slugifyClientName(input.clientName);
+
     const session: InternalSession = {
       sessionId,
-      agentId: deriveAgentId(input.userOid, input.clientSlug, sessionId),
+      agentId: deriveAgentId(input.userOid, clientSlug, sessionId),
       userOid: input.userOid,
       projectId: input.projectId,
       folderPath: input.folderPath,
@@ -275,6 +300,7 @@ export class SessionRegistry {
     };
 
     this.active = session;
+    this.agentNameUnknownEmitted = false;
     await this.persist(session, signal);
     return cloneSnapshot(session);
   }
@@ -288,6 +314,7 @@ export class SessionRegistry {
     if (this.active === null) return;
     const sessionId = this.active.sessionId;
     this.active = null;
+    this.agentNameUnknownEmitted = false;
     await removeDestructiveCount(this.configDir, sessionId, this.now(), signal);
   }
 

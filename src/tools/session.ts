@@ -611,15 +611,20 @@ async function runInitProject(
   // destructive budget come from §5.2.1 — the full slider form lands in
   // a later milestone (the W1 Day 4 init UI only collects folder + file).
   //
-  // `clientSlug` is hard-coded to `"unknown"` until W5 Day 3 ("agentId
-  // fallback") plumbs MCP `clientInfo.name` through the SDK; the resulting
-  // `agentId` still uniquely identifies this session via its `sessionId`
-  // suffix.
+  // `clientName` / `clientVersion` are read from `config.getClientInfo()`
+  // (W5 Day 3); the registry slugifies the name into the middle segment
+  // of `agentId` and falls back to `"unknown"` when the value is absent
+  // / non-slug. The fallback path arms a per-session warn-once
+  // `agent_name_unknown` audit emitted just below.
+  const clientInfo = config.getClientInfo?.();
+  const clientName = clientInfo?.name ?? null;
+  const clientVersion = clientInfo?.version ?? null;
   const sessionSnapshot = await config.sessionRegistry.start(
     {
       projectId,
       userOid: account.userOid,
-      clientSlug: "unknown",
+      clientName,
+      clientVersion,
       folderPath,
       authoritativeFileName: authoritativeFile.name,
     },
@@ -643,12 +648,18 @@ async function runInitProject(
         ttlSeconds: sessionSnapshot.ttlSeconds,
         writeBudget: sessionSnapshot.writeBudgetTotal,
         destructiveBudget: sessionSnapshot.destructiveBudgetTotal,
-        clientName: null,
-        clientVersion: null,
+        clientName,
+        clientVersion,
       },
     },
     signal,
   );
+
+  // §3.6 / §10 question 4 — warn-once `agent_name_unknown` audit. Fires
+  // when the resolved agentId middle segment is the literal `"unknown"`
+  // (i.e. `clientInfo.name` was missing or all-non-slug-chars). The
+  // registry's tryMark helper guarantees at-most-once-per-session.
+  await emitAgentNameUnknownIfNeeded(config, sessionSnapshot, clientInfo, signal);
 
   // ------- Render success -------
 
@@ -810,6 +821,55 @@ function renderOpeningMessage(args: {
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/**
+ * Emit the warn-once-per-session `agent_name_unknown` audit envelope
+ * (§3.6, §10 question 4) when the registry-derived agentId middle
+ * segment is `"unknown"` — i.e. the connected MCP client's
+ * `clientInfo.name` was missing, an empty string, or all-non-slug
+ * characters. The registry's
+ * {@link import("../collab/session.js").SessionRegistry.tryMarkAgentNameUnknownEmitted | tryMarkAgentNameUnknownEmitted}
+ * guarantees the audit fires at most once per session, so subsequent
+ * tool calls in the same session are silent.
+ *
+ * `clientInfoPresent` is `true` whenever the underlying MCP client
+ * reported any `clientInfo` payload at all (even one with an empty
+ * `name`); it is `false` only when the SDK returned no implementation
+ * record. This matches the §3.6 row's intent (distinguish "client
+ * forgot to send clientInfo" from "client sent clientInfo but with an
+ * unusable name").
+ */
+async function emitAgentNameUnknownIfNeeded(
+  config: ServerConfig,
+  session: { sessionId: string; agentId: string; userOid: string; projectId: string },
+  clientInfo: { name?: string; version?: string } | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  // `agentId` shape is `<oidPrefix>-<clientSlug>-<sessionPrefix>` (§B6.17).
+  // Parsing the middle segment lets us key off the registry's slugifier
+  // result without re-running it.
+  const segments = session.agentId.split("-");
+  const isUnknown = segments.length >= 3 && segments[1] === "unknown";
+  if (!isUnknown) return;
+  if (!config.sessionRegistry.tryMarkAgentNameUnknownEmitted()) return;
+
+  await writeAudit(
+    config,
+    {
+      sessionId: session.sessionId,
+      agentId: session.agentId,
+      userOid: session.userOid,
+      projectId: session.projectId,
+      result: AuditResult.Success,
+      type: "agent_name_unknown",
+      details: {
+        clientInfoPresent: clientInfo !== undefined,
+        agentIdAssigned: session.agentId,
+      },
+    },
+    signal,
+  );
+}
 
 /**
  * Convert a `Date` to an ISO 8601 string with an explicit UTC offset
@@ -1084,11 +1144,17 @@ async function runOpenProject(
   };
   await upsertRecent(config.configDir, recentEntry, signal);
 
-  // Activate session
+  // Activate session — clientInfo plumbed via config.getClientInfo (W5
+  // Day 3). Missing/unknown name falls back to slug `"unknown"` and arms
+  // the per-session warn-once `agent_name_unknown` audit emitted below.
+  const clientInfo = config.getClientInfo?.();
+  const clientName = clientInfo?.name ?? null;
+  const clientVersion = clientInfo?.version ?? null;
   const sessionInput: SessionStartInput = {
     projectId: sentinel.projectId,
     userOid: account.userOid,
-    clientSlug: "unknown", // W5 Day 3 wires the real MCP clientInfo
+    clientName,
+    clientVersion,
     folderPath: refreshed.folderPath,
     authoritativeFileName: sentinel.authoritativeFileName,
   } as const;
@@ -1109,12 +1175,14 @@ async function runOpenProject(
         ttlSeconds: session.ttlSeconds,
         writeBudget: session.writeBudgetTotal,
         destructiveBudget: session.destructiveBudgetTotal,
-        clientName: null,
-        clientVersion: null,
+        clientName,
+        clientVersion,
       },
     },
     signal,
   );
+
+  await emitAgentNameUnknownIfNeeded(config, session, clientInfo, signal);
 
   return {
     content: [

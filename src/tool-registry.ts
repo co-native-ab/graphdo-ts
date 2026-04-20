@@ -174,11 +174,31 @@ export function buildInstructions(defs: readonly ToolDef[]): string {
       "tool immediately - do not ask the user which list to use, the tool opens a " +
       "browser picker where the user selects the list themselves.",
   );
+  lines.push(
+    "- collab_* tools require an active collab session. If a collab_* tool returns " +
+      "'No active collab session', call session_init_project (you are starting a new " +
+      "project from a OneDrive folder) or session_open_project (you are joining an " +
+      "existing project a collaborator shared with you), then retry. Do not ask the " +
+      "user which to call - both tools open browser pickers where the user makes the " +
+      "selection themselves.",
+  );
+  lines.push(
+    "- If a collab_* or session-bound tool reports the session has expired " +
+      "(SessionExpiredError or 'past its TTL'), call session_renew immediately - " +
+      "do not ask the user. session_renew opens a browser approval form; the user " +
+      "decides there.",
+  );
   lines.push("- Use auth_status as a first step when diagnosing issues.");
   lines.push("");
   lines.push(
     "WORKFLOW: On first use, call login (automatic browser sign-in), then " +
       "todo_select_list (browser-based list selection), then the user's requested action.",
+  );
+  lines.push(
+    "COLLAB WORKFLOW: For collab editing, after login call session_init_project " +
+      "(originator) or session_open_project (collaborator) to start a session, then " +
+      "use collab_read / collab_list_files to inspect, collab_write to update, and " +
+      "collab_create_proposal / collab_apply_proposal for cross-author changes.",
   );
 
   return lines.join("\n");
