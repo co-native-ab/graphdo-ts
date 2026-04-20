@@ -259,7 +259,7 @@ async function main(): Promise<void> {
   // `src/instance-lock.ts` for rationale.
   let lockHandle: InstanceLockHandle;
   try {
-    lockHandle = await acquireInstanceLock(cfgDir);
+    lockHandle = await acquireInstanceLock(cfgDir, shutdown.signal);
   } catch (err: unknown) {
     logger.error("instance lock acquisition failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -312,8 +312,10 @@ async function main(): Promise<void> {
   // Best-effort lock release — never let release errors mask a normal
   // exit. The lock file may legitimately be gone already if another
   // process recovered it as stale (which would itself be a bug, but
-  // not one we can act on here).
-  await lockHandle.release();
+  // not one we can act on here). Use a short fresh deadline so the
+  // shutdown-aborted parent signal doesn't prevent the cleanup itself.
+  const releaseSignal = AbortSignal.timeout(5_000);
+  await lockHandle.release(releaseSignal);
 }
 
 // Auto-start only when running as the entry point (not when imported by tests).

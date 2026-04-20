@@ -59,8 +59,12 @@ export class InstanceLockHeldError extends Error {
 export interface InstanceLockHandle {
   /** Absolute path of the lock file. */
   readonly path: string;
-  /** Best-effort delete of the lock file. Idempotent; never throws. */
-  release(): Promise<void>;
+  /**
+   * Best-effort delete of the lock file. Idempotent; never throws.
+   * `signal` is forwarded to the read-back step so a shutdown that
+   * times out can still cancel the release cleanly.
+   */
+  release(signal: AbortSignal): Promise<void>;
 }
 
 /**
@@ -104,6 +108,7 @@ export function defaultIsPidAlive(pid: number): boolean {
  */
 export async function acquireInstanceLock(
   configDir: string,
+  signal: AbortSignal,
   options: {
     now?: () => Date;
     isPidAlive?: (pid: number) => boolean;
@@ -115,10 +120,16 @@ export async function acquireInstanceLock(
   const myPid = options.pid ?? process.pid;
   const lockPath = path.join(configDir, INSTANCE_LOCK_FILE);
 
+  signal.throwIfAborted();
+  // `fs.mkdir` does not accept an AbortSignal in current Node typings;
+  // the abort-check above plus the cancellable I/O on read/write below
+  // give the same effective semantics — a signal aborted at any point
+  // during acquisition surfaces as either an immediate throw here or
+  // an `AbortError` from the next signal-aware syscall.
   await fs.mkdir(configDir, mkdirOptions());
 
   // Read any existing lock and refuse if it looks live.
-  const existing = await readLockFile(lockPath);
+  const existing = await readLockFile(lockPath, signal);
   if (existing !== null) {
     if (existing.pid !== myPid && isPidAlive(existing.pid)) {
       throw new InstanceLockHeldError(configDir, existing.pid, existing.startedAt);
@@ -140,12 +151,14 @@ export async function acquireInstanceLock(
 
   // Atomic write via temp+rename so a crashed mid-write never leaves a
   // partial line on disk.
+  signal.throwIfAborted();
   const tempPath = `${lockPath}.${String(myPid)}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(data), writeFileOptions());
+  await fs.writeFile(tempPath, JSON.stringify(data), writeFileOptions(signal));
   try {
+    signal.throwIfAborted();
     await fs.rename(tempPath, lockPath);
   } catch (err: unknown) {
-    // Best-effort cleanup of the temp file on rename failure.
+    // Best-effort cleanup of the temp file on rename failure (or abort).
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw err;
   }
@@ -153,14 +166,14 @@ export async function acquireInstanceLock(
   let released = false;
   return {
     path: lockPath,
-    release: async (): Promise<void> => {
+    release: async (releaseSignal: AbortSignal): Promise<void> => {
       if (released) return;
       released = true;
       try {
         // Only delete if the file still claims us — defensive against a
         // peer process that overwrote our lock after acquiring it
         // legitimately (would be a bug, but cheap to guard).
-        const current = await readLockFile(lockPath);
+        const current = await readLockFile(lockPath, releaseSignal);
         if (current?.pid === myPid) {
           await fs.rm(lockPath, { force: true });
         }
@@ -174,10 +187,13 @@ export async function acquireInstanceLock(
   };
 }
 
-async function readLockFile(lockPath: string): Promise<InstanceLockData | null> {
+async function readLockFile(
+  lockPath: string,
+  signal: AbortSignal,
+): Promise<InstanceLockData | null> {
   let content: string;
   try {
-    content = await fs.readFile(lockPath, { encoding: "utf-8" });
+    content = await fs.readFile(lockPath, { encoding: "utf-8", signal });
   } catch (err: unknown) {
     if (
       err !== null &&
