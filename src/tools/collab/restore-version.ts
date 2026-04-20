@@ -342,7 +342,6 @@ export function registerCollabRestoreVersion(server: McpServer, config: ServerCo
             details: {
               inputSummary: {
                 path: path ?? `itemId:${item.id}`,
-                ...(isAuthoritative ? {} : {}),
               },
               cTagBefore: item.cTag ?? null,
               cTagAfter: updated.cTag ?? null,
