@@ -11,7 +11,9 @@ import { newUlid } from "./collab/ulid.js";
 import { SessionRegistry } from "./collab/session.js";
 import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
+import { acquireInstanceLock, type InstanceLockHandle } from "./instance-lock.js";
 import { logger, setLogLevel } from "./logger.js";
+import { type AgentPersona, AGENT_PERSONA_ENV_VAR, parseAgentPersonaFromEnv } from "./persona.js";
 import type { GraphScope } from "./scopes.js";
 import { LOGIN_TOOL_DEFS, registerLoginTools } from "./tools/login.js";
 import { MAIL_TOOL_DEFS, registerMailTools } from "./tools/mail.js";
@@ -88,6 +90,18 @@ export interface ServerConfig {
   getClientInfo?: () => { name?: string; version?: string } | undefined;
   /** Set by createMcpServer() — login/logout tools call this to sync tool visibility. */
   onScopesChanged?: (grantedScopes: GraphScope[]) => void;
+  /**
+   * Optional test-persona override (`docs/plans/two-instance-e2e.md`,
+   * ADR-0009). When set, the collab session's `agentId` is replaced
+   * with the persona id (e.g. `"persona:alice"`) so two MCP server
+   * processes on the same Microsoft account can be treated as
+   * distinct collaborators by the destructive classifier, authorship
+   * trail, lease ownership, and audit envelopes. The persona id never
+   * reaches Microsoft Graph — Graph requests still use the same MSAL
+   * token from the same MSAL cache. The override is read **once** from
+   * `GRAPHDO_AGENT_PERSONA` in `main()`; tests inject it directly here.
+   */
+  agentPersona?: AgentPersona;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +241,32 @@ async function main(): Promise<void> {
   const cfgDir = configDir(process.env["GRAPHDO_CONFIG_DIR"]);
   logger.debug("config directory", { path: cfgDir });
 
+  // Test-persona override (`docs/plans/two-instance-e2e.md`, ADR-0009).
+  // Read **once** here so the override naturally dies with the process
+  // and cannot be smuggled via runtime tool calls. Invalid values
+  // surface as a fatal startup error rather than silent fallback.
+  const agentPersona = parseAgentPersonaFromEnv(process.env);
+  if (agentPersona !== undefined) {
+    logger.warn("agent persona override active", {
+      env: AGENT_PERSONA_ENV_VAR,
+      id: agentPersona.id,
+      configDir: cfgDir,
+    });
+  }
+
+  // Per-configDir instance lock — refuses startup when another
+  // graphdo-ts process is already pointed at this `<configDir>`. See
+  // `src/instance-lock.ts` for rationale.
+  let lockHandle: InstanceLockHandle;
+  try {
+    lockHandle = await acquireInstanceLock(cfgDir);
+  } catch (err: unknown) {
+    logger.error("instance lock acquisition failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
   // Use static token if provided, otherwise MSAL (browser-only)
   const staticToken = process.env["GRAPHDO_ACCESS_TOKEN"];
   const clientId = process.env["GRAPHDO_CLIENT_ID"] ?? CLIENT_ID;
@@ -244,6 +284,7 @@ async function main(): Promise<void> {
       configDir: cfgDir,
       openBrowser,
       now: () => new Date(),
+      ...(agentPersona !== undefined ? { agentPersona } : {}),
     },
     shutdown.signal,
   );
@@ -267,6 +308,12 @@ async function main(): Promise<void> {
       { once: true },
     );
   });
+
+  // Best-effort lock release — never let release errors mask a normal
+  // exit. The lock file may legitimately be gone already if another
+  // process recovered it as stale (which would itself be a bug, but
+  // not one we can act on here).
+  await lockHandle.release();
 }
 
 // Auto-start only when running as the entry point (not when imported by tests).

@@ -91,6 +91,21 @@ export interface SessionStartInput {
   projectId: string;
   userOid: string;
   /**
+   * Test-persona override (`docs/plans/two-instance-e2e.md`, ADR-0009).
+   * When set, the session's {@link SessionSnapshot.agentId} becomes
+   * this value verbatim (instead of the derived
+   * `<oidPrefix>-<clientSlug>-<sessionPrefix>`) so two MCP processes
+   * on the same Microsoft account can be treated as distinct
+   * collaborators by the destructive classifier, authorship trail,
+   * lease ownership, and audit envelopes. The persona id never reaches
+   * Microsoft Graph — it is a collab-layer label only.
+   *
+   * `userOid` is preserved verbatim on the snapshot regardless, so
+   * audit envelopes always carry both the synthetic label and the real
+   * user's `oid`.
+   */
+  agentPersonaId?: string;
+  /**
    * Raw `clientInfo.name` reported by the connected MCP client (or `null`
    * when the client sent no `clientInfo` at all). The registry slugifies
    * this internally via {@link slugifyClientName} to derive the middle
@@ -280,10 +295,15 @@ export class SessionRegistry {
     const expiresAt = computeExpiresAt(startedAtDate, ttlSeconds);
 
     const clientSlug = slugifyClientName(input.clientName);
+    const derivedAgentId = deriveAgentId(input.userOid, clientSlug, sessionId);
 
     const session: InternalSession = {
       sessionId,
-      agentId: deriveAgentId(input.userOid, clientSlug, sessionId),
+      // Test-persona override (`docs/plans/two-instance-e2e.md`,
+      // ADR-0009): when set, the persona id becomes the authoritative
+      // collab `agentId`. `userOid` is still preserved on the snapshot
+      // so audit envelopes carry both the label and the real user oid.
+      agentId: input.agentPersonaId ?? derivedAgentId,
       userOid: input.userOid,
       projectId: input.projectId,
       folderPath: input.folderPath,

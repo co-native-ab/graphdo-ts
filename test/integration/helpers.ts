@@ -117,16 +117,31 @@ export async function createTestClient(
      * controls the wire payload the test `Client` actually sends.
      */
     testClientInfo?: { name: string; version: string };
+    /**
+     * Optional `ServerConfig.agentPersona` override
+     * (`docs/plans/two-instance-e2e.md`, ADR-0009). Used by
+     * `22-two-personas-same-config.test.ts` to spin up two MCP server
+     * instances with distinct persona ids against the same mock Graph.
+     */
+    agentPersona?: import("../../src/persona.js").AgentPersona;
+    /**
+     * Override `ServerConfig.configDir` (defaults to `env.configDir`).
+     * Used by `22-two-personas-same-config.test.ts` to give each MCP
+     * server its own `<configDir>` (matching the prod two-instance
+     * topology) while sharing one mock Graph state.
+     */
+    configDir?: string;
   },
 ): Promise<Client> {
   const server = await createMcpServer(
     {
       authenticator,
       graphBaseUrl: env.graphUrl,
-      configDir: env.configDir,
+      configDir: opts?.configDir ?? env.configDir,
       openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
       ...(opts?.now ? { now: opts.now } : {}),
       ...(opts?.sessionRegistry ? { sessionRegistry: opts.sessionRegistry } : {}),
+      ...(opts?.agentPersona ? { agentPersona: opts.agentPersona } : {}),
       ...(opts?.clientInfo !== undefined
         ? {
             getClientInfo: (): { name?: string; version?: string } | undefined =>
