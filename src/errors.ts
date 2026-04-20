@@ -596,6 +596,50 @@ export class StaleRecentError extends Error {
   }
 }
 
+/**
+ * Raised by `session_renew` (W4 Day 5) when the active session has
+ * already used its per-session renewal cap (3 — `MAX_RENEWALS_PER_SESSION`
+ * in `src/collab/session.ts`). Per `docs/plans/collab-v1.md` §2.2 the
+ * session must be ended (process exit / TTL expiry) and a new one
+ * started before further renewals are possible.
+ */
+export class RenewalCapPerSessionError extends Error {
+  constructor(
+    public readonly renewalsUsed: number,
+    public readonly cap: number,
+  ) {
+    super(
+      `Per-session renewal cap reached: ${renewalsUsed} / ${cap} renewals used. ` +
+        "Stop the MCP server (or wait for TTL expiry) and start a new session " +
+        "with session_init_project / session_open_project to renew further.",
+    );
+    this.name = "RenewalCapPerSessionError";
+  }
+}
+
+/**
+ * Raised by `session_renew` (W4 Day 5) when the user has already used
+ * the maximum number of renewals (6 — `MAX_RENEWALS_PER_WINDOW`) for
+ * this `(userOid, projectId)` key inside the rolling 24-hour window.
+ * Per `docs/plans/collab-v1.md` §3.5 the window slides on read (entries
+ * older than 24h are pruned), so the cap reopens automatically once the
+ * oldest renewal ages out.
+ */
+export class RenewalCapPerWindowError extends Error {
+  constructor(
+    public readonly windowCount: number,
+    public readonly cap: number,
+    public readonly windowHours: number,
+  ) {
+    super(
+      `Per-${String(windowHours)}h-window renewal cap reached: ${windowCount} / ${cap} ` +
+        "renewals used in the rolling window. Wait until the oldest renewal " +
+        "ages out, or stop using session_renew until the window reopens.",
+    );
+    this.name = "RenewalCapPerWindowError";
+  }
+}
+
 export class BrowserFormCancelledError extends Error {
   constructor(public readonly formType: string) {
     super(`Browser form (${formType}) was cancelled by the user.`);

@@ -75,13 +75,26 @@ import {
 import {
   NoActiveSessionError,
   SessionAlreadyActiveError,
+  MAX_RENEWALS_PER_SESSION,
   type SessionStartInput,
 } from "../collab/session.js";
 import { newUlid } from "../collab/ulid.js";
 import { writeAudit, AuditResult } from "../collab/audit.js";
 import { LeasesFileMissingError, readLeases } from "../collab/leases.js";
+import {
+  recordRenewal,
+  renewalKey,
+  windowCount,
+  MAX_RENEWALS_PER_WINDOW,
+  RENEWAL_WINDOW_MS,
+} from "../collab/renewal-counts.js";
 import { listRootFolders } from "../graph/markdown.js";
-import { SentinelTamperedError } from "../errors.js";
+import {
+  SentinelTamperedError,
+  RenewalCapPerSessionError,
+  RenewalCapPerWindowError,
+  BrowserFormCancelledError,
+} from "../errors.js";
 
 import { acquireFormSlot } from "./collab-forms.js";
 import { formatError } from "./shared.js";
@@ -134,10 +147,26 @@ const SESSION_OPEN_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+const SESSION_RENEW_DEF: ToolDef = {
+  name: "session_renew",
+  title: "Renew Collab Session",
+  description:
+    "Reset the active collaboration session's TTL clock by opening a browser " +
+    "approval form. Counters are persisted across the renewal: writes used, " +
+    "destructive approvals used, and source counters are preserved. Caps: " +
+    "max 3 renewals per session and max 6 renewals per user per project per " +
+    "rolling 24-hour window. On approval, the session's expiresAt is reset " +
+    "to now + the original TTL, the renewal counters increment, and a renewal " +
+    "audit entry is written. Errors with RenewalCapPerSessionError or " +
+    "RenewalCapPerWindowError when the relevant cap is reached.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 export const SESSION_TOOL_DEFS: readonly ToolDef[] = [
   SESSION_INIT_DEF,
   SESSION_STATUS_DEF,
   SESSION_OPEN_DEF,
+  SESSION_RENEW_DEF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -234,6 +263,38 @@ export function registerSessionTools(server: McpServer, config: ServerConfig): T
           return formatError("session_open_project", err, { suffix: retryHint });
         } finally {
           slot.release();
+        }
+      },
+    ),
+    defineTool(
+      server,
+      SESSION_RENEW_DEF,
+      {
+        inputSchema: z.object({}).shape,
+        annotations: {
+          title: SESSION_RENEW_DEF.title,
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async (_args, { signal }) => {
+        try {
+          if (signal.aborted) throw signal.reason;
+          return await runSessionRenew(config, signal);
+        } catch (err: unknown) {
+          if (err instanceof UserCancelledError || err instanceof BrowserFormCancelledError) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Session renewal cancelled. The TTL clock was not reset.",
+                },
+              ],
+            };
+          }
+          return formatError("session_renew", err);
         }
       },
     ),
@@ -1004,4 +1065,160 @@ async function runOpenProject(
       },
     ],
   };
+}
+
+// ---------------------------------------------------------------------------
+// W4 Day 5 — session_renew
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive the §2.2 `session_renew` flow:
+ *
+ *   1. Require an active session in this MCP instance.
+ *   2. Pre-check the per-session cap (`MAX_RENEWALS_PER_SESSION = 3` —
+ *      from the in-memory snapshot).
+ *   3. Pre-check the per-window cap (`MAX_RENEWALS_PER_WINDOW = 6` per
+ *      `(userOid, projectId)` per rolling 24h — read from disk via
+ *      `windowCount`).
+ *   4. Open a browser approval form via the W0 form-factory slot.
+ *   5. On approve: append the renewal timestamp to the sliding window,
+ *      reset `expiresAt` via `sessionRegistry.renew()`, and emit a
+ *      `renewal` audit envelope (best-effort).
+ *
+ * The pre-checks raise *before* opening the browser so a budget-exhausted
+ * agent never spawns a re-prompt the human would just have to cancel.
+ * On cancel / timeout the registry is untouched and no entry is written
+ * to the renewal-counts sidecar.
+ */
+async function runSessionRenew(
+  config: ServerConfig,
+  signal: AbortSignal,
+): Promise<{ content: { type: "text"; text: string }[] }> {
+  const now = config.now ?? ((): Date => new Date());
+
+  const snap = config.sessionRegistry.snapshot();
+  if (snap === null) {
+    throw new NoActiveSessionError();
+  }
+
+  // Pre-check the per-session cap. The registry's `renew()` itself does
+  // not enforce this — keeping the policy in the tool layer keeps
+  // counters and forms aligned (we never open a form we are about to
+  // refuse anyway).
+  if (snap.renewalsUsed >= MAX_RENEWALS_PER_SESSION) {
+    throw new RenewalCapPerSessionError(snap.renewalsUsed, MAX_RENEWALS_PER_SESSION);
+  }
+
+  // Pre-check the per-window cap. The sliding window is keyed by
+  // `(userOid, projectId)` per §3.5 — `loadRenewalCounts` prunes entries
+  // older than 24h on read so a stale row never blocks a fresh renewal.
+  const key = renewalKey(snap.userOid, snap.projectId);
+  const beforeCount = await windowCount(config.configDir, key, now(), signal);
+  if (beforeCount >= MAX_RENEWALS_PER_WINDOW) {
+    throw new RenewalCapPerWindowError(
+      beforeCount,
+      MAX_RENEWALS_PER_WINDOW,
+      RENEWAL_WINDOW_MS / (60 * 60 * 1000),
+    );
+  }
+
+  // Open the §5.2 re-approval form via the W0 form-factory slot.
+  const slot = acquireFormSlot("session_renew");
+  try {
+    const summaryLines = [
+      `projectId: ${snap.projectId}`,
+      `folderPath: ${snap.folderPath}`,
+      `currentExpiresAt: ${snap.expiresAt}`,
+      `ttlSeconds (will be re-applied on approve): ${snap.ttlSeconds}`,
+      `renewals (this session): ${snap.renewalsUsed} / ${MAX_RENEWALS_PER_SESSION}`,
+      `renewals (rolling 24h): ${beforeCount} / ${MAX_RENEWALS_PER_WINDOW}`,
+      `writes used: ${snap.writesUsed} / ${snap.writeBudgetTotal}`,
+      `destructive used: ${snap.destructiveUsed} / ${snap.destructiveBudgetTotal}`,
+    ];
+    const handle = await startBrowserPicker(
+      {
+        title: "Approve Session Renewal",
+        subtitle:
+          "An MCP tool is asking to reset the session TTL clock. Counters " +
+          "(writes / destructive / sources) are preserved across the renewal. " +
+          "Click Approve to renew, or Cancel to refuse.\n\n" +
+          summaryLines.join("\n"),
+        options: [{ id: "approve", label: "Approve session renewal" }],
+        onSelect: async () => {
+          // Counter mutations happen after the picker resolves so the
+          // slot URL stays useful in FormBusyError messages until the
+          // sidecar write + registry update complete.
+        },
+      },
+      signal,
+    );
+    slot.setUrl(handle.url);
+
+    let browserOpened = false;
+    try {
+      await config.openBrowser(handle.url);
+      browserOpened = true;
+      logger.info("session_renew picker opened", { url: handle.url });
+    } catch (err: unknown) {
+      logger.warn("could not open browser for session_renew", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (!browserOpened) {
+      logger.info("session_renew awaiting manual visit", { url: handle.url });
+    }
+
+    try {
+      await handle.waitForSelection;
+    } catch (err: unknown) {
+      if (err instanceof UserCancelledError) {
+        throw new BrowserFormCancelledError("session_renew");
+      }
+      throw err;
+    }
+
+    // Approved — append to the sliding window, then reset the TTL
+    // clock. Order matters: the persisted window entry is the source of
+    // truth for the per-user/per-project cap, so writing it first means
+    // a crash between the two operations still records the cap usage
+    // (rather than letting the agent retry forever for free).
+    const recorded = await recordRenewal(config.configDir, key, now(), signal);
+    const renewedSnap = await config.sessionRegistry.renew(undefined, signal);
+
+    // §3.6 audit envelope. Best-effort — the writer swallows failures
+    // and never fails the tool call.
+    await writeAudit(
+      config,
+      {
+        sessionId: renewedSnap.sessionId,
+        agentId: renewedSnap.agentId,
+        userOid: renewedSnap.userOid,
+        projectId: renewedSnap.projectId,
+        tool: "session_renew",
+        result: AuditResult.Success,
+        type: "renewal",
+        details: {
+          windowCountBefore: recorded.windowCountBefore,
+          windowCountAfter: recorded.windowCountAfter,
+          sessionRenewalsBefore: snap.renewalsUsed,
+          sessionRenewalsAfter: renewedSnap.renewalsUsed,
+        },
+      },
+      signal,
+    );
+
+    const lines = [
+      "Session renewed.",
+      `  sessionId: ${renewedSnap.sessionId}`,
+      `  expiresAt: ${renewedSnap.expiresAt}`,
+      `  ttlSeconds: ${renewedSnap.ttlSeconds}`,
+      `  renewals (this session): ${renewedSnap.renewalsUsed} / ${MAX_RENEWALS_PER_SESSION}`,
+      `  renewals (rolling 24h): ${recorded.windowCountAfter} / ${MAX_RENEWALS_PER_WINDOW}`,
+      `  writes: ${renewedSnap.writesUsed} / ${renewedSnap.writeBudgetTotal}`,
+      `  destructive: ${renewedSnap.destructiveUsed} / ${renewedSnap.destructiveBudgetTotal}`,
+    ];
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } finally {
+    slot.release();
+  }
 }
