@@ -42,6 +42,18 @@ export function registerStatusTool(server: McpServer, config: ServerConfig): Too
           lines.push(`graphdo v${VERSION}`);
           lines.push("");
 
+          // Test-persona override (`docs/plans/two-instance-e2e.md`,
+          // ADR-0009): surface a high-visibility "WARN" line so the
+          // operator can never accidentally confuse a labelled instance
+          // with a real second user. Real `userOid` is unchanged.
+          if (config.agentPersona !== undefined) {
+            lines.push(
+              `WARN: Test persona active: ${config.agentPersona.id} ` +
+                `(GRAPHDO_AGENT_PERSONA override; real user OID unchanged)`,
+            );
+            lines.push("");
+          }
+
           // Authentication status
           const authenticated = await config.authenticator.isAuthenticated(signal);
           if (authenticated) {

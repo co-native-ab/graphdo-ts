@@ -227,9 +227,20 @@ Published as `@co-native-ab/graphdo-ts` with OIDC Trusted Publishing (no tokens)
 ### Environment Variables
 
 - `GRAPHDO_GRAPH_URL` - override Graph API base URL (used in development)
-- `GRAPHDO_CONFIG_DIR` - override config directory (used in tests)
+- `GRAPHDO_CONFIG_DIR` - override config directory (used in tests; required for the two-instance topology)
 - `GRAPHDO_DEBUG=true` - enable debug logging
 - `GRAPHDO_ACCESS_TOKEN` - skip MSAL auth and use a static Bearer token
+- `GRAPHDO_AGENT_PERSONA` - **test-only** label override (`^persona:[a-z0-9-]{1,32}$`); see `docs/adr/0009-test-persona-override.md` for the threat model. When set, the collab session's `agentId` becomes the persona id (e.g. `persona:alice`) so two MCP server processes on the same Microsoft user can act as distinct collaborators. Read **once** in `main()`; invalid values fail startup.
+
+### Running two instances on one machine
+
+For multi-agent collab smoke tests on a single Microsoft account:
+
+1. Each instance gets its own `GRAPHDO_CONFIG_DIR` (a per-process lock file in `<configDir>/instance.lock` refuses sharing).
+2. Each instance gets a distinct `GRAPHDO_AGENT_PERSONA` (e.g. `persona:alice`, `persona:bob`).
+3. Both instances log in as the same Microsoft user; collab treats them as distinct collaborators for authorship, leases, audit, and destructive re-prompts. Microsoft Graph still attributes every actual write to the one real user.
+
+The full Copilot CLI playbook is at `docs/plans/two-instance-e2e.md`; the sub-agent orchestration prompt is at `docs/plans/two-instance-e2e-copilot-prompt.md`.
 
 ## Config Files
 

@@ -408,16 +408,48 @@ npm run mcpb         # Build + create MCPB bundle
 
 ### Environment Variables
 
-| Variable               | Description                                                            | Default                                |
-| ---------------------- | ---------------------------------------------------------------------- | -------------------------------------- |
-| `GRAPHDO_DEBUG`        | Enable debug logging (`true`/`false`)                                  | `false`                                |
-| `GRAPHDO_CLIENT_ID`    | Azure AD (Entra ID) application client ID                              | `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` |
-| `GRAPHDO_TENANT_ID`    | Azure AD tenant ID (`common`, `organizations`, `consumers`, or a GUID) | `common`                               |
-| `GRAPHDO_CONFIG_DIR`   | Override config directory                                              | OS default                             |
-| `GRAPHDO_GRAPH_URL`    | Override Graph API base URL                                            | `https://graph.microsoft.com/v1.0`     |
-| `GRAPHDO_ACCESS_TOKEN` | Skip MSAL auth and use a static Bearer token                           | -                                      |
+| Variable                | Description                                                                                                       | Default                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `GRAPHDO_DEBUG`         | Enable debug logging (`true`/`false`)                                                                             | `false`                                |
+| `GRAPHDO_CLIENT_ID`     | Azure AD (Entra ID) application client ID                                                                         | `b073490b-a1a2-4bb8-9d83-00bb5c15fcfd` |
+| `GRAPHDO_TENANT_ID`     | Azure AD tenant ID (`common`, `organizations`, `consumers`, or a GUID)                                            | `common`                               |
+| `GRAPHDO_CONFIG_DIR`    | Override config directory                                                                                         | OS default                             |
+| `GRAPHDO_GRAPH_URL`     | Override Graph API base URL                                                                                       | `https://graph.microsoft.com/v1.0`     |
+| `GRAPHDO_ACCESS_TOKEN`  | Skip MSAL auth and use a static Bearer token                                                                      | -                                      |
+| `GRAPHDO_AGENT_PERSONA` | **Test-only** persona override label for collab (`^persona:[a-z0-9-]{1,32}$`). See "Running two instances" below. | unset                                  |
 
 When installed via [MCPB](https://github.com/modelcontextprotocol/mcpb), `GRAPHDO_DEBUG`, `GRAPHDO_CLIENT_ID`, and `GRAPHDO_TENANT_ID` are exposed as configurable settings in the extension UI and automatically passed as environment variables.
+
+### Running two instances (smoke test)
+
+You can configure two graphdo-ts MCP server instances on the same
+machine, both authenticated as the same Microsoft user, and have
+collab treat them as **two distinct collaborators** for authorship,
+leases, audit, and destructive re-prompts. This is the supported way
+to drive the multi-agent collab paths end-to-end on a single machine.
+
+Each instance MUST get its own `GRAPHDO_CONFIG_DIR` (the MSAL token
+cache, destructive-counts sidecar, and project metadata files cannot
+be shared — a startup lock-file refuses sharing). Each instance also
+needs a distinct `GRAPHDO_AGENT_PERSONA` label, e.g.:
+
+```bash
+mkdir -p ~/.graphdo-personas/alice ~/.graphdo-personas/bob
+GRAPHDO_CONFIG_DIR=~/.graphdo-personas/alice GRAPHDO_AGENT_PERSONA=persona:alice npx @co-native-ab/graphdo-ts &
+GRAPHDO_CONFIG_DIR=~/.graphdo-personas/bob   GRAPHDO_AGENT_PERSONA=persona:bob   npx @co-native-ab/graphdo-ts &
+```
+
+The persona label changes how collab identifies the instance — it does
+**not** change which Microsoft user is authenticated. Both instances
+still log in as you; Microsoft Graph attributes every actual write to
+your real account. See
+[`docs/adr/0009-test-persona-override.md`](docs/adr/0009-test-persona-override.md)
+for the full threat model.
+
+For a turn-key Copilot CLI playbook that drives the full multi-agent
+collab surface end-to-end (10 scenarios, ~13 yellow human-input
+checkpoints, ~30 minutes wall time), see
+[`docs/plans/two-instance-e2e.md`](docs/plans/two-instance-e2e.md).
 
 ---
 

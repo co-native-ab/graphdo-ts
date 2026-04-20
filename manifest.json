@@ -26,7 +26,9 @@
       "env": {
         "GRAPHDO_DEBUG": "${user_config.debug}",
         "GRAPHDO_CLIENT_ID": "${user_config.client_id}",
-        "GRAPHDO_TENANT_ID": "${user_config.tenant_id}"
+        "GRAPHDO_TENANT_ID": "${user_config.tenant_id}",
+        "GRAPHDO_AGENT_PERSONA": "${user_config.agent_persona}",
+        "GRAPHDO_CONFIG_DIR": "${user_config.config_dir}"
       }
     }
   },
@@ -231,6 +233,20 @@
       "title": "Tenant ID",
       "description": "Azure AD (Entra ID) tenant ID. Use 'common' for any Microsoft account, 'organizations' for work/school only, 'consumers' for personal only, or a specific tenant GUID.",
       "default": "common",
+      "required": false
+    },
+    "agent_persona": {
+      "type": "string",
+      "title": "Agent Persona (test-only override)",
+      "description": "Optional collab-layer persona label of the form 'persona:<id>' (e.g. 'persona:alice') with id matching ^[a-z0-9-]{1,32}$. When set, the collab session's agentId becomes this value so two graphdo-ts instances on the same Microsoft account can be treated as distinct collaborators (authorship, leases, audit, destructive re-prompts). Only meaningful when running two instances on one machine — see docs/plans/two-instance-e2e.md. Each instance MUST also use a distinct GRAPHDO_CONFIG_DIR (a startup lock-file refuses sharing). The persona id never reaches Microsoft Graph; the real user OID is preserved unchanged.",
+      "default": "",
+      "required": false
+    },
+    "config_dir": {
+      "type": "string",
+      "title": "Config Directory (override)",
+      "description": "Override the OS default config directory used for the MSAL token cache, project metadata, audit log, and recents file. Required when running two graphdo-ts instances on one machine — each instance must point at its own directory. Leave empty for the OS default (~/.config/graphdo-ts on Linux, ~/Library/Application Support/graphdo-ts on macOS, %APPDATA%/graphdo-ts on Windows).",
+      "default": "",
       "required": false
     }
   }

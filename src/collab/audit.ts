@@ -166,6 +166,17 @@ export interface SessionStartDetails {
   destructiveBudget: number;
   clientName: string | null;
   clientVersion: string | null;
+  /**
+   * Test-persona override marker (`docs/plans/two-instance-e2e.md`,
+   * ADR-0009). `"default"` for production runs (back-compat — same
+   * audit shape as before the override existed). `"test-persona"`
+   * when `GRAPHDO_AGENT_PERSONA` was set; the persona id is also
+   * surfaced in {@link agentPersona} so post-hoc forensic reads can
+   * trivially identify sessions where the override was in effect.
+   */
+  mode?: "default" | "test-persona";
+  /** Persona id (e.g. `"persona:alice"`) when {@link mode} is `"test-persona"`. */
+  agentPersona?: { id: string; source: "env" };
 }
 
 export interface SessionEndDetails {

@@ -627,6 +627,7 @@ async function runInitProject(
       clientVersion,
       folderPath,
       authoritativeFileName: authoritativeFile.name,
+      ...(config.agentPersona !== undefined ? { agentPersonaId: config.agentPersona.id } : {}),
     },
     signal,
   );
@@ -650,6 +651,12 @@ async function runInitProject(
         destructiveBudget: sessionSnapshot.destructiveBudgetTotal,
         clientName,
         clientVersion,
+        ...(config.agentPersona !== undefined
+          ? {
+              mode: "test-persona" as const,
+              agentPersona: { id: config.agentPersona.id, source: "env" as const },
+            }
+          : {}),
       },
     },
     signal,
@@ -726,6 +733,12 @@ async function runSessionStatus(
 
   const lines: string[] = [];
   lines.push(`Collab session: ${expired ? "expired" : "active"}`);
+  if (config.agentPersona !== undefined) {
+    lines.push(
+      `  WARN: Test persona active: ${config.agentPersona.id} ` +
+        `(GRAPHDO_AGENT_PERSONA override; real user OID unchanged)`,
+    );
+  }
   lines.push(`  projectId: ${snap.projectId}`);
   lines.push(`  agentId: ${snap.agentId}`);
   lines.push(`  userOid: ...${userOidSuffix(snap.userOid)}`);
@@ -1157,6 +1170,7 @@ async function runOpenProject(
     clientVersion,
     folderPath: refreshed.folderPath,
     authoritativeFileName: sentinel.authoritativeFileName,
+    ...(config.agentPersona !== undefined ? { agentPersonaId: config.agentPersona.id } : {}),
   } as const;
   const session = await config.sessionRegistry.start(sessionInput, signal);
 
@@ -1177,6 +1191,12 @@ async function runOpenProject(
         destructiveBudget: session.destructiveBudgetTotal,
         clientName,
         clientVersion,
+        ...(config.agentPersona !== undefined
+          ? {
+              mode: "test-persona" as const,
+              agentPersona: { id: config.agentPersona.id, source: "env" as const },
+            }
+          : {}),
       },
     },
     signal,
