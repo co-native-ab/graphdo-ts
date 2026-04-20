@@ -58,7 +58,46 @@ import {
   serializeFrontmatter,
   splitFrontmatter,
   type CollabFrontmatter,
+  type FrontmatterResetAudit,
+  type FrontmatterResetReason,
 } from "../collab/frontmatter.js";
+import {
+  writeAudit,
+  AuditApprovalOutcome,
+  AuditConflictMode,
+  AuditFrontmatterResetReason,
+  AuditResult,
+  AuditWriteSource,
+  type AuditInputSummary,
+} from "../collab/audit.js";
+
+/**
+ * Map the canonical {@link FrontmatterResetReason} string union onto the
+ * audit enum so the writer's discriminated-union schema accepts the
+ * value without losing the string-equality contract.
+ */
+function toAuditResetReason(reason: FrontmatterResetReason): AuditFrontmatterResetReason {
+  return reason === "missing"
+    ? AuditFrontmatterResetReason.Missing
+    : AuditFrontmatterResetReason.Malformed;
+}
+
+/** Map the zod-typed `source` literal onto the audit enum. */
+function toAuditWriteSource(source: "chat" | "project" | "external"): AuditWriteSource {
+  switch (source) {
+    case "chat":
+      return AuditWriteSource.Chat;
+    case "project":
+      return AuditWriteSource.Project;
+    case "external":
+      return AuditWriteSource.External;
+  }
+}
+
+/** Map the zod-typed `conflictMode` literal onto the audit enum. */
+function toAuditConflictMode(mode: "fail" | "proposal"): AuditConflictMode {
+  return mode === "fail" ? AuditConflictMode.Fail : AuditConflictMode.Proposal;
+}
 import { parse as yamlParseRaw } from "yaml";
 import { startBrowserPicker } from "../picker.js";
 import { acquireFormSlot } from "./collab-forms.js";
@@ -608,7 +647,11 @@ async function runAuthoritativeWrite(
   cTag: string,
   agentContent: string,
   signal: AbortSignal,
-): Promise<{ updated: DriveItem; writtenDocId: string }> {
+): Promise<{
+  updated: DriveItem;
+  writtenDocId: string;
+  frontmatterReset: FrontmatterResetAudit | null;
+}> {
   const validatedItemId = validateGraphId("authoritativeItemId", resolvedItem.id);
 
   // Read live content for doc_id/created_at recovery. A 404 here is a
@@ -618,7 +661,7 @@ async function runAuthoritativeWrite(
   const liveContent = await getDriveItemContent(client, validatedItemId, signal);
 
   const now = config.now ?? ((): Date => new Date());
-  const { frontmatter, body } = resolveAuthoritativeFrontmatter({
+  const { frontmatter, body, docIdSource } = resolveAuthoritativeFrontmatter({
     agentContent,
     liveContent,
     cachedDocId: metadata.docId,
@@ -626,10 +669,27 @@ async function runAuthoritativeWrite(
     now,
   });
 
+  // Detect whether the live file's frontmatter was reset (missing /
+  // malformed) so the §3.6 audit writer can record one
+  // `frontmatter_reset` per write that recovered from the wipe. We
+  // only re-read once — `readMarkdownFrontmatter` is pure — to keep
+  // the helper's contract intact while still surfacing the reason.
+  let frontmatterReset: FrontmatterResetAudit | null = null;
+  if (docIdSource === DocIdSource.Cache || docIdSource === DocIdSource.Fresh) {
+    const liveRead = readMarkdownFrontmatter(liveContent);
+    if (liveRead.kind === "reset") {
+      frontmatterReset = {
+        reason: liveRead.reason,
+        previousRevision: resolvedItem.cTag ?? null,
+        recoveredDocId: metadata.docId !== null,
+      };
+    }
+  }
+
   const yaml = serializeFrontmatter(frontmatter);
   const newContent = joinFrontmatter(yaml, body);
   const updated = await writeAuthoritative(client, validatedItemId, cTag, newContent, signal);
-  return { updated, writtenDocId: frontmatter.collab.doc_id };
+  return { updated, writtenDocId: frontmatter.collab.doc_id, frontmatterReset };
 }
 
 /**
@@ -819,8 +879,37 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             const frontmatter = readResult.kind === "parsed" ? readResult.frontmatter : null;
             const body = readResult.body;
 
-            // Note: audit emission (`frontmatter_reset`) is W3 Day 3; deferred.
             const revision = extractRevisionFromCTag(resolvedItem.cTag);
+
+            // §3.6 audit: when the live frontmatter is missing or
+            // malformed, emit a `frontmatter_reset` entry so the
+            // post-hoc reviewer can see the OneDrive UI stripped the
+            // envelope. `recoveredDocId: true` when the local pin
+            // block still carries the project's `docId` (the
+            // recovery path for the next write).
+            if (readResult.kind === "reset") {
+              const session = config.sessionRegistry.snapshot();
+              if (session !== null) {
+                await writeAudit(
+                  config,
+                  {
+                    sessionId: session.sessionId,
+                    agentId: session.agentId,
+                    userOid: session.userOid,
+                    projectId: metadata.projectId,
+                    tool: "collab_read",
+                    result: AuditResult.Success,
+                    type: "frontmatter_reset",
+                    details: {
+                      reason: toAuditResetReason(readResult.reason),
+                      previousRevision: resolvedItem.cTag ?? null,
+                      recoveredDocId: metadata.docId !== null,
+                    },
+                  },
+                  signal,
+                );
+              }
+            }
 
             const output = formatAuthoritativeRead(resolvedItem, frontmatter, body, revision);
             return { content: [{ type: "text", text: output }] };
@@ -1303,14 +1392,61 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
               );
             } catch (err) {
               if (err instanceof ExternalSourceDeclinedError) {
+                // §3.6 audit: record the declined external-source
+                // approval so post-hoc review sees the human said no
+                // and no Graph write was issued.
+                await writeAudit(
+                  config,
+                  {
+                    sessionId: session.sessionId,
+                    agentId: session.agentId,
+                    userOid: session.userOid,
+                    projectId: metadata.projectId,
+                    tool: "collab_write",
+                    result: AuditResult.Failure,
+                    intent,
+                    type: "external_source_approval",
+                    details: {
+                      tool: "collab_write",
+                      path,
+                      outcome: AuditApprovalOutcome.Declined,
+                      csrfTokenMatched: true,
+                    },
+                  },
+                  signal,
+                );
                 return formatError("collab_write", err);
               }
               throw err;
             }
+            // Approval succeeded — record the audit before the write
+            // so the order in the JSONL matches the order of events.
+            await writeAudit(
+              config,
+              {
+                sessionId: session.sessionId,
+                agentId: session.agentId,
+                userOid: session.userOid,
+                projectId: metadata.projectId,
+                tool: "collab_write",
+                result: AuditResult.Success,
+                intent,
+                type: "external_source_approval",
+                details: {
+                  tool: "collab_write",
+                  path,
+                  outcome: AuditApprovalOutcome.Approved,
+                  csrfTokenMatched: true,
+                },
+              },
+              signal,
+            );
           }
 
+          const cTagBefore = resolvedItem?.cTag ?? null;
           let updated: DriveItem;
           let writtenDocId: string | null = null;
+          let frontmatterReset: FrontmatterResetAudit | null = null;
           try {
             if (isAuthoritative) {
               if (resolvedItem === null) {
@@ -1330,6 +1466,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
               );
               updated = auth.updated;
               writtenDocId = auth.writtenDocId;
+              frontmatterReset = auth.frontmatterReset;
             } else if (writeIsCreate) {
               if (parentFolderId === null) {
                 throw new Error("internal: parentFolderId missing for byPath create");
@@ -1377,6 +1514,64 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           if (isAuthoritative && writtenDocId !== null) {
             await persistAuthoritativeMetadata(config, metadata, updated, writtenDocId, signal);
           }
+
+          // §3.6 audit: when the live frontmatter was missing /
+          // malformed, emit a single `frontmatter_reset` for the write
+          // that recovered the doc_id. The next read sees the
+          // re-injected envelope and does not duplicate the entry.
+          if (frontmatterReset !== null) {
+            await writeAudit(
+              config,
+              {
+                sessionId: session.sessionId,
+                agentId: session.agentId,
+                userOid: session.userOid,
+                projectId: metadata.projectId,
+                tool: "collab_write",
+                result: AuditResult.Success,
+                type: "frontmatter_reset",
+                details: {
+                  reason: toAuditResetReason(frontmatterReset.reason),
+                  previousRevision: frontmatterReset.previousRevision,
+                  recoveredDocId: frontmatterReset.recoveredDocId,
+                },
+              },
+              signal,
+            );
+          }
+
+          // §3.6 audit: record the successful write. inputSummary
+          // carries only allow-listed fields (the writer enforces this
+          // again); content / body / rationale never reach disk.
+          const inputSummary: AuditInputSummary = {
+            path,
+            source: toAuditWriteSource(source),
+            conflictMode: toAuditConflictMode(conflictMode),
+            contentSizeBytes: bytes,
+          };
+          await writeAudit(
+            config,
+            {
+              sessionId: session.sessionId,
+              agentId: session.agentId,
+              userOid: session.userOid,
+              projectId: metadata.projectId,
+              tool: "collab_write",
+              result: AuditResult.Success,
+              intent,
+              type: "tool_call",
+              details: {
+                inputSummary,
+                cTagBefore,
+                cTagAfter: updated.cTag ?? null,
+                revisionAfter: updated.version ?? null,
+                bytes,
+                source: toAuditWriteSource(source),
+                resolvedItemId: updated.id,
+              },
+            },
+            signal,
+          );
 
           const lines = [
             `wrote: ${updated.name} (${updated.id})`,

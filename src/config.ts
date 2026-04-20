@@ -8,6 +8,7 @@ import { z } from "zod";
 import { isNodeError } from "./errors.js";
 import { validateGraphId, type ValidatedGraphId } from "./graph/ids.js";
 import { logger } from "./logger.js";
+import { mkdirOptions, writeFileOptions } from "./fs-options.js";
 
 export interface MarkdownConfig {
   rootFolderId?: string;
@@ -108,20 +109,13 @@ export async function saveConfig(config: Config, dir: string, signal: AbortSigna
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
 
-  const isWindows = os.platform() === "win32";
-  const mkdirOptions: Parameters<typeof fs.mkdir>[1] = isWindows
-    ? { recursive: true }
-    : { recursive: true, mode: 0o700 };
-  await fs.mkdir(dir, mkdirOptions);
+  await fs.mkdir(dir, mkdirOptions());
 
   const data = JSON.stringify(config, null, 2) + "\n";
   const tmpFile = path.join(dir, `.config-${crypto.randomUUID()}.tmp`);
 
   try {
-    const writeOptions: Parameters<typeof fs.writeFile>[2] = isWindows
-      ? { encoding: "utf-8" as const, signal }
-      : { encoding: "utf-8" as const, mode: 0o600, signal };
-    await fs.writeFile(tmpFile, data, writeOptions);
+    await fs.writeFile(tmpFile, data, writeFileOptions(signal));
     await fs.rename(tmpFile, filePath);
     logger.debug("config saved", { path: filePath });
   } catch (err: unknown) {

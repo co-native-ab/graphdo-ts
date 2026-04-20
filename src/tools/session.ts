@@ -61,6 +61,7 @@ import {
 } from "../collab/projects.js";
 import { NoActiveSessionError, SessionAlreadyActiveError } from "../collab/session.js";
 import { newUlid } from "../collab/ulid.js";
+import { writeAudit, AuditResult } from "../collab/audit.js";
 import { listRootFolders } from "../graph/markdown.js";
 
 import { acquireFormSlot } from "./collab-forms.js";
@@ -435,6 +436,30 @@ async function runInitProject(
       clientSlug: "unknown",
       folderPath,
       authoritativeFileName: authoritativeFile.name,
+    },
+    signal,
+  );
+
+  // §3.6 audit: record `session_start` so post-hoc review can correlate
+  // budget / TTL settings with the agent that initialised the project.
+  // Best-effort — the writer swallows failures and never fails the tool.
+  await writeAudit(
+    config,
+    {
+      sessionId: sessionSnapshot.sessionId,
+      agentId: sessionSnapshot.agentId,
+      userOid: sessionSnapshot.userOid,
+      projectId: sessionSnapshot.projectId,
+      tool: "session_init_project",
+      result: AuditResult.Success,
+      type: "session_start",
+      details: {
+        ttlSeconds: sessionSnapshot.ttlSeconds,
+        writeBudget: sessionSnapshot.writeBudgetTotal,
+        destructiveBudget: sessionSnapshot.destructiveBudgetTotal,
+        clientName: null,
+        clientVersion: null,
+      },
     },
     signal,
   );

@@ -256,9 +256,103 @@ describe("01-init-write-read-list", () => {
   // (lands in W2 Day 4 + W3 Day 2)
   // -------------------------------------------------------------------------
 
-  it.todo(
-    "after the §3.6 audit writer lands (W3 Day 3): writing the authoritative file appends an audit entry",
-  );
+  it.skip("deferred placeholder — replaced by audit assertions inside the W3 Day 2 + W3 Day 3 tests below", () => {
+    // intentionally empty; see the `audit emission` blocks below.
+  });
+
+  describe("§3.6 audit emission (W3 Day 3)", () => {
+    it("session_init_project appends a session_start entry", async () => {
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({
+        token: "init-token",
+        username: "alice@example.com",
+      });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      const initResult = (await c.callTool({
+        name: "session_init_project",
+        arguments: {},
+      })) as ToolResult;
+      expect(initResult.isError).toBeFalsy();
+      const initText = firstText(initResult);
+      const projectIdMatch = /projectId: (\S+)/.exec(initText);
+      const projectId = projectIdMatch?.[1] ?? "";
+      expect(projectId.length).toBeGreaterThan(0);
+
+      const auditPath = `${env.configDir}/sessions/audit/${projectId}.jsonl`;
+      const raw = await readFile(auditPath, { encoding: "utf-8" });
+      const lines = raw.split("\n").filter((l) => l.length > 0);
+      expect(lines.length).toBe(1);
+      const entry = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+      expect(entry["type"]).toBe("session_start");
+      expect(entry["tool"]).toBe("session_init_project");
+      expect(entry["projectId"]).toBe(projectId);
+      const details = entry["details"] as Record<string, unknown>;
+      expect(details["writeBudget"]).toBe(50);
+      expect(details["destructiveBudget"]).toBe(10);
+      expect(details["ttlSeconds"]).toBe(7200);
+    });
+
+    it("collab_write appends a tool_call entry on success with allow-listed inputSummary", async () => {
+      const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
+      const auth = new MockAuthenticator({
+        token: "init-token",
+        username: "alice@example.com",
+      });
+      const c = await createTestClient(env, auth, { openBrowser: spy });
+
+      const initResult = (await c.callTool({
+        name: "session_init_project",
+        arguments: {},
+      })) as ToolResult;
+      expect(initResult.isError).toBeFalsy();
+      const initText = firstText(initResult);
+      const projectId = /projectId: (\S+)/.exec(initText)?.[1] ?? "";
+
+      // Read the cTag, then write.
+      const readResult = (await c.callTool({
+        name: "collab_read",
+        arguments: { path: "spec.md" },
+      })) as ToolResult;
+      const initialCTag = /cTag: (\S+)/.exec(firstText(readResult))?.[1];
+
+      const writeResult = (await c.callTool({
+        name: "collab_write",
+        arguments: {
+          path: "spec.md",
+          content: "# Updated\n\nBody.\n",
+          cTag: initialCTag,
+          source: "chat",
+        },
+      })) as ToolResult;
+      expect(writeResult.isError).toBeFalsy();
+
+      const auditPath = `${env.configDir}/sessions/audit/${projectId}.jsonl`;
+      const raw = await readFile(auditPath, { encoding: "utf-8" });
+      const lines = raw.split("\n").filter((l) => l.length > 0);
+      const toolCalls = lines
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((e) => e["type"] === "tool_call");
+      expect(toolCalls.length).toBe(1);
+      const entry = toolCalls[0]!;
+      expect(entry["tool"]).toBe("collab_write");
+      expect(entry["result"]).toBe("success");
+      const details = entry["details"] as Record<string, unknown>;
+      const inputSummary = details["inputSummary"] as Record<string, unknown>;
+      // Allow-list: only path, source, conflictMode, contentSizeBytes
+      // appear; never `content`.
+      expect(inputSummary).toMatchObject({
+        path: "spec.md",
+        source: "chat",
+        conflictMode: "fail",
+      });
+      expect(inputSummary).not.toHaveProperty("content");
+      expect(details["source"]).toBe("chat");
+      expect(details["cTagBefore"]).toBe(initialCTag);
+      expect(details["cTagAfter"]).not.toBe(initialCTag);
+      expect(details["bytes"]).toBe(Buffer.byteLength("# Updated\n\nBody.\n", "utf-8"));
+    });
+  });
 
   describe("collab_read + collab_list_files (W2 Day 4)", () => {
     it("reading echoes the written body with cTag, listing surfaces the authoritative file marker", async () => {
