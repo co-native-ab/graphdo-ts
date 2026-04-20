@@ -39,6 +39,7 @@ describe("integration: discovery & login", () => {
       expect(names).toEqual([
         "auth_status",
         "collab_acquire_section",
+        "collab_apply_proposal",
         "collab_create_proposal",
         "collab_list_files",
         "collab_read",
