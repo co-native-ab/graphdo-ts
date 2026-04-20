@@ -145,7 +145,7 @@ describe("integration: session_status (W1 Day 5)", () => {
     const initText = firstText(init);
     expect(initText).toContain("Session active.");
     expect(initText).toMatch(/sessionId: [0-9A-HJKMNP-TV-Z]{26}/);
-    expect(initText).toMatch(/agentId: [0-9a-f]{8}-unknown-[0-9a-z]{1,8}/);
+    expect(initText).toMatch(/agentId: [0-9a-f]{8}-test-client-[0-9a-z]{1,8}/);
 
     const status = (await c.callTool({
       name: "session_status",

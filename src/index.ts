@@ -71,6 +71,21 @@ export interface ServerConfig {
    * does not reset the budget within the same session window.
    */
   sessionRegistry: SessionRegistry;
+  /**
+   * Lazy accessor for the connected MCP client's `clientInfo` (W5 Day 3,
+   * §2.2 / §10 question 4). Returns `undefined` when no client has yet
+   * called `initialize`. Used by `session_init_project` and
+   * `session_open_project` to seed the session's `agentId` middle segment
+   * with the client's slugified `name` (e.g. `"vscode"`, `"claude-ai"`,
+   * `"claude-code"`); when the name is missing or all-non-slug-chars the
+   * registry emits a one-time `agent_name_unknown` audit and falls back
+   * to `"unknown"`.
+   *
+   * Wired in `createMcpServer()` to read from `mcpServer.server.getClientVersion()`.
+   * Tests can override to simulate a specific client identity (or a
+   * missing one).
+   */
+  getClientInfo?: () => { name?: string; version?: string } | undefined;
   /** Set by createMcpServer() — login/logout tools call this to sync tool visibility. */
   onScopesChanged?: (grantedScopes: GraphScope[]) => void;
 }
@@ -81,7 +96,17 @@ export interface ServerConfig {
 
 /** Create a configured McpServer instance with all tools registered. */
 export async function createMcpServer(
-  opts: Omit<ServerConfig, "graphClient" | "sessionRegistry">,
+  opts: Omit<ServerConfig, "graphClient" | "sessionRegistry"> & {
+    /**
+     * Optional pre-built {@link SessionRegistry}. Tests pass one to
+     * simulate "same process, dropped transport, new transport" — a
+     * fresh `McpServer` paired with the surviving registry yields the
+     * same active session, matching test 19's DoD. Production callers
+     * (`main()`) leave this `undefined` so the registry is constructed
+     * from `now` + `configDir`.
+     */
+    sessionRegistry?: SessionRegistry;
+  },
   signal: AbortSignal,
 ): Promise<McpServer> {
   // Collect all static tool definitions for instruction generation
@@ -114,14 +139,32 @@ export async function createMcpServer(
   // (see §2.2). The injected `now` factory keeps TTL math deterministic in
   // tests; the ULID generator is seeded from the same clock so a fake clock
   // yields reproducible session ids too.
+  //
+  // Tests can also supply a pre-built registry via `opts.sessionRegistry`
+  // to simulate transport reconnect within the same process — the same
+  // registry threaded into a fresh `McpServer` keeps the in-memory session
+  // alive across the disconnect, matching test 19's DoD.
   const now = opts.now ?? ((): Date => new Date());
-  const sessionRegistry = new SessionRegistry(
-    opts.configDir,
-    () => newUlid(() => now().getTime()),
-    now,
-  );
+  const sessionRegistry =
+    opts.sessionRegistry ??
+    new SessionRegistry(opts.configDir, () => newUlid(() => now().getTime()), now);
 
-  const config: ServerConfig = { ...opts, graphClient, sessionRegistry };
+  const config: ServerConfig = {
+    ...opts,
+    graphClient,
+    sessionRegistry,
+    // Lazy reader: mcpServer.server.getClientVersion() returns the
+    // client's `Implementation` record after `initialize`. Tests can
+    // override this via opts.getClientInfo (e.g. to simulate a client
+    // sending an empty `name` — see test 21).
+    getClientInfo:
+      opts.getClientInfo ??
+      ((): { name?: string; version?: string } | undefined => {
+        const impl = mcpServer.server.getClientVersion();
+        if (impl === undefined) return undefined;
+        return { name: impl.name, version: impl.version };
+      }),
+  };
 
   // Register all tools and collect entries for dynamic state management
   const registry: ToolEntry[] = [

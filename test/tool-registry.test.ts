@@ -198,6 +198,14 @@ describe("buildInstructions", () => {
     expect(text).toContain("login");
   });
 
+  it("includes collab session guidance (W5 Day 3 scope-gate polish)", () => {
+    const text = buildInstructions(defs);
+    expect(text).toContain("session_init_project");
+    expect(text).toContain("session_open_project");
+    expect(text).toContain("session_renew");
+    expect(text).toContain("COLLAB WORKFLOW:");
+  });
+
   it("mentions dynamic scope-based discovery", () => {
     const text = buildInstructions(defs);
     expect(text).toContain("dynamically enabled");

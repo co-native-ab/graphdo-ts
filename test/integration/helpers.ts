@@ -91,7 +91,33 @@ export async function teardownIntegrationEnv(env: IntegrationEnv): Promise<void>
 export async function createTestClient(
   env: IntegrationEnv,
   authenticator: MockAuthenticator,
-  opts?: { openBrowser?: (url: string) => Promise<void>; now?: () => Date },
+  opts?: {
+    openBrowser?: (url: string) => Promise<void>;
+    now?: () => Date;
+    /**
+     * Override the MCP `clientInfo` payload reported via
+     * `ServerConfig.getClientInfo`. Used by `21-agent-name-unknown.test.ts`
+     * to simulate a client whose `clientInfo.name` is empty / missing
+     * (warn-once `agent_name_unknown` audit, W5 Day 3). Pass `null` to
+     * simulate a client that sent no `clientInfo` at all.
+     */
+    clientInfo?: { name?: string; version?: string } | null;
+    /**
+     * Pre-built {@link import("../../src/collab/session.js").SessionRegistry}
+     * threaded into the server. Used by `19-session-survives-reconnect.test.ts`
+     * to keep the in-memory session alive across a transport reconnect.
+     */
+    sessionRegistry?: import("../../src/collab/session.js").SessionRegistry;
+    /**
+     * Override the MCP `Client`'s own identity sent during `initialize`
+     * (defaults to `test-client` / `1.0.0`). Distinct from the
+     * {@link clientInfo} override above: `clientInfo` replaces what
+     * `ServerConfig.getClientInfo()` returns on the server side (used
+     * by the session registry to derive `agentId`); `testClientInfo`
+     * controls the wire payload the test `Client` actually sends.
+     */
+    testClientInfo?: { name: string; version: string };
+  },
 ): Promise<Client> {
   const server = await createMcpServer(
     {
@@ -100,12 +126,19 @@ export async function createTestClient(
       configDir: env.configDir,
       openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
       ...(opts?.now ? { now: opts.now } : {}),
+      ...(opts?.sessionRegistry ? { sessionRegistry: opts.sessionRegistry } : {}),
+      ...(opts?.clientInfo !== undefined
+        ? {
+            getClientInfo: (): { name?: string; version?: string } | undefined =>
+              opts.clientInfo === null ? undefined : opts.clientInfo,
+          }
+        : {}),
     },
     testSignal(),
   );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
-  const c = new Client({ name: "test-client", version: "1.0.0" });
+  const c = new Client(opts?.testClientInfo ?? { name: "test-client", version: "1.0.0" });
 
   await server.connect(serverTransport);
   await c.connect(clientTransport);

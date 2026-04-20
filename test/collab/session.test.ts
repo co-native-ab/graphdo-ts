@@ -285,7 +285,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "01JPROJECT00000000000000001",
         userOid: "00000000-0000-0000-0000-0000a3f2c891",
-        clientSlug: "claude-desktop",
+        clientName: "claude-desktop",
+        clientVersion: null,
         folderPath: "/Project Foo",
         authoritativeFileName: "spec.md",
       },
@@ -323,7 +324,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p1",
         userOid: "oid-1",
-        clientSlug: "vscode",
+        clientName: "vscode",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "y.md",
       },
@@ -345,7 +347,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
         ttlSeconds: 1, // way below MIN
@@ -359,7 +362,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
         ttlSeconds: 1_000_000, // way above MAX
@@ -376,7 +380,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
         destructiveBudget: 9999,
@@ -393,7 +398,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p1",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
       },
@@ -404,7 +410,8 @@ describe("SessionRegistry", () => {
         {
           projectId: "p2",
           userOid: "o",
-          clientSlug: "x",
+          clientName: "x",
+          clientVersion: null,
           folderPath: "/y",
           authoritativeFileName: "b.md",
         },
@@ -420,7 +427,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
         ttlSeconds: 60 * 60,
@@ -446,7 +454,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
       },
@@ -476,7 +485,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
         ttlSeconds: 60 * 60,
@@ -496,7 +506,8 @@ describe("SessionRegistry", () => {
       {
         projectId: "p",
         userOid: "o",
-        clientSlug: "x",
+        clientName: "x",
+        clientVersion: null,
         folderPath: "/x",
         authoritativeFileName: "a.md",
       },
