@@ -20,6 +20,7 @@ import { registerCollabApplyProposal, registerCollabCreateProposal } from "./pro
 import { registerCollabAcquireSection, registerCollabReleaseSection } from "./leases.js";
 import { registerCollabListVersions } from "./list-versions.js";
 import { registerCollabRestoreVersion } from "./restore-version.js";
+import { registerCollabDeleteFile } from "./delete.js";
 
 export { COLLAB_TOOL_DEFS } from "./shared.js";
 
@@ -42,5 +43,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
     registerCollabReleaseSection(server, config),
     registerCollabListVersions(server, config),
     registerCollabRestoreVersion(server, config),
+    registerCollabDeleteFile(server, config),
   ];
 }

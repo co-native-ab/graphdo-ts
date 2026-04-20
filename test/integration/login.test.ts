@@ -41,6 +41,7 @@ describe("integration: discovery & login", () => {
         "collab_acquire_section",
         "collab_apply_proposal",
         "collab_create_proposal",
+        "collab_delete_file",
         "collab_list_files",
         "collab_list_versions",
         "collab_read",
