@@ -94,9 +94,12 @@ export type FrontmatterSection = z.infer<typeof FrontmatterSectionSchema>;
 /**
  * Source of a proposal entry — the channel through which the proposing
  * agent received the request. Mirrors the `collab_create_proposal`
- * `source` parameter (W4 Day 2).
+ * `source` parameter (W4 Day 2) and the `collab_write.source` enum
+ * (`docs/plans/collab-v1.md` §2.3 / §5.2.4): `chat` = the human typed
+ * it this turn; `project` = read via `collab_read` in this session;
+ * `external` = anything else (web fetch, prior session, generated).
  */
-export const FrontmatterProposalSourceSchema = z.enum(["chat", "file", "agent"]);
+export const FrontmatterProposalSourceSchema = z.enum(["chat", "project", "external"]);
 
 /**
  * Lifecycle state of a proposal entry. `applied`/`superseded`/`withdrawn`

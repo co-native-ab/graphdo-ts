@@ -409,6 +409,35 @@ export class SectionAnchorLostError extends Error {
   }
 }
 
+/**
+ * Raised by `collab_create_proposal` (W4 Day 2) when the helper cannot
+ * find an unused proposal id (`/proposals/<ulid>.md`) inside its retry
+ * budget. ULIDs are randomised in the rightmost 80 bits, so a true
+ * collision is astronomically unlikely; in practice this surfaces as a
+ * persistent 409 from `conflictBehavior=fail` against the byPath PUT,
+ * almost certainly a bug or a misbehaving cooperator.
+ *
+ * Per `docs/plans/collab-v1.md` §2.3 the error is informational — the
+ * caller can simply retry the tool. Carries the project folder id and
+ * the most recent attempted proposal id so post-hoc analysis can locate
+ * the file (if any sneaked through outside the helper) and the number of
+ * attempts for telemetry.
+ */
+export class ProposalIdCollisionError extends Error {
+  constructor(
+    public readonly projectFolderId: string,
+    public readonly lastAttemptedProposalId: string,
+    public readonly attempts: number,
+  ) {
+    super(
+      `Could not create a proposal file under folder ${projectFolderId} ` +
+        `after ${String(attempts)} attempts (last id: ${lastAttemptedProposalId}). ` +
+        "Retry collab_create_proposal — the next ULID will almost certainly land.",
+    );
+    this.name = "ProposalIdCollisionError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but
