@@ -369,6 +369,46 @@ export class LeaseNotHeldError extends Error {
   }
 }
 
+/**
+ * Raised by `collab_apply_proposal` (W4 Day 3) when neither the
+ * proposal's recorded `target_section_slug` nor its
+ * `target_section_content_hash_at_create` matches any section in the
+ * current authoritative body.
+ *
+ * Per `docs/plans/collab-v1.md` §2.3 step 2e this is **distinct** from
+ * {@link SectionNotFoundError}: the proposal recorded *both* anchors
+ * at create time and *both* are now gone, so the human has either
+ * deleted or fundamentally rewritten the section between proposal
+ * creation and apply. Surface the old slug, the current heading slugs
+ * (so the agent can suggest a re-target), and the proposal id so the
+ * caller can decide between creating a fresh proposal and asking the
+ * human.
+ *
+ * Slug-drift fallback decisions are computed by
+ * {@link import("./collab/authorship.js").findSectionByAnchor} —
+ * `SectionAnchorLostError` is the terminal "neither anchor matched"
+ * outcome of that helper, raised by the tool layer when it lands.
+ */
+export class SectionAnchorLostError extends Error {
+  constructor(
+    public readonly proposalId: string,
+    public readonly oldSlug: string,
+    public readonly contentHashAtCreate: string,
+    public readonly currentSlugs: readonly string[],
+  ) {
+    const sample = currentSlugs.slice(0, 10).join(", ");
+    super(
+      `Cannot apply proposal ${proposalId}: neither the original section slug ` +
+        `"${oldSlug}" nor the section content hash recorded at create time matches ` +
+        `any current heading or section body. Current heading slugs: ` +
+        (currentSlugs.length === 0 ? "(no headings)" : sample) +
+        (currentSlugs.length > 10 ? ", … (truncated)" : "") +
+        ". Re-read the authoritative file with collab_read and consider creating a fresh proposal.",
+    );
+    this.name = "SectionAnchorLostError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but

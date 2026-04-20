@@ -1,5 +1,5 @@
 // Unit tests for the leases sidecar codec (`docs/plans/collab-v1.md`
-// §3.2.1) and the heading-slug helper (§3.1 steps 1–5).
+// §3.2.1). Slug-helper unit tests live in `test/collab/slug.test.ts`.
 
 import { describe, it, expect } from "vitest";
 
@@ -16,13 +16,6 @@ import {
   pruneExpiredLeases,
   serializeLeases,
 } from "../../src/collab/leases.js";
-import {
-  EMPTY_HEADING_SYNTHETIC_SLUG,
-  headingSlugSet,
-  normaliseSectionId,
-  slugifyHeading,
-  slugifyHeadings,
-} from "../../src/collab/slug.js";
 
 describe("collab/leases — file naming", () => {
   it("LEASES_FILE_NAME is exactly leases.json", () => {
@@ -198,82 +191,6 @@ describe("collab/leases — assertLeasesWithinCap", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Slug helper (§3.1 steps 1–5)
-// ---------------------------------------------------------------------------
-
-describe("collab/slug — slugifyHeading", () => {
-  it("lowercases ASCII headings", () => {
-    expect(slugifyHeading("Introduction")).toBe("introduction");
-  });
-
-  it("strips leading hashes and surrounding whitespace", () => {
-    expect(slugifyHeading("## Introduction")).toBe("introduction");
-    expect(slugifyHeading("####   Deeper Heading   ")).toBe("deeper-heading");
-  });
-
-  it("replaces whitespace runs with a single dash", () => {
-    expect(slugifyHeading("Hello   World  ")).toBe("hello-world");
-  });
-
-  it("ASCII-folds accented characters via NFKD", () => {
-    expect(slugifyHeading("Café au lait")).toBe("cafe-au-lait");
-  });
-
-  it("drops punctuation outside [a-z0-9-_]", () => {
-    expect(slugifyHeading("v1.0 (RC)!")).toBe("v10-rc");
-  });
-
-  it("preserves underscores and existing dashes", () => {
-    expect(slugifyHeading("snake_case-and-dashes")).toBe("snake_case-and-dashes");
-  });
-
-  it("collapses repeated dashes and trims them at the edges", () => {
-    expect(slugifyHeading("---weird---")).toBe("weird");
-  });
-
-  it("returns the synthetic slug for hash-only headings", () => {
-    expect(slugifyHeading("##")).toBe(EMPTY_HEADING_SYNTHETIC_SLUG);
-    expect(slugifyHeading("###    ")).toBe(EMPTY_HEADING_SYNTHETIC_SLUG);
-  });
-
-  it("returns the synthetic slug for headings that slugify to empty", () => {
-    expect(slugifyHeading("***")).toBe(EMPTY_HEADING_SYNTHETIC_SLUG);
-  });
-});
-
-describe("collab/slug — slugifyHeadings", () => {
-  it("collects ATX headings in source order", () => {
-    const body = "# Top\n\n## Middle\n\nbody text\n\n### Bottom\n";
-    expect(slugifyHeadings(body)).toEqual(["top", "middle", "bottom"]);
-  });
-
-  it("applies the collision walk on duplicate slugs", () => {
-    const body = "# Same\n\n## Same\n\n### Same\n";
-    expect(slugifyHeadings(body)).toEqual(["same", "same-1", "same-2"]);
-  });
-
-  it("ignores setext headings (only ATX is parsed in v1)", () => {
-    const body = "Top\n===\n\n# ATX\n";
-    expect(slugifyHeadings(body)).toEqual(["atx"]);
-  });
-
-  it("ignores non-heading lines", () => {
-    expect(slugifyHeadings("# Real\nplain prose\n## Also real\n")).toEqual(["real", "also-real"]);
-  });
-});
-
-describe("collab/slug — headingSlugSet + normaliseSectionId", () => {
-  it("headingSlugSet returns unique post-collision slugs", () => {
-    const set = headingSlugSet("# Same\n## Same\n");
-    expect(set.has("same")).toBe(true);
-    expect(set.has("same-1")).toBe(true);
-    expect(set.size).toBe(2);
-  });
-
-  it("normaliseSectionId accepts raw headings or slugs", () => {
-    expect(normaliseSectionId("introduction")).toBe("introduction");
-    expect(normaliseSectionId("## Introduction")).toBe("introduction");
-    expect(normaliseSectionId("Introduction")).toBe("introduction");
-  });
-});
+// Slug helper unit tests live in `test/collab/slug.test.ts` (extracted
+// in W4 Day 1 alongside the §3.1 step-6 preamble synthetic + the
+// {@link walkSections} body partitioner used by the authorship codec).
