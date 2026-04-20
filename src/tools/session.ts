@@ -61,7 +61,7 @@ import {
 } from "../collab/projects.js";
 import { NoActiveSessionError, SessionAlreadyActiveError } from "../collab/session.js";
 import { newUlid } from "../collab/ulid.js";
-import { writeAudit } from "../collab/audit.js";
+import { writeAudit, AuditResult } from "../collab/audit.js";
 import { listRootFolders } from "../graph/markdown.js";
 
 import { acquireFormSlot } from "./collab-forms.js";
@@ -451,7 +451,7 @@ async function runInitProject(
       userOid: sessionSnapshot.userOid,
       projectId: sessionSnapshot.projectId,
       tool: "session_init_project",
-      result: "success",
+      result: AuditResult.Success,
       type: "session_start",
       details: {
         ttlSeconds: sessionSnapshot.ttlSeconds,

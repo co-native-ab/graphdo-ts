@@ -59,8 +59,45 @@ import {
   splitFrontmatter,
   type CollabFrontmatter,
   type FrontmatterResetAudit,
+  type FrontmatterResetReason,
 } from "../collab/frontmatter.js";
-import { writeAudit, type AuditInputSummary } from "../collab/audit.js";
+import {
+  writeAudit,
+  AuditApprovalOutcome,
+  AuditConflictMode,
+  AuditFrontmatterResetReason,
+  AuditResult,
+  AuditWriteSource,
+  type AuditInputSummary,
+} from "../collab/audit.js";
+
+/**
+ * Map the canonical {@link FrontmatterResetReason} string union onto the
+ * audit enum so the writer's discriminated-union schema accepts the
+ * value without losing the string-equality contract.
+ */
+function toAuditResetReason(reason: FrontmatterResetReason): AuditFrontmatterResetReason {
+  return reason === "missing"
+    ? AuditFrontmatterResetReason.Missing
+    : AuditFrontmatterResetReason.Malformed;
+}
+
+/** Map the zod-typed `source` literal onto the audit enum. */
+function toAuditWriteSource(source: "chat" | "project" | "external"): AuditWriteSource {
+  switch (source) {
+    case "chat":
+      return AuditWriteSource.Chat;
+    case "project":
+      return AuditWriteSource.Project;
+    case "external":
+      return AuditWriteSource.External;
+  }
+}
+
+/** Map the zod-typed `conflictMode` literal onto the audit enum. */
+function toAuditConflictMode(mode: "fail" | "proposal"): AuditConflictMode {
+  return mode === "fail" ? AuditConflictMode.Fail : AuditConflictMode.Proposal;
+}
 import { parse as yamlParseRaw } from "yaml";
 import { startBrowserPicker } from "../picker.js";
 import { acquireFormSlot } from "./collab-forms.js";
@@ -861,10 +898,10 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
                     userOid: session.userOid,
                     projectId: metadata.projectId,
                     tool: "collab_read",
-                    result: "success",
+                    result: AuditResult.Success,
                     type: "frontmatter_reset",
                     details: {
-                      reason: readResult.reason,
+                      reason: toAuditResetReason(readResult.reason),
                       previousRevision: resolvedItem.cTag ?? null,
                       recoveredDocId: metadata.docId !== null,
                     },
@@ -1366,13 +1403,13 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
                     userOid: session.userOid,
                     projectId: metadata.projectId,
                     tool: "collab_write",
-                    result: "failure",
+                    result: AuditResult.Failure,
                     intent,
                     type: "external_source_approval",
                     details: {
                       tool: "collab_write",
                       path,
-                      outcome: "declined",
+                      outcome: AuditApprovalOutcome.Declined,
                       csrfTokenMatched: true,
                     },
                   },
@@ -1392,13 +1429,13 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
                 userOid: session.userOid,
                 projectId: metadata.projectId,
                 tool: "collab_write",
-                result: "success",
+                result: AuditResult.Success,
                 intent,
                 type: "external_source_approval",
                 details: {
                   tool: "collab_write",
                   path,
-                  outcome: "approved",
+                  outcome: AuditApprovalOutcome.Approved,
                   csrfTokenMatched: true,
                 },
               },
@@ -1491,9 +1528,13 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
                 userOid: session.userOid,
                 projectId: metadata.projectId,
                 tool: "collab_write",
-                result: "success",
+                result: AuditResult.Success,
                 type: "frontmatter_reset",
-                details: frontmatterReset,
+                details: {
+                  reason: toAuditResetReason(frontmatterReset.reason),
+                  previousRevision: frontmatterReset.previousRevision,
+                  recoveredDocId: frontmatterReset.recoveredDocId,
+                },
               },
               signal,
             );
@@ -1504,8 +1545,8 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           // again); content / body / rationale never reach disk.
           const inputSummary: AuditInputSummary = {
             path,
-            source,
-            conflictMode,
+            source: toAuditWriteSource(source),
+            conflictMode: toAuditConflictMode(conflictMode),
             contentSizeBytes: bytes,
           };
           await writeAudit(
@@ -1516,7 +1557,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
               userOid: session.userOid,
               projectId: metadata.projectId,
               tool: "collab_write",
-              result: "success",
+              result: AuditResult.Success,
               intent,
               type: "tool_call",
               details: {
@@ -1525,7 +1566,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
                 cTagAfter: updated.cTag ?? null,
                 revisionAfter: updated.version ?? null,
                 bytes,
-                source,
+                source: toAuditWriteSource(source),
                 resolvedItemId: updated.id,
               },
             },

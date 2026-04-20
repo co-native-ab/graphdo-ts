@@ -24,11 +24,11 @@
 // to failing a tool call.
 
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
 import { logger } from "../logger.js";
+import { appendFileOptions, mkdirOptions } from "../fs-options.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -51,6 +51,75 @@ export const AUDIT_UNSCOPED_FILE_NAME = "_unscoped.jsonl";
 
 /** Subdirectory under `<configDir>/sessions/`. */
 export const AUDIT_DIR_NAME = "audit";
+
+// ---------------------------------------------------------------------------
+// Envelope enums
+// ---------------------------------------------------------------------------
+//
+// Per the codebase convention (see {@link import("../scopes.js").GraphScope},
+// {@link import("../graph/client.js").HttpMethod},
+// {@link import("../graph/markdown.js").MarkdownFolderEntryKind},
+// {@link import("../tools/collab.js").DocIdSource}), audit-envelope
+// discriminator strings are modelled as TypeScript string enums. The
+// values match the §3.6 wire format byte-for-byte so JSON.stringify
+// produces the documented schema and consumers (e.g. operators
+// reviewing JSONL on disk) see the canonical lower-case strings.
+
+/** Tool source classification per §5.2.4. */
+export enum AuditWriteSource {
+  Chat = "chat",
+  Project = "project",
+  External = "external",
+}
+
+/** `collab_write.conflictMode` reflected into audit. */
+export enum AuditConflictMode {
+  Fail = "fail",
+  Proposal = "proposal",
+}
+
+/** Why a session ended (§3.6 `session_end`). */
+export enum AuditSessionEndReason {
+  Ttl = "ttl",
+  Budget = "budget",
+  McpShutdown = "mcp_shutdown",
+  ManualStop = "manual_stop",
+}
+
+/** Outcome of a re-prompt form (destructive / external-source). */
+export enum AuditApprovalOutcome {
+  Approved = "approved",
+  Declined = "declined",
+  Timeout = "timeout",
+}
+
+/** Top-level result marker for an envelope. */
+export enum AuditResult {
+  Success = "success",
+  Failure = "failure",
+}
+
+/** Why a `frontmatter_reset` envelope was emitted. Mirrors {@link import("./frontmatter.js").FrontmatterResetReason}. */
+export enum AuditFrontmatterResetReason {
+  Missing = "missing",
+  Malformed = "malformed",
+}
+
+/** What anchored a `slug_drift_resolved` recovery. */
+export enum AuditMatchedBy {
+  ContentHash = "content_hash",
+}
+
+/**
+ * Which field the cap cascade dropped to fit a line under
+ * {@link AUDIT_MAX_LINE_BYTES}. {@link AuditTruncationStage.None}
+ * is the no-op state set on the happy path.
+ */
+export enum AuditTruncationStage {
+  None = "none",
+  InputSummary = "inputSummary",
+  Intent = "intent",
+}
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -81,8 +150,8 @@ export function auditFilePath(configDir: string, projectId: string | null): stri
  */
 export interface AuditInputSummary {
   path?: string;
-  source?: "chat" | "project" | "external";
-  conflictMode?: "fail" | "proposal";
+  source?: AuditWriteSource;
+  conflictMode?: AuditConflictMode;
   contentSizeBytes?: number;
   sectionId?: string;
   proposalId?: string;
@@ -100,7 +169,7 @@ export interface SessionStartDetails {
 }
 
 export interface SessionEndDetails {
-  reason: "ttl" | "budget" | "mcp_shutdown" | "manual_stop";
+  reason: AuditSessionEndReason;
   writesUsed: number;
   renewalsUsed: number;
 }
@@ -111,7 +180,7 @@ export interface ToolCallDetails {
   cTagAfter?: string | null;
   revisionAfter?: number | string | null;
   bytes?: number;
-  source?: "chat" | "project" | "external";
+  source?: AuditWriteSource;
   resolvedItemId?: string;
 }
 
@@ -123,7 +192,7 @@ export interface ScopeDeniedDetails {
 
 export interface DestructiveApprovalDetails {
   tool: string;
-  outcome: "approved" | "declined" | "timeout";
+  outcome: AuditApprovalOutcome;
   diffSummaryHash: string;
   csrfTokenMatched: boolean;
 }
@@ -138,12 +207,12 @@ export interface RenewalDetails {
 export interface ExternalSourceApprovalDetails {
   tool: string;
   path: string;
-  outcome: "approved" | "declined" | "timeout";
+  outcome: AuditApprovalOutcome;
   csrfTokenMatched: boolean;
 }
 
 export interface FrontmatterResetDetails {
-  reason: "missing" | "malformed";
+  reason: AuditFrontmatterResetReason;
   previousRevision: string | number | null;
   recoveredDocId: boolean;
 }
@@ -152,7 +221,7 @@ export interface SlugDriftResolvedDetails {
   proposalId: string;
   oldSlug: string;
   newSlug: string;
-  matchedBy: "content_hash";
+  matchedBy: AuditMatchedBy;
 }
 
 export interface DocIdRecoveredDetails {
@@ -201,7 +270,7 @@ export interface AuditEnvelopeBase {
   /** Tool name (e.g. `"collab_write"`). Optional for non-tool events. */
   tool?: string;
   /** Outcome marker for the envelope. */
-  result?: "success" | "failure";
+  result?: AuditResult;
   /**
    * Free-text intent shown on re-prompt forms. Truncated to
    * {@link AUDIT_INTENT_MAX_CHARS} after NFKC normalisation and control-
@@ -312,8 +381,8 @@ interface BuiltEnvelope {
   line: string;
   /** Bytes of `line` (utf-8). */
   bytes: number;
-  /** Whether the writer dropped fields to fit under the cap. */
-  truncated: false | "inputSummary" | "intent";
+  /** Which field (if any) the cap cascade had to drop. */
+  truncated: AuditTruncationStage;
   /** Whether the envelope was replaced by a smaller `error` envelope. */
   replaced: boolean;
 }
@@ -353,7 +422,7 @@ export function buildAuditLine(envelope: AuditEnvelope, now: Date): BuiltEnvelop
     return {
       line: serialised + "\n",
       bytes: byteLength(serialised) + 1,
-      truncated: false,
+      truncated: AuditTruncationStage.None,
       replaced: false,
     };
   }
@@ -368,7 +437,7 @@ export function buildAuditLine(envelope: AuditEnvelope, now: Date): BuiltEnvelop
       return {
         line: serialised + "\n",
         bytes: byteLength(serialised) + 1,
-        truncated: "inputSummary",
+        truncated: AuditTruncationStage.InputSummary,
         replaced: false,
       };
     }
@@ -382,7 +451,7 @@ export function buildAuditLine(envelope: AuditEnvelope, now: Date): BuiltEnvelop
     return {
       line: serialised + "\n",
       bytes: byteLength(serialised) + 1,
-      truncated: "intent",
+      truncated: AuditTruncationStage.Intent,
       replaced: false,
     };
   }
@@ -401,7 +470,7 @@ export function buildAuditLine(envelope: AuditEnvelope, now: Date): BuiltEnvelop
   return {
     line: serialised + "\n",
     bytes: byteLength(serialised) + 1,
-    truncated: "intent",
+    truncated: AuditTruncationStage.Intent,
     replaced: true,
   };
 }
@@ -548,7 +617,7 @@ export async function writeAudit(
     });
     return;
   }
-  if (built.truncated !== false) {
+  if (built.truncated !== AuditTruncationStage.None) {
     logger.warn("audit envelope truncated to fit cap", {
       type: envelope.type,
       projectId: envelope.projectId,
@@ -561,21 +630,14 @@ export async function writeAudit(
   const filePath = auditFilePath(config.configDir, envelope.projectId);
   try {
     const dir = path.dirname(filePath);
-    const isWindows = os.platform() === "win32";
-    const mkdirOptions: Parameters<typeof fs.mkdir>[1] = isWindows
-      ? { recursive: true }
-      : { recursive: true, mode: 0o700 };
-    await fs.mkdir(dir, mkdirOptions);
+    await fs.mkdir(dir, mkdirOptions());
     // O_APPEND is implied by `flag: "a"`. Per POSIX, writes ≤
     // PIPE_BUF are atomic across concurrent appenders.
     // Note: `fs.appendFile` does not accept an AbortSignal in this Node
     // typings version; the caller already aborted-checked above so a
     // late-arriving signal will surface from `mkdir` / `appendFile` as
     // an `AbortError` and be swallowed by the outer catch below.
-    const appendOptions: Parameters<typeof fs.appendFile>[2] = isWindows
-      ? { encoding: "utf-8" as const, flag: "a" }
-      : { encoding: "utf-8" as const, flag: "a", mode: 0o600 };
-    await fs.appendFile(filePath, built.line, appendOptions);
+    await fs.appendFile(filePath, built.line, appendFileOptions());
   } catch (err: unknown) {
     logger.warn("audit append failed", {
       type: envelope.type,

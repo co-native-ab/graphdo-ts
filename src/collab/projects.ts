@@ -22,7 +22,6 @@
 // any time and we never want a half-written JSON file on disk.
 
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
@@ -30,6 +29,7 @@ import { z } from "zod";
 
 import { logger } from "../logger.js";
 import { isNodeError } from "../errors.js";
+import { mkdirOptions, writeFileOptions } from "../fs-options.js";
 
 // ---------------------------------------------------------------------------
 // Constants & paths
@@ -161,20 +161,13 @@ async function writeJsonAtomic(
   if (signal.aborted) throw signal.reason;
 
   const dir = path.dirname(filePath);
-  const isWindows = os.platform() === "win32";
-  const mkdirOptions: Parameters<typeof fs.mkdir>[1] = isWindows
-    ? { recursive: true }
-    : { recursive: true, mode: 0o700 };
-  await fs.mkdir(dir, mkdirOptions);
+  await fs.mkdir(dir, mkdirOptions());
 
   const body = JSON.stringify(data, null, 2) + "\n";
   const tmpFile = path.join(dir, `.${path.basename(filePath)}-${crypto.randomUUID()}.tmp`);
 
   try {
-    const writeOptions: Parameters<typeof fs.writeFile>[2] = isWindows
-      ? { encoding: "utf-8" as const, signal }
-      : { encoding: "utf-8" as const, mode: 0o600, signal };
-    await fs.writeFile(tmpFile, body, writeOptions);
+    await fs.writeFile(tmpFile, body, writeFileOptions(signal));
     await fs.rename(tmpFile, filePath);
   } catch (err) {
     try {

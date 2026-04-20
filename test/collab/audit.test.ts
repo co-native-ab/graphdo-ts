@@ -25,6 +25,12 @@ import {
   AUDIT_INTENT_MAX_CHARS,
   AUDIT_MAX_LINE_BYTES,
   AUDIT_SCHEMA_VERSION,
+  AuditApprovalOutcome,
+  AuditFrontmatterResetReason,
+  AuditResult,
+  AuditSessionEndReason,
+  AuditTruncationStage,
+  AuditWriteSource,
   auditDir,
   auditFilePath,
   buildAuditLine,
@@ -55,15 +61,19 @@ const sampleEnvelope = (overrides: Partial<AuditEnvelope> = {}): AuditEnvelope =
     userOid: "00000000-0000-0000-0000-0000a3f2c891",
     projectId: "01JABCDE0FGHJKMNPQRSTV0WXY" as string | null,
     tool: "collab_write",
-    result: "success" as "success" | "failure",
+    result: AuditResult.Success,
     type: "tool_call" as const,
     details: {
-      inputSummary: { path: "spec.md", source: "chat", contentSizeBytes: 42 } as const,
+      inputSummary: {
+        path: "spec.md",
+        source: AuditWriteSource.Chat,
+        contentSizeBytes: 42,
+      },
       cTagBefore: '"c:1,1"',
       cTagAfter: '"c:1,2"',
       revisionAfter: 2,
       bytes: 42,
-      source: "chat" as const,
+      source: AuditWriteSource.Chat,
       resolvedItemId: "file-spec",
     },
   } satisfies AuditEnvelope;
@@ -210,7 +220,7 @@ describe("buildAuditLine", () => {
     expect(parsed["projectId"]).toBe(envelope.projectId);
     expect(parsed["tool"]).toBe("collab_write");
     expect(parsed["result"]).toBe("success");
-    expect(built.truncated).toBe(false);
+    expect(built.truncated).toBe(AuditTruncationStage.None);
     expect(built.line.endsWith("\n")).toBe(true);
   });
 
@@ -279,7 +289,7 @@ describe("buildAuditLine", () => {
     } as AuditEnvelope;
     const built = buildAuditLine(envelope, new Date());
     expect(built.bytes).toBeLessThanOrEqual(AUDIT_MAX_LINE_BYTES);
-    expect(built.truncated).toBe("inputSummary");
+    expect(built.truncated).toBe(AuditTruncationStage.InputSummary);
     expect(built.replaced).toBe(false);
     const parsed = JSON.parse(built.line.trimEnd()) as {
       details: { inputSummary: { truncated: boolean } };
@@ -476,7 +486,7 @@ describe("writeAudit per-type round-trip", () => {
       userOid: "u",
       projectId: "p",
       type: "session_end",
-      details: { reason: "ttl", writesUsed: 3, renewalsUsed: 0 },
+      details: { reason: AuditSessionEndReason.Ttl, writesUsed: 3, renewalsUsed: 0 },
     },
     {
       sessionId: "s",
@@ -484,7 +494,11 @@ describe("writeAudit per-type round-trip", () => {
       userOid: "u",
       projectId: "p",
       type: "frontmatter_reset",
-      details: { reason: "missing", previousRevision: 1, recoveredDocId: true },
+      details: {
+        reason: AuditFrontmatterResetReason.Missing,
+        previousRevision: 1,
+        recoveredDocId: true,
+      },
     },
     {
       sessionId: "s",
@@ -495,7 +509,7 @@ describe("writeAudit per-type round-trip", () => {
       details: {
         tool: "collab_write",
         path: "spec.md",
-        outcome: "approved",
+        outcome: AuditApprovalOutcome.Approved,
         csrfTokenMatched: true,
       },
     },
