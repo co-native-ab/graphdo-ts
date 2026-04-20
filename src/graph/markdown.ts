@@ -830,6 +830,29 @@ export async function downloadDriveItemVersionContent(
 }
 
 /**
+ * Restore a historical version of a drive item to be the current
+ * version. Wraps `POST /me/drive/items/{id}/versions/{vid}/restoreVersion`.
+ *
+ * Real OneDrive returns HTTP 204 No Content on success and snapshots
+ * the previous current version into `/versions` so the restore is
+ * itself reversible.
+ *
+ * See https://learn.microsoft.com/en-us/graph/api/driveitem-restoreversion.
+ */
+export async function restoreDriveItemVersion(
+  client: GraphClient,
+  itemId: ValidatedGraphId,
+  versionId: ValidatedGraphId,
+  signal: AbortSignal,
+): Promise<void> {
+  const path =
+    `/me/drive/items/${encodeURIComponent(itemId)}` +
+    `/versions/${encodeURIComponent(versionId)}/restoreVersion`;
+  logger.debug("restoring drive item version", { itemId, versionId });
+  await client.request(HttpMethod.POST, path, signal);
+}
+
+/**
  * Error raised when a caller references a revision that does not exist for
  * the given file — neither as the current `version` nor in the `/versions`
  * history list. Distinct from `GraphRequestError` so tool handlers can

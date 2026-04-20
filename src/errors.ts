@@ -159,6 +159,40 @@ export class DocIdAlreadyKnownError extends Error {
 }
 
 /**
+ * Raised by `session_recover_doc_id` (W5 Day 1) when the version walk
+ * cap is exhausted without finding a single historical version whose
+ * frontmatter parses cleanly and carries a `doc_id`.
+ *
+ * Per `docs/plans/collab-v1.md` §2.2 the project is then "effectively
+ * dead" — no automated recovery is possible. The human's only option
+ * is to start fresh with `session_init_project` against a copy of the
+ * folder under a new name; the new project gets a new id and the old
+ * audit log is archived rather than continued.
+ *
+ * The error name and `nextStep` field appear verbatim in §2.6
+ * (typed-error table) so callers can pattern-match without importing
+ * the class.
+ */
+export class DocIdUnrecoverableError extends Error {
+  /** Stable identifier the human should follow — never localised. */
+  public readonly nextStep = "init_fresh_project" as const;
+
+  constructor(
+    public readonly projectId: string,
+    public readonly versionsInspected: number,
+  ) {
+    super(
+      `No historical version of the authoritative file for project ${projectId} ` +
+        `had parseable collab frontmatter (inspected ${String(versionsInspected)} ` +
+        "versions). The project's doc_id cannot be recovered automatically. " +
+        "Start a fresh project with session_init_project against a copy of the " +
+        "folder under a new name; the old audit log is archived rather than continued.",
+    );
+    this.name = "DocIdUnrecoverableError";
+  }
+}
+
+/**
  * Refusal reasons emitted by the §4.6 scope resolution algorithm. Each
  * value is a stable identifier so downstream callers (the `scope_denied`
  * audit entry — §3.6, the agent-facing message, and post-hoc analysis)

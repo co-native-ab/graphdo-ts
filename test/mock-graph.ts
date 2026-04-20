@@ -1047,6 +1047,61 @@ async function handleDriveRequest(
     return true;
   }
 
+  // POST /me/drive/items/{id}/versions/{versionId}/restoreVersion
+  // Snapshots the current content into /versions and overwrites the
+  // current content from the named historical version. Real OneDrive
+  // returns HTTP 204 No Content.
+  if (
+    method === "POST" &&
+    segments.length === 7 &&
+    segments[4] === "versions" &&
+    segments[6] === "restoreVersion"
+  ) {
+    const versionId = decodeURIComponent(segments[5] ?? "");
+    const file = findMockFile(state, itemId);
+    if (file?.content === undefined) {
+      errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+      return true;
+    }
+    // Trigger lazy version assignment for the current version.
+    driveItemView(file, state);
+    if (file.version !== undefined && file.version === versionId) {
+      // Restoring the current version is a no-op in real OneDrive.
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+    const versions = state.driveItemVersions.get(itemId) ?? [];
+    const target = versions.find((v) => v.id === versionId);
+    if (!target) {
+      errorResponse(res, 404, "itemNotFound", `version ${versionId} of item ${itemId} not found`);
+      return true;
+    }
+    // Snapshot the prior current content as a new historical version
+    // so the restore is itself reversible (matches real OneDrive).
+    const priorContent = file.content;
+    const priorVersion = file.version;
+    const priorEntry: MockDriveItemVersion = {
+      id: priorVersion ?? state.genVersionId(),
+      lastModifiedDateTime: file.lastModifiedDateTime ?? new Date().toISOString(),
+      size: Buffer.byteLength(priorContent, "utf-8"),
+      content: priorContent,
+    };
+    const list = state.driveItemVersions.get(itemId) ?? [];
+    list.unshift(priorEntry);
+    state.driveItemVersions.set(itemId, list);
+
+    file.content = target.content;
+    file.size = Buffer.byteLength(target.content, "utf-8");
+    file.lastModifiedDateTime = new Date().toISOString();
+    file.cTag = state.genCTag(itemId);
+    file.version = state.genVersionId();
+
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
   // POST /me/drive/items/{folderId}/children — create a child folder.
   // Used by the collab `session_init_project` flow to create the
   // `.collab/` subfolder under the chosen project root. Honours
