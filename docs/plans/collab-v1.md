@@ -2565,6 +2565,21 @@ list.test.ts` end-to-end happy path.
 - **W4 Day 5 — `session_renew` + renewal caps.** Renewal counts
   file with rolling-window pruning. Fake-clock test infra. DoD:
   `11-renewal-caps.test.ts` passes.
+- **W4 buffer (one day from the W6 reserve) — refactor
+  `src/tools/collab.ts`.** The file grew to 3294 LOC by the end of
+  W4 Day 3 (read + list + write + create-proposal + apply-proposal
+  - lease tools + their helpers in one module) and review feedback
+    on PR #53 flagged it as going out of control. Split it into
+    per-tool modules under `src/tools/collab/`:
+    `read.ts`, `list-files.ts`, `write.ts`,
+    `proposal.ts` (create + apply + the shared `runProposalWrite`
+    helper), `leases.ts`, `shared.ts` (re-prompt helpers, scope check,
+    frontmatter resolve, formatting), and an `index.ts` that
+    re-exports `COLLAB_TOOL_DEFS` and `registerCollabTools`.
+    Pure code-organisation; no behaviour change, no new tests, no
+    public-API churn. DoD: each new module ≤ ~600 LOC, `npm run
+check` stays green at the same test count, the tool registration
+    envelope (names, schemas, errors) is byte-identical.
 
 ### Week 5 — versions + delete + polish
 
@@ -2610,8 +2625,10 @@ two independent observations:
    Better to budget for it now than to rediscover it at code
    review.
 
-If W1–W5 land on schedule, W6 is for follow-up issues found in
-internal dogfooding before announcing v1.
+One day of W6 reserve has been earmarked for the W4 buffer
+refactor of `src/tools/collab.ts` (see W4 above). If W1–W5
+otherwise land on schedule, the remainder of W6 is for follow-up
+issues found in internal dogfooding before announcing v1.
 
 Total estimate, stated arithmetically so it can't be misread:
 
