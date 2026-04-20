@@ -124,7 +124,7 @@ export class NoActiveSessionError extends Error {
     super(
       "No active collab session in this MCP instance. " +
         "Call session_init_project (originator) or session_open_project " +
-        "(collaborator) first. After starting a session, retry this tool.",
+        "(collaborator) first, then retry the original operation.",
     );
     this.name = "NoActiveSessionError";
   }

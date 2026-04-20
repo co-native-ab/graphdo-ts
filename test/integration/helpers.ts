@@ -108,7 +108,14 @@ export async function createTestClient(
      * to keep the in-memory session alive across a transport reconnect.
      */
     sessionRegistry?: import("../../src/collab/session.js").SessionRegistry;
-    /** Override the test client's `clientInfo` (defaults to `test-client / 1.0.0`). */
+    /**
+     * Override the MCP `Client`'s own identity sent during `initialize`
+     * (defaults to `test-client` / `1.0.0`). Distinct from the
+     * {@link clientInfo} override above: `clientInfo` replaces what
+     * `ServerConfig.getClientInfo()` returns on the server side (used
+     * by the session registry to derive `agentId`); `testClientInfo`
+     * controls the wire payload the test `Client` actually sends.
+     */
     testClientInfo?: { name: string; version: string };
   },
 ): Promise<Client> {
