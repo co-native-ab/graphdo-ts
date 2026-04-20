@@ -2,7 +2,7 @@
 //
 // Validates that `session_open_project`'s URL-paste resolution refuses
 // attacker-controlled URLs before issuing any Graph call. The allow-list
-// (§4.4 lines 1799–1807) accepts only:
+// (§4.4) accepts only:
 //
 //   - `*.sharepoint.com`
 //   - `*-my.sharepoint.com`

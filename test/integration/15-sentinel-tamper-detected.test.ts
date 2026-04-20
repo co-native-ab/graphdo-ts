@@ -144,17 +144,14 @@ describe("15-sentinel-tamper-detected", () => {
   });
 
   describe("Variant C — folder moved", () => {
+    // The full silent folderPath-refresh integration row lives in the
+    // `session_open_project` integration suite (driven via the mock
+    // Graph's `?$select=parentReference,name` handler in
+    // `test/mock-graph.ts`). The codec-level invariant guarded here —
+    // that the pin is id-based, not path-based — is already covered by
+    // Variant A above.
     it.todo(
-      "after `session_open_project` lands (W4 Day 4): silent folderPath refresh in recents and local metadata when the project folder is moved to a new parent",
+      "session_open_project integration: silent folderPath refresh in recents and local metadata when the project folder is moved",
     );
-
-    it("silent folderPath refresh updates metadata without audit entry", () => {
-      // This variant is tested in the integration suite (test 18) where we
-      // can drive the full session_open_project flow and verify the
-      // folderPath refresh happens silently. The codec-level invariant
-      // (the pin is id-based, not path-based) is already covered by
-      // Variant A above.
-      expect(true).toBe(true);
-    });
   });
 });
