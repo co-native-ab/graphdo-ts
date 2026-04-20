@@ -18,6 +18,8 @@ import { registerCollabListFiles } from "./list-files.js";
 import { registerCollabWrite } from "./write.js";
 import { registerCollabApplyProposal, registerCollabCreateProposal } from "./proposal.js";
 import { registerCollabAcquireSection, registerCollabReleaseSection } from "./leases.js";
+import { registerCollabListVersions } from "./list-versions.js";
+import { registerCollabRestoreVersion } from "./restore-version.js";
 
 export { COLLAB_TOOL_DEFS } from "./shared.js";
 
@@ -38,5 +40,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
     registerCollabApplyProposal(server, config),
     registerCollabAcquireSection(server, config),
     registerCollabReleaseSection(server, config),
+    registerCollabListVersions(server, config),
+    registerCollabRestoreVersion(server, config),
   ];
 }

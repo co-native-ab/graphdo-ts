@@ -19,6 +19,7 @@ import { GraphScope } from "../../scopes.js";
 import { GraphClient } from "../../graph/client.js";
 import { validateGraphId, type ValidatedGraphId } from "../../graph/ids.js";
 import type { DriveItem } from "../../graph/types.js";
+import { OutOfScopeError } from "../../errors.js";
 import { NoActiveSessionError } from "../../collab/session.js";
 import { loadProjectMetadata } from "../../collab/projects.js";
 import {
@@ -27,8 +28,9 @@ import {
   COLLAB_CONTENT_TYPE_MARKDOWN,
   createChildFolder,
   findChildFolderByName,
+  getDriveItem,
 } from "../../collab/graph.js";
-import { resolveScopedPath } from "../../collab/scope.js";
+import { MAX_ANCESTRY_HOPS, resolveScopedPath } from "../../collab/scope.js";
 import {
   AuditConflictMode,
   AuditFrontmatterResetReason,
@@ -181,6 +183,38 @@ export const COLLAB_RELEASE_SECTION_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+export const COLLAB_LIST_VERSIONS_DEF: ToolDef = {
+  name: "collab_list_versions",
+  title: "List Collab File Versions",
+  description:
+    "List historical versions of a file in the active project's scope, " +
+    "newest first. Provide either `path` (scope-relative) or `itemId` " +
+    "(from collab_list_files); when both are omitted the authoritative " +
+    "file is used. Read-only — does not count toward the write or " +
+    "destructive-approval budget. Each entry reports the opaque versionId, " +
+    "size, and last-modified timestamp; pass the versionId to " +
+    "collab_restore_version to roll the file back to that revision.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
+export const COLLAB_RESTORE_VERSION_DEF: ToolDef = {
+  name: "collab_restore_version",
+  title: "Restore Collab File Version",
+  description:
+    "Roll a file in the active project back to a previous revision via " +
+    "OneDrive's restoreVersion API. Provide `versionId` (from " +
+    "collab_list_versions) plus either `path` (scope-relative) or " +
+    "`itemId`; defaults to the authoritative file when both are omitted. " +
+    "When the target is the authoritative file the restore is destructive: " +
+    "a browser re-approval form is opened showing a unified diff between " +
+    "the current and the target revision; on approve the destructive " +
+    "budget is decremented. Counts as 1 write toward the session budget " +
+    "always. The authoritative file also requires `authoritativeCTag` " +
+    "(from collab_read) for optimistic-concurrency safety: a stale cTag " +
+    "raises CollabCTagMismatchError before the restore is issued.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 /** Static tool metadata for collab tools. */
 export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_READ_DEF,
@@ -190,6 +224,8 @@ export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_APPLY_PROPOSAL_DEF,
   COLLAB_ACQUIRE_SECTION_DEF,
   COLLAB_RELEASE_SECTION_DEF,
+  COLLAB_LIST_VERSIONS_DEF,
+  COLLAB_RESTORE_VERSION_DEF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -476,6 +512,81 @@ export async function ensureParentFolder(
 // ---------------------------------------------------------------------------
 // Misc helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Misc helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a `path` / `itemId` argument pair to a {@link DriveItem}.
+ *
+ * Used by the version tools (`collab_list_versions`,
+ * `collab_restore_version`) where addressing is interchangeable and
+ * defaults to the authoritative file when both are omitted. The return
+ * value carries `isAuthoritative` so the caller can apply the
+ * destructive-budget rules without a second comparison.
+ *
+ * `path` runs the full §4.6 scope algorithm via
+ * {@link scopeCheckedResolve}. `itemId` runs a lightweight ancestry
+ * walk capped at {@link import("../../collab/scope.js").MAX_ANCESTRY_HOPS}
+ * (matches the in-line check in `collab_read`). When both are
+ * undefined / empty the authoritative file is fetched directly via
+ * `getDriveItem` against the pinned id in the project metadata.
+ */
+export async function resolveTargetItem(
+  config: ServerConfig,
+  metadata: ProjectMetadata,
+  args: { path?: string; itemId?: string },
+  signal: AbortSignal,
+): Promise<{ item: DriveItem; isAuthoritative: boolean }> {
+  const { path, itemId } = args;
+  const hasPath = path !== undefined && path !== "";
+  const hasItemId = itemId !== undefined && itemId !== "";
+  if (hasPath && hasItemId) {
+    throw new Error("Provide either 'path' or 'itemId', not both.");
+  }
+
+  if (hasPath) {
+    const item = await scopeCheckedResolve(config, metadata, path, signal);
+    return { item, isAuthoritative: item.id === metadata.pinnedAuthoritativeFileId };
+  }
+
+  const token = await config.authenticator.token(signal);
+  const client = new GraphClient(config.graphBaseUrl, {
+    getToken: () => Promise.resolve(token),
+  });
+
+  if (!hasItemId) {
+    // Default to the authoritative file.
+    const validatedAuthoritative = validateGraphId(
+      "pinnedAuthoritativeFileId",
+      metadata.pinnedAuthoritativeFileId,
+    );
+    const item = await getDriveItem(client, validatedAuthoritative, signal);
+    return { item, isAuthoritative: true };
+  }
+
+  // itemId path — walk parentReference up to the project folder so the
+  // §4.6 scope guarantee holds even when the agent skips the path
+  // resolver. Hop cap matches `collab_read`'s in-line walk.
+  const validatedItemId = validateGraphId("itemId", itemId);
+  const item = await getDriveItem(client, validatedItemId, signal);
+  const projectFolderId = metadata.folderId;
+  let cursorParentId: string | undefined = item.parentReference?.id;
+  let foundAncestor = false;
+  for (let hop = 0; hop < MAX_ANCESTRY_HOPS && cursorParentId !== undefined; hop++) {
+    if (cursorParentId === projectFolderId) {
+      foundAncestor = true;
+      break;
+    }
+    const parent = await getDriveItem(client, validateGraphId("parentId", cursorParentId), signal);
+    cursorParentId = parent.parentReference?.id;
+  }
+  if (!foundAncestor) {
+    throw new OutOfScopeError(`itemId:${itemId}`, "ancestry_escape", item.id);
+  }
+  return { item, isAuthoritative: item.id === metadata.pinnedAuthoritativeFileId };
+}
 
 /**
  * Build a deduplicated list of human-readable labels for the prior
