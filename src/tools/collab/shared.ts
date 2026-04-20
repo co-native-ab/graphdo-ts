@@ -215,6 +215,23 @@ export const COLLAB_RESTORE_VERSION_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+export const COLLAB_DELETE_FILE_DEF: ToolDef = {
+  name: "collab_delete_file",
+  title: "Delete Collab File",
+  description:
+    "Permanently delete a non-authoritative file inside the active " +
+    "project's scope. Always destructive: a browser re-approval form is " +
+    "opened for every call and the destructive-approval budget is " +
+    "decremented on approve. Counts as 1 write toward the session " +
+    "budget. Accepts `path` (scope-relative — `proposals/<...>.md`, " +
+    "`drafts/<...>.md`, `attachments/<...>`); the authoritative `.md` " +
+    "file and the `.collab/` sentinel folder are always refused. " +
+    "Errors: RefuseDeleteAuthoritativeError, RefuseDeleteSentinelError, " +
+    "OutOfScopeError, FileNotFoundError, BudgetExhaustedError, " +
+    "DestructiveBudgetExhaustedError, DestructiveApprovalDeclinedError.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 /** Static tool metadata for collab tools. */
 export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_READ_DEF,
@@ -226,6 +243,7 @@ export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_RELEASE_SECTION_DEF,
   COLLAB_LIST_VERSIONS_DEF,
   COLLAB_RESTORE_VERSION_DEF,
+  COLLAB_DELETE_FILE_DEF,
 ];
 
 // ---------------------------------------------------------------------------
@@ -261,6 +279,38 @@ export class PathLayoutViolationError extends Error {
       `Path "${path}" does not match the allowed layout (root .md, proposals/, drafts/, attachments/).`,
     );
     this.name = "PathLayoutViolationError";
+  }
+}
+
+/**
+ * Raised by `collab_delete_file` when the caller targets the pinned
+ * authoritative markdown file. The authoritative file is the
+ * project's identity — deletion is never allowed, even with an
+ * explicit destructive approval. Plain `Error` per §2.5.
+ */
+export class RefuseDeleteAuthoritativeError extends Error {
+  constructor(public readonly path: string) {
+    super(
+      `Refusing to delete the authoritative file "${path}". The authoritative file ` +
+        "is the project's identity and cannot be removed via collab_delete_file.",
+    );
+    this.name = "RefuseDeleteAuthoritativeError";
+  }
+}
+
+/**
+ * Raised by `collab_delete_file` when the caller targets the
+ * `.collab/` sentinel folder or anything inside it. The sentinel
+ * carries `project.json` and `leases.json`; removing either would
+ * invalidate every active session. Plain `Error` per §2.5.
+ */
+export class RefuseDeleteSentinelError extends Error {
+  constructor(public readonly path: string) {
+    super(
+      `Refusing to delete "${path}" — paths inside the .collab/ sentinel folder ` +
+        "are protected. Use session_open_project on a fresh folder if the project is abandoned.",
+    );
+    this.name = "RefuseDeleteSentinelError";
   }
 }
 
