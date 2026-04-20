@@ -40,7 +40,7 @@ import { startBrowserPicker } from "../picker.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
-import { formatError } from "./shared.js";
+import { formatError, retryHintForPickerError } from "./shared.js";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -439,12 +439,9 @@ export function registerMarkdownTools(server: McpServer, config: ServerConfig): 
               content: [{ type: "text", text: "Markdown root folder selection cancelled." }],
             };
           }
-          const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
-          const retryHint = isTimeout
-            ? "\n\nThe user did not make a selection in time. " +
-              "You can call this tool again if the user would like to retry."
-            : "\n\nYou can call this tool again if the user would like to retry.";
-          return formatError("markdown_select_root_folder", err, { suffix: retryHint });
+          return formatError("markdown_select_root_folder", err, {
+            suffix: retryHintForPickerError(err),
+          });
         }
       },
     ),

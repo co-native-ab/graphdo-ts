@@ -281,10 +281,10 @@ describe("buildAuditLine", () => {
   // whitespace variants so a future log path that emits e.g.
   // `bearer\tabc…` still fails closed.
   it.each([
-    ["lowercase bearer with space", 'rejected: bearer eyJhbGc…'],
-    ["uppercase BEARER with newline", 'rejected: BEARER\neyJhbGc…'],
-    ["bearer with tab", 'rejected: Bearer\teyJhbGc…'],
-    ["bare JWT (no Bearer prefix)", 'rejected: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.aBcDeF-_'],
+    ["lowercase bearer with space", "rejected: bearer eyJhbGc…"],
+    ["uppercase BEARER with newline", "rejected: BEARER\neyJhbGc…"],
+    ["bearer with tab", "rejected: Bearer\teyJhbGc…"],
+    ["bare JWT (no Bearer prefix)", "rejected: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.aBcDeF-_"],
   ])("rejects envelopes containing %s", (_label, errorMessage) => {
     const envelope: AuditEnvelope = {
       ...sampleEnvelope(),

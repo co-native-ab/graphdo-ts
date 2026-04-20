@@ -1,14 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import * as crypto from "node:crypto";
 
 import { z } from "zod";
 
 import { isNodeError } from "./errors.js";
 import { validateGraphId, type ValidatedGraphId } from "./graph/ids.js";
 import { logger } from "./logger.js";
-import { mkdirOptions, writeFileOptions } from "./fs-options.js";
+import { writeJsonAtomic } from "./fs-options.js";
 
 export interface MarkdownConfig {
   rootFolderId?: string;
@@ -105,28 +104,10 @@ export async function loadConfig(dir: string, signal: AbortSignal): Promise<Conf
 
 /** Writes config atomically: writes to a temp file then renames into place. */
 export async function saveConfig(config: Config, dir: string, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) throw signal.reason;
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
-
-  await fs.mkdir(dir, mkdirOptions());
-
-  const data = JSON.stringify(config, null, 2) + "\n";
-  const tmpFile = path.join(dir, `.config-${crypto.randomUUID()}.tmp`);
-
-  try {
-    await fs.writeFile(tmpFile, data, writeFileOptions(signal));
-    await fs.rename(tmpFile, filePath);
-    logger.debug("config saved", { path: filePath });
-  } catch (err: unknown) {
-    // Best-effort cleanup of the temp file
-    try {
-      await fs.unlink(tmpFile);
-    } catch {
-      // ignore cleanup errors
-    }
-    throw err;
-  }
+  await writeJsonAtomic(filePath, config, signal);
+  logger.debug("config saved", { path: filePath });
 }
 
 /**

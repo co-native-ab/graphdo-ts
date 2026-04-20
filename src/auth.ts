@@ -32,7 +32,8 @@ const AUTHORITY_BASE = "https://login.microsoftonline.com";
  *   - GUID — directory tenant id (case-insensitive).
  *   - `<name>.onmicrosoft.com` — tenant primary domain.
  */
-const TENANT_ID_RE = /^(?:common|consumers|organizations|[0-9a-fA-F-]{36}|[a-z0-9-]+\.onmicrosoft\.com)$/i;
+const TENANT_ID_RE =
+  /^(?:common|consumers|organizations|[0-9a-fA-F-]{36}|[a-z0-9-]+\.onmicrosoft\.com)$/i;
 
 /** Default tenant: "common" allows any Microsoft account (personal + work/school). */
 export const DEFAULT_TENANT_ID = "common";

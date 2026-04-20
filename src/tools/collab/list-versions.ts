@@ -14,7 +14,7 @@ import { OutOfScopeError } from "../../errors.js";
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import { listDriveItemVersions } from "../../graph/markdown.js";
 import { formatError } from "../shared.js";
@@ -71,10 +71,7 @@ export function registerCollabListVersions(server: McpServer, config: ServerConf
         }
 
         const item = resolved.item;
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         const versions = await listDriveItemVersions(
           client,

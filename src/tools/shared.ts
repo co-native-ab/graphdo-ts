@@ -1,6 +1,7 @@
 // Shared helpers for MCP tool handlers.
 
 import { AuthenticationRequiredError } from "../errors.js";
+import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 
 /**
@@ -27,4 +28,31 @@ export function formatError(
   logger.error(`${toolName} failed`, { error: message });
   const text = `${options?.prefix ?? ""}${message}${options?.suffix ?? ""}`;
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/**
+ * Returns the wall-clock factory for this server. Honours
+ * `ServerConfig.now` (injected for test determinism — see
+ * `src/index.ts` and `test/collab/clock.ts`) and falls back to
+ * `() => new Date()` in production. Centralising the fallback keeps
+ * the eight collab/session call sites uniform and makes it impossible
+ * for a stray `new Date()` to bypass an injected fake clock.
+ */
+export function nowFactory(config: ServerConfig): () => Date {
+  return config.now ?? ((): Date => new Date());
+}
+
+/**
+ * Retry-hint suffix shared by every browser-picker-backed tool
+ * (`session_init_project`, `session_open_project`,
+ * `todo_select_list`, `markdown_select_root_folder`). When the
+ * underlying picker times out the user gets a friendlier phrasing
+ * than the generic retry hint. Centralised so wording stays uniform.
+ */
+export function retryHintForPickerError(err: unknown): string {
+  const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
+  return isTimeout
+    ? "\n\nThe user did not make a selection in time. " +
+        "You can call this tool again if the user would like to retry."
+    : "\n\nYou can call this tool again if the user would like to retry.";
 }

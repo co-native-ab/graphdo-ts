@@ -11,7 +11,7 @@ import { OutOfScopeError } from "../../errors.js";
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import { MarkdownFileTooLargeError } from "../../graph/markdown.js";
 import { getDriveItem, getDriveItemContent } from "../../collab/graph.js";
@@ -71,10 +71,7 @@ export function registerCollabRead(server: McpServer, config: ServerConfig): Too
 
         const { metadata } = await requireActiveSession(config, signal);
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         let resolvedItem: DriveItem;
         let isAuthoritative = false;

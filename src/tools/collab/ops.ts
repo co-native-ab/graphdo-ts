@@ -50,6 +50,7 @@ import {
 import { startBrowserPicker } from "../../picker.js";
 import { acquireFormSlot } from "../collab-forms.js";
 
+import { nowFactory } from "../shared.js";
 import {
   PROPOSALS_FOLDER_NAME,
   PROPOSAL_ID_RETRY_LIMIT,
@@ -403,7 +404,7 @@ export async function runAuthoritativeWrite(
   // formatter does the right thing.
   const liveContent = await getDriveItemContent(client, validatedItemId, signal);
 
-  const now = config.now ?? ((): Date => new Date());
+  const now = nowFactory(config);
   const { frontmatter, body, docIdSource } = resolveAuthoritativeFrontmatter({
     agentContent,
     liveContent,
@@ -524,7 +525,7 @@ export async function runProposalWrite(
   // 2. Mint a ULID and PUT the proposal body byPath, retrying on the
   //    astronomically-unlikely ProposalIdCollision race. The clock
   //    source is `config.now` so deterministic-time tests are stable.
-  const now = (args.config.now ?? ((): Date => new Date()))();
+  const now = nowFactory(args.config)();
   const newUlidWithClock = (): string => newUlid(() => now.getTime());
   let proposalId = "";
   let proposalItem: DriveItem | null = null;

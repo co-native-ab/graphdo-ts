@@ -102,7 +102,7 @@ import {
 } from "../errors.js";
 
 import { acquireFormSlot } from "./collab-forms.js";
-import { formatError } from "./shared.js";
+import { formatError, nowFactory, retryHintForPickerError } from "./shared.js";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -222,12 +222,9 @@ export function registerSessionTools(server: McpServer, config: ServerConfig): T
               content: [{ type: "text", text: "Project initialisation cancelled." }],
             };
           }
-          const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
-          const retryHint = isTimeout
-            ? "\n\nThe user did not make a selection in time. " +
-              "You can call this tool again if the user would like to retry."
-            : "\n\nYou can call this tool again if the user would like to retry.";
-          return formatError("session_init_project", err, { suffix: retryHint });
+          return formatError("session_init_project", err, {
+            suffix: retryHintForPickerError(err),
+          });
         } finally {
           slot.release();
         }
@@ -278,12 +275,9 @@ export function registerSessionTools(server: McpServer, config: ServerConfig): T
               content: [{ type: "text", text: "Project open cancelled." }],
             };
           }
-          const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
-          const retryHint = isTimeout
-            ? "\n\nThe user did not make a selection in time. " +
-              "You can call this tool again if the user would like to retry."
-            : "\n\nYou can call this tool again if the user would like to retry.";
-          return formatError("session_open_project", err, { suffix: retryHint });
+          return formatError("session_open_project", err, {
+            suffix: retryHintForPickerError(err),
+          });
         } finally {
           slot.release();
         }
@@ -375,7 +369,7 @@ async function runInitProject(
   signal: AbortSignal,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
   const client = config.graphClient;
-  const now = config.now ?? ((): Date => new Date());
+  const now = nowFactory(config);
 
   // Refuse early if a session is already active in this MCP instance —
   // §2.2 limits the process to one active session at a time. Checking
@@ -930,7 +924,7 @@ async function runOpenProject(
   signal: AbortSignal,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
   const client = config.graphClient;
-  const now = config.now ?? ((): Date => new Date());
+  const now = nowFactory(config);
 
   // Refuse early if a session is already active
   const existing = config.sessionRegistry.snapshot();
@@ -1241,7 +1235,7 @@ async function runSessionRenew(
   config: ServerConfig,
   signal: AbortSignal,
 ): Promise<{ content: { type: "text"; text: string }[] }> {
-  const now = config.now ?? ((): Date => new Date());
+  const now = nowFactory(config);
 
   const snap = config.sessionRegistry.snapshot();
   if (snap === null) {

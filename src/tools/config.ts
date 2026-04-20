@@ -14,7 +14,7 @@ import { z } from "zod";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
 import { acquireFormSlot } from "./collab-forms.js";
-import { formatError } from "./shared.js";
+import { formatError, retryHintForPickerError } from "./shared.js";
 import { GraphScope } from "../scopes.js";
 import type { ToolDef, ToolEntry } from "../tool-registry.js";
 import { defineTool } from "../tool-registry.js";
@@ -133,13 +133,9 @@ export function registerConfigTools(server: McpServer, config: ServerConfig): To
               content: [{ type: "text", text: "Todo list selection cancelled." }],
             };
           }
-          const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
-          const retryHint = isTimeout
-            ? "\n\nThe user did not make a selection in time. " +
-              "You can call this tool again if the user would like to retry."
-            : "\n\nYou can call this tool again if the user would like to retry.";
-
-          return formatError("todo_select_list", err, { suffix: retryHint });
+          return formatError("todo_select_list", err, {
+            suffix: retryHintForPickerError(err),
+          });
         } finally {
           slot.release();
         }

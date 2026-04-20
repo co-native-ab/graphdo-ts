@@ -23,13 +23,12 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 
 import { z } from "zod";
 
 import { logger } from "../logger.js";
 import { isNodeError } from "../errors.js";
-import { mkdirOptions, writeFileOptions } from "../fs-options.js";
+import { writeJsonAtomic } from "../fs-options.js";
 
 // ---------------------------------------------------------------------------
 // Constants & paths
@@ -95,36 +94,6 @@ export function renewalKey(userOid: string, projectId: string): string {
   if (userOid.length === 0) throw new Error("renewalKey: userOid must be non-empty");
   if (projectId.length === 0) throw new Error("renewalKey: projectId must be non-empty");
   return `${userOid}/${projectId}`;
-}
-
-// ---------------------------------------------------------------------------
-// Atomic writer
-// ---------------------------------------------------------------------------
-
-async function writeJsonAtomic(
-  filePath: string,
-  data: unknown,
-  signal: AbortSignal,
-): Promise<void> {
-  if (signal.aborted) throw signal.reason;
-
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, mkdirOptions());
-
-  const body = JSON.stringify(data, null, 2) + "\n";
-  const tmpFile = path.join(dir, `.${path.basename(filePath)}-${crypto.randomUUID()}.tmp`);
-
-  try {
-    await fs.writeFile(tmpFile, body, writeFileOptions(signal));
-    await fs.rename(tmpFile, filePath);
-  } catch (err) {
-    try {
-      await fs.unlink(tmpFile);
-    } catch {
-      // best-effort cleanup
-    }
-    throw err;
-  }
 }
 
 // ---------------------------------------------------------------------------
