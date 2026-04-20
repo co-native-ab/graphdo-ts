@@ -376,3 +376,59 @@ export interface SendMailMessage {
 export interface SendMailRequest {
   message: SendMailMessage;
 }
+
+// --- Permissions (W4 Day 4 — session_open_project) ---
+
+/**
+ * A permission entry on a drive item. Only models the `roles` field
+ * consumed by `session_open_project` to verify write access.
+ */
+export interface Permission {
+  id: string;
+  roles?: string[];
+}
+
+export const PermissionSchema = z
+  .object({
+    id: z.string(),
+    roles: z.array(z.string()).optional(),
+  })
+  .loose();
+
+// --- Shared with me (W4 Day 4 — session_open_project) ---
+
+/**
+ * A single entry from `GET /me/drive/sharedWithMe`. The real target of
+ * the share is in `remoteItem`.
+ */
+export interface SharedWithMeEntry {
+  id: string;
+  name: string;
+  lastModifiedDateTime?: string;
+  remoteItem?: {
+    id?: string;
+    folder?: { childCount?: number };
+    parentReference?: { driveId?: string };
+  };
+}
+
+export const SharedWithMeEntrySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    lastModifiedDateTime: z.string().optional(),
+    remoteItem: z
+      .object({
+        id: z.string().optional(),
+        folder: z.object({ childCount: z.number().optional() }).loose().optional(),
+        parentReference: z
+          .object({
+            driveId: z.string().optional(),
+          })
+          .loose()
+          .optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();

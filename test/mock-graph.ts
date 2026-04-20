@@ -53,6 +53,27 @@ export class MockState {
    * Graph calls (test 08 in `docs/plans/collab-v1.md` §8.2).
    */
   requestLog: { method: string; path: string }[];
+  /** W4 Day 4: Shared-with-me entries. */
+  sharedWithMe?: {
+    id: string;
+    name: string;
+    remoteItem?: {
+      id?: string;
+      folder?: { childCount?: number };
+      parentReference?: { driveId?: string };
+    };
+    lastModifiedDateTime?: string;
+  }[];
+  /** W4 Day 4: Share URL resolutions keyed by encoded share ID. */
+  shares?: Map<string, DriveItem>;
+  /** W4 Day 4: Per-item permissions keyed by item ID. */
+  permissions?: Map<
+    string,
+    {
+      id: string;
+      roles?: string[];
+    }[]
+  >;
   private nextId: number;
   private nextVersionSeq: number;
   /** Per-item cTag sequence so cTags monotonically bump on every content write. */
@@ -76,6 +97,9 @@ export class MockState {
     this.nextVersionSeq = 1;
     this.cTagSeq = new Map();
     this.requestLog = [];
+    this.sharedWithMe = [];
+    this.shares = new Map();
+    this.permissions = new Map();
   }
 
   genId(): string {
@@ -401,6 +425,56 @@ async function handleRequest(
     if (segments[0] === "me" && segments[1] === "drive") {
       const handled = await handleDriveRequest(state, req, res, method, segments, parsed);
       if (handled) return;
+    }
+
+    // W4 Day 4: /shares/{encoded}/driveItem
+    if (
+      method === "GET" &&
+      segments.length === 3 &&
+      segments[0] === "shares" &&
+      segments[2] === "driveItem"
+    ) {
+      const encodedShareId = decodeURIComponent(segments[1] ?? "");
+      const shareItem = state.shares?.get(encodedShareId);
+      if (!shareItem) {
+        errorResponse(res, 404, "itemNotFound", `share ${encodedShareId} not found`);
+        return;
+      }
+      jsonResponse(res, 200, shareItem);
+      return;
+    }
+
+    // W4 Day 4: /drives/{driveId}/items/{itemId}/permissions
+    if (
+      method === "GET" &&
+      segments.length === 5 &&
+      segments[0] === "drives" &&
+      segments[2] === "items" &&
+      segments[4] === "permissions"
+    ) {
+      const _driveId = decodeURIComponent(segments[1] ?? "");
+      const itemId = decodeURIComponent(segments[3] ?? "");
+      const permissions = state.permissions?.get(itemId) ?? [];
+      jsonResponse(res, 200, { value: permissions });
+      return;
+    }
+
+    // W4 Day 4: /drives/{driveId}/items/{itemId} (folder metadata refresh)
+    if (
+      method === "GET" &&
+      segments.length === 4 &&
+      segments[0] === "drives" &&
+      segments[2] === "items"
+    ) {
+      const _driveId = decodeURIComponent(segments[1] ?? "");
+      const itemId = decodeURIComponent(segments[3] ?? "");
+      const item = state.findDriveItem(itemId);
+      if (!item) {
+        errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+        return;
+      }
+      jsonResponse(res, 200, driveItemView(item, state));
+      return;
     }
 
     errorResponse(res, 404, "NotFound", `no route for ${method} ${parsed.pathname}`);
@@ -1060,6 +1134,14 @@ async function handleDriveRequest(
       return true;
     }
     errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
+    return true;
+  }
+
+  // GET /me/drive/sharedWithMe (W4 Day 4)
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (method === "GET" && segments.length === 3 && segments[2] === "sharedWithMe") {
+    const entries = state.sharedWithMe ?? [];
+    jsonResponse(res, 200, { value: entries });
     return true;
   }
 
