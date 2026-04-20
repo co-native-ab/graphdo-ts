@@ -1,3 +1,5 @@
+import type { EncodedShareId } from "./collab/share-url.js";
+
 export function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
@@ -531,3 +533,117 @@ export class ProposalIdCollisionError extends Error {
 // thrower travel together (mirrors the `ProjectMetadataParseError` /
 // `loadProjectMetadata` pairing in `src/collab/projects.ts`).
 export { NoActiveSessionError, SessionAlreadyActiveError } from "./collab/session.js";
+
+// ---------------------------------------------------------------------------
+// W4 Day 4 — session_open_project
+// ---------------------------------------------------------------------------
+
+export class SchemaVersionUnsupportedError extends Error {
+  constructor(public readonly schemaVersion: number) {
+    super(
+      `The sentinel at this project uses schemaVersion ${String(schemaVersion)}, ` +
+        "which is not supported by this MCP server version. " +
+        "Please upgrade the MCP server.",
+    );
+    this.name = "SchemaVersionUnsupportedError";
+  }
+}
+
+export class BlockedScopeError extends Error {
+  constructor(public readonly reason: string) {
+    super(`Cannot open project: ${reason}`);
+    this.name = "BlockedScopeError";
+  }
+}
+
+export class NoWriteAccessError extends Error {
+  constructor(public readonly folderId: string) {
+    super(
+      `You do not have write permission on the project folder ${folderId}. ` +
+        "Ask the owner to grant you write access.",
+    );
+    this.name = "NoWriteAccessError";
+  }
+}
+
+export class NotAFolderError extends Error {
+  constructor(public readonly itemId: string) {
+    super(`Drive item ${itemId} is not a folder — only folders can be project scopes.`);
+    this.name = "NotAFolderError";
+  }
+}
+
+export class AuthoritativeFileMissingError extends Error {
+  constructor(public readonly authoritativeFileId: string) {
+    super(
+      `The authoritative file ${authoritativeFileId} referenced by the sentinel ` +
+        "no longer exists — the file may have been deleted.",
+    );
+    this.name = "AuthoritativeFileMissingError";
+  }
+}
+
+export class StaleRecentError extends Error {
+  constructor(
+    public readonly projectId: string,
+    public readonly folderId: string,
+  ) {
+    super(
+      `The recent entry for project ${projectId} (folder ${folderId}) is stale — ` +
+        "the folder no longer exists or you lost access. It has been marked unavailable.",
+    );
+    this.name = "StaleRecentError";
+  }
+}
+
+export class BrowserFormCancelledError extends Error {
+  constructor(public readonly formType: string) {
+    super(`Browser form (${formType}) was cancelled by the user.`);
+    this.name = "BrowserFormCancelledError";
+  }
+}
+
+export class BrowserFormTimeoutError extends Error {
+  constructor(public readonly formType: string) {
+    super(`Browser form (${formType}) timed out waiting for user input.`);
+    this.name = "BrowserFormTimeoutError";
+  }
+}
+
+export type InvalidShareUrlReason =
+  | "unsupported_scheme"
+  | "unsupported_host"
+  | "ip_literal"
+  | "loopback"
+  | "malformed";
+
+export class InvalidShareUrlError extends Error {
+  constructor(
+    public readonly url: string,
+    public readonly reason: InvalidShareUrlReason,
+  ) {
+    super(`Invalid share URL "${url}": ${reason}`);
+    this.name = "InvalidShareUrlError";
+  }
+}
+
+export class ShareNotFoundError extends Error {
+  constructor(public readonly encodedShareId: EncodedShareId) {
+    super(
+      `The share link could not be found (${encodedShareId}) — ` +
+        "the link may be revoked, or you may not have access.",
+    );
+    this.name = "ShareNotFoundError";
+  }
+}
+
+export class ShareAccessDeniedError extends Error {
+  constructor(public readonly encodedShareId: EncodedShareId) {
+    super(
+      `Access denied to share ${encodedShareId} — ` +
+        "the link is valid but you do not have access. " +
+        "Ask the owner to share with your account.",
+    );
+    this.name = "ShareAccessDeniedError";
+  }
+}

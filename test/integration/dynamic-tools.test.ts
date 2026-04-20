@@ -83,7 +83,7 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("collab_apply_proposal");
     expect(names).toContain("collab_acquire_section");
     expect(names).toContain("collab_release_section");
-    expect(names).toHaveLength(34);
+    expect(names).toHaveLength(35);
   });
 
   // -------------------------------------------------------------------------

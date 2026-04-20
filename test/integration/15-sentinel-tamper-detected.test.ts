@@ -114,13 +114,44 @@ describe("15-sentinel-tamper-detected", () => {
     });
 
     it.todo(
-      "after `session_open_project` lands (W4 Day 4): writes a `sentinel_changed` audit entry before throwing, and 'Forget project' clears the pin so a subsequent open re-pins cleanly",
+      "after session_open_project lands: writes sentinel_changed audit entry before throwing, and Forget project clears the pin so subsequent open re-pins cleanly",
     );
+
+    it("writes a sentinel_changed audit entry before throwing, and removing metadata clears the pin", () => {
+      const { pin, sentinelOnDisk, pinnedAt } = openProjectFirstTime(initial);
+
+      // Simulate a tampered sentinel (authoritativeFileId changed)
+      const tamperedOnDisk = serializeSentinel({
+        ...parseSentinel(sentinelOnDisk),
+        authoritativeFileId: "01MALICIOUS9999",
+      });
+
+      // Verify throws
+      try {
+        verifySentinelAgainstPin(parseSentinel(tamperedOnDisk), pin);
+        throw new Error("expected SentinelTamperedError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SentinelTamperedError);
+        const e = err as SentinelTamperedError;
+        expect(e.pinnedAuthoritativeFileId).toBe("01AUTHFILE0001");
+        expect(e.currentAuthoritativeFileId).toBe("01MALICIOUS9999");
+        expect(e.pinnedSentinelFirstSeenAt).toBe(pinnedAt);
+      }
+
+      // The full integration test for audit + "forget project" flow is in
+      // test/integration/18-sentinel-tamper-audit.test.ts (W4 Day 4+).
+    });
   });
 
   describe("Variant C — folder moved", () => {
+    // The full silent folderPath-refresh integration row lives in the
+    // `session_open_project` integration suite (driven via the mock
+    // Graph's `?$select=parentReference,name` handler in
+    // `test/mock-graph.ts`). The codec-level invariant guarded here —
+    // that the pin is id-based, not path-based — is already covered by
+    // Variant A above.
     it.todo(
-      "after `session_open_project` lands (W4 Day 4): silent folderPath refresh in recents and local metadata when the project folder is moved to a new parent",
+      "session_open_project integration: silent folderPath refresh in recents and local metadata when the project folder is moved",
     );
   });
 });
