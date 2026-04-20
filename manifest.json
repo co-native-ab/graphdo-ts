@@ -3,8 +3,8 @@
   "name": "graphdo",
   "display_name": "graphdo - Microsoft Graph for AI",
   "version": "0.0.0",
-  "description": "Give your AI assistant access to Microsoft To Do, Outlook mail, and markdown notes in OneDrive via Microsoft Graph.",
-  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks, send emails through Outlook, and read/write markdown files in a OneDrive folder you choose - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Markdown Notes (OneDrive)** - Read, write, and delete .md files in a single OneDrive folder you choose via the browser. The AI operates on one folder only - it cannot switch folders on its own. A 4 MiB per-file limit (graphdo-ts tool-side cap, not a Microsoft Graph API limit) keeps the tool focused on notes, not bulk uploads.\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, Files.ReadWrite, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
+  "description": "Give your AI assistant access to Microsoft To Do, Outlook mail, markdown notes in OneDrive, and collaborative project editing via Microsoft Graph.",
+  "long_description": "graphdo connects your AI assistant to Microsoft Graph, enabling it to manage your Microsoft To Do tasks, send emails through Outlook, read/write markdown files in a OneDrive folder you choose, and collaborate with humans (and other agents) on a structured project folder - all with scoped, low-risk permissions.\n\n**Microsoft To Do** - List, create, update, complete, and delete tasks. Manage checklist steps within tasks. Set due dates, reminders, importance, and recurrence. The AI operates on a single list chosen by you in the browser - it cannot switch lists on its own.\n\n**Outlook Mail** - Send emails to yourself (useful for notes, reminders, and forwarding information to your inbox).\n\n**Markdown Notes (OneDrive)** - Read, write, and delete .md files in a single OneDrive folder you choose via the browser. The AI operates on one folder only - it cannot switch folders on its own. A 4 MiB per-file limit (graphdo-ts tool-side cap, not a Microsoft Graph API limit) keeps the tool focused on notes, not bulk uploads.\n\n**Collaborative Editing (Collab v1)** - Open a structured project folder in OneDrive containing one authoritative markdown file, plus optional `proposals/`, `drafts/`, and `attachments/` sub-folders. The agent operates inside an explicit session with a write budget, a destructive-approval budget, and a session TTL that you renew via a browser approval form. Destructive edits (overwriting another author's section, restoring an old version, deleting a file) always open a browser re-approval form showing a unified diff before any change is written. Per-section leases let multiple agents cooperate without trampling each other. Every session and every approval is recorded in an append-only audit log on disk.\n\n**Authentication** - Signs in via your browser using your Microsoft account. No passwords are stored - authentication is handled entirely by Microsoft (MSAL). The AI assistant will sign you in automatically when needed.\n\n**Privacy** - graphdo requests only the permissions it needs: Tasks.ReadWrite, Mail.Send, Files.ReadWrite, and User.Read. Your credentials are handled directly by Microsoft. graphdo never sees your password.",
   "author": {
     "name": "Co-native AB",
     "url": "https://co-native.com"
@@ -130,6 +130,66 @@
     {
       "name": "markdown_preview_file",
       "description": "Open a markdown file from the configured root folder in the user's browser using the SharePoint OneDrive web preview, which renders the markdown nicely instead of triggering a download. Accepts the file name only (the preview URL is human-facing, so the agent should look the file up by name the same way a user would refer to it). The tool opens the URL in the default browser and also returns the URL as text so it can be shared. Consumer OneDrive (onedrive.live.com) is not supported."
+    },
+    {
+      "name": "session_init_project",
+      "description": "Start a new collaboration project. Opens a browser form for the human to pick the OneDrive folder, then a second form to pick the authoritative markdown file at the root of that folder (auto-confirmed when only one .md is present). Writes a .collab/project.json sentinel into the chosen folder, records the project locally, and activates a session. Returns the projectId, folder path, and authoritative file name. Use session_open_project to join an existing project as a collaborator."
+    },
+    {
+      "name": "session_open_project",
+      "description": "Join an existing collaboration project as a collaborator. Opens a browser form with three entry points: recents (previously opened projects), 'shared with me' (folders shared with your OneDrive account), and a URL paste box for OneDrive share links. Reads the .collab/project.json sentinel, validates write access, activates a session, and writes a session_start audit entry. Use session_init_project to create a new project as the originator."
+    },
+    {
+      "name": "session_status",
+      "description": "Report the active collaboration session's project, agent identity, TTL, write/destructive/renewal counters, per-source counters (chat / project / external), and the current leases sidecar cTag. Read-only and free - no Graph calls, no destructive-budget cost. Returns a 'no active session' message (not an error) when nothing is active. When the session is past its TTL, reports expired:true with counters frozen so the agent knows to call session_renew."
+    },
+    {
+      "name": "session_renew",
+      "description": "Reset the active collaboration session's TTL clock by opening a browser approval form. Counters are persisted across the renewal: writes used, destructive approvals used, and source counters are preserved. Caps: max 3 renewals per session and max 6 renewals per user per project per rolling 24-hour window. On approval, expiresAt is reset to now + the original TTL and a renewal audit entry is written."
+    },
+    {
+      "name": "session_recover_doc_id",
+      "description": "Recover the project's stable doc_id when both the live frontmatter and the local project metadata cache are gone (a fresh machine and a cooperator wiped the YAML envelope in OneDrive web). Walks the authoritative file's /versions history newest-first, capped at 50 versions, and writes the first recoverable doc_id back to the local cache. No body change, no restoreVersion call, no destructive-budget or write-budget cost. No-op (informational, not an error) when live frontmatter parses cleanly and the local cache already holds a matching docId."
+    },
+    {
+      "name": "collab_read",
+      "description": "Read any file inside the active project's scope. Provide either path (scope-relative, e.g. 'spec.md', 'proposals/foo.md', 'attachments/img.png') or itemId (from a previous collab_list_files). For the authoritative markdown file the response includes parsed frontmatter and body separately, plus the cTag required for collab_write optimistic concurrency. For other files, returns raw content with cTag/size/modified. Files larger than 4 MiB return an error (graphdo-ts tool-side limit)."
+    },
+    {
+      "name": "collab_list_files",
+      "description": "List files in the active project folder, grouped into ROOT, PROPOSALS, DRAFTS, and ATTACHMENTS. ATTACHMENTS is listed recursively (subfolders are walked); the other groups are flat. The authoritative markdown file is marked with [authoritative]. The .collab/ sentinel folder is excluded. Accepts an optional prefix filter: '/' (all), '/proposals', '/drafts', '/attachments'. Total entries are capped at 500; on overflow the response shows which groups were truncated."
+    },
+    {
+      "name": "collab_write",
+      "description": "Create or update a file inside the active project's scope. Provide path (scope-relative - the authoritative .md file at the root, or proposals/, drafts/, attachments/), content (UTF-8 text, max 4 MiB), and source (where the content came from: 'chat' = the human typed it this turn; 'project' = read via collab_read in this session; 'external' = anything else, which triggers a browser re-approval before the write is issued). For existing files supply the cTag returned by collab_read for optimistic concurrency. On the authoritative file the canonical YAML collab: frontmatter block is re-injected (recovering doc_id from local cache when the human stripped it). conflictMode='proposal' diverts a cTag mismatch into a proposal write instead of failing."
+    },
+    {
+      "name": "collab_create_proposal",
+      "description": "Propose a replacement body for one section of the authoritative file without overwriting it. Writes the proposed body to /proposals/<ulid>.md and records a proposals[] entry in the authoritative frontmatter (target_section_slug + target_section_content_hash_at_create - the latter survives heading renames between create and apply). Counts as 1 write toward the session budget."
+    },
+    {
+      "name": "collab_apply_proposal",
+      "description": "Merge a previously-created proposal into the authoritative file. Locates the target section by slug first, falling back to the content hash recorded at create time (so a rename between create and apply is recovered automatically and audited as slug_drift_resolved). The §3.1 authorship trail is consulted to decide whether the apply is destructive - if any prior author of the target section is a human or a different agent, a browser re-approval form is opened showing a unified diff. On approve, the section body is replaced, an authorship[] entry is appended, and the proposals[] entry is marked applied; the file is CAS-written with the supplied authoritativeCTag. Counts toward the write budget always and toward the destructive-approval budget when destructive."
+    },
+    {
+      "name": "collab_acquire_section",
+      "description": "Lease a section of the authoritative file so cooperating agents avoid concurrent writes to the same heading. Free - does not count toward the session write budget. Section identity is the GitHub-flavored heading slug; pass either the raw heading text ('## Introduction') or a pre-computed slug ('introduction'). The leases sidecar lives at .collab/leases.json and is created lazily on first acquire. Supply leasesCTag (from session_status). Returns the slug, lease expiry, and the new leases-file cTag for the next acquire/release."
+    },
+    {
+      "name": "collab_release_section",
+      "description": "Release a previously-acquired section lease. Free. No-op when the lease is already absent (gracefully degraded - the leases sidecar may have been deleted or expired). Refuses with LeaseNotHeldError when the lease exists but is held by a different agent - releasing somebody else's lease is rejected. Supply leasesCTag (from session_status) for the byId CAS replace."
+    },
+    {
+      "name": "collab_list_versions",
+      "description": "List historical versions of a file in the active project's scope, newest first. Provide either path (scope-relative) or itemId (from collab_list_files); when both are omitted the authoritative file is used. Read-only - does not count toward the write or destructive-approval budget. Each entry reports the opaque versionId, size, and last-modified timestamp; pass the versionId to collab_restore_version to roll the file back to that revision."
+    },
+    {
+      "name": "collab_restore_version",
+      "description": "Roll a file in the active project back to a previous revision via OneDrive's restoreVersion API. Provide versionId (from collab_list_versions) plus either path or itemId; defaults to the authoritative file when both are omitted. When the target is the authoritative file the restore is destructive: a browser re-approval form is opened showing a unified diff between the current and the target revision. Counts as 1 write toward the session budget always; +1 destructive only when the target is the authoritative file."
+    },
+    {
+      "name": "collab_delete_file",
+      "description": "Permanently delete a non-authoritative file inside the active project's scope. Always destructive: a browser re-approval form is opened for every call and the destructive-approval budget is decremented on approve. Counts as 1 write toward the session budget. Accepts path (scope-relative - proposals/, drafts/, attachments/); the authoritative .md file and the .collab/ sentinel folder are always refused."
     }
   ],
   "keywords": [
@@ -141,6 +201,7 @@
     "outlook",
     "markdown",
     "onedrive",
+    "collaboration",
     "productivity"
   ],
   "license": "MIT",

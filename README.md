@@ -8,7 +8,7 @@ The design intentionally minimizes blast radius — agents can only mail _you_, 
 
 ## Features
 
-graphdo-ts currently exposes **24 MCP tools**:
+graphdo-ts currently exposes **40 MCP tools**:
 
 | Tool                          | Description                                                                                           |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -37,6 +37,21 @@ graphdo-ts currently exposes **24 MCP tools**:
 | `markdown_get_file_version`   | Read the UTF-8 content of a specific prior version of a markdown file                                 |
 | `markdown_diff_file_versions` | Compute a unified diff between two revisions of a markdown file server-side (via jsdiff)              |
 | `markdown_preview_file`       | Open a markdown file in the user's browser using the SharePoint OneDrive web preview                  |
+| `session_init_project`        | Start a new collaboration project in a OneDrive folder (originator; opens browser pickers)            |
+| `session_open_project`        | Join an existing collaboration project as a collaborator (opens browser form: recents / shared / URL) |
+| `session_status`              | Report active session, agent identity, TTL, and write / destructive / renewal counters (read-only)    |
+| `session_renew`               | Reset the session TTL via a browser approval form (per-session and per-window caps)                   |
+| `session_recover_doc_id`      | Recover the project's `doc_id` from `/versions` history when both live + cached copies are gone       |
+| `collab_read`                 | Read a file in the active project's scope (path or itemId); authoritative file returns frontmatter    |
+| `collab_list_files`           | List project files grouped into ROOT / PROPOSALS / DRAFTS / ATTACHMENTS (attachments is recursive)    |
+| `collab_write`                | Create or update a project file with optimistic concurrency; canonical frontmatter on the auth file   |
+| `collab_create_proposal`      | Propose a replacement body for one section without overwriting the authoritative file                 |
+| `collab_apply_proposal`       | Merge a proposal into the authoritative file (destructive applies open a browser re-approval form)    |
+| `collab_acquire_section`      | Lease a section heading so cooperating agents avoid concurrent writes (free; section-slug identity)   |
+| `collab_release_section`      | Release a previously-acquired section lease (free; refuses to release another agent's lease)          |
+| `collab_list_versions`        | List historical versions of a project file (defaults to the authoritative file)                       |
+| `collab_restore_version`      | Roll a project file back to a previous revision (destructive when the target is the authoritative)    |
+| `collab_delete_file`          | Permanently delete a non-authoritative project file (always opens a browser re-approval form)         |
 
 ---
 
@@ -103,13 +118,13 @@ The Azure AD client ID (`b073490b-a1a2-4bb8-9d83-00bb5c15fcfd`) is built into th
 
 These scopes reflect the current set of capabilities. Additional scopes may be required as new Graph surfaces are added.
 
-| Scope             | Purpose                                            |
-| ----------------- | -------------------------------------------------- |
-| `Mail.Send`       | Send emails as the signed-in user                  |
-| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks    |
-| `Files.ReadWrite` | Read and write markdown files in a OneDrive folder |
-| `User.Read`       | Read the signed-in user's basic profile            |
-| `offline_access`  | Enable refresh tokens for persistent sessions      |
+| Scope             | Purpose                                                            |
+| ----------------- | ------------------------------------------------------------------ |
+| `Mail.Send`       | Send emails as the signed-in user                                  |
+| `Tasks.ReadWrite` | Read and write the user's Microsoft To Do tasks                    |
+| `Files.ReadWrite` | Read and write markdown files and collab project files in OneDrive |
+| `User.Read`       | Read the signed-in user's basic profile                            |
+| `offline_access`  | Enable refresh tokens for persistent sessions                      |
 
 ### Todo List Selection
 
@@ -169,6 +184,118 @@ Requests with invalid names are rejected with a clear error that states which ru
 **4 MiB size cap (tool-side policy).** `markdown_get_file`, `markdown_create_file`, `markdown_update_file`, `markdown_get_file_version`, and `markdown_diff_file_versions` enforce a hard 4 MiB (4,194,304 bytes) cap per file. **This is a graphdo-ts policy limit, not a Microsoft Graph limit** — Microsoft Graph's `/content` endpoint accepts simple PUT uploads up to 250 MB ([driveItem: PUT content](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0&tabs=http)) and resumable upload sessions extend that further. The cap exists to keep the markdown surface focused on hand-written notes and small documents rather than bulk file storage, and to keep agent payloads bounded. The limit is a single constant (`MAX_DIRECT_CONTENT_BYTES` in `src/graph/markdown.ts`) and can be raised in the future if a concrete need appears; until then, it is intentionally conservative. Files over 4 MiB return a clear error explaining the cap.
 
 See [ADR-0004: Markdown File Support on OneDrive](./docs/adr/0004-markdown-file-support.md) for the rationale behind the 4 MiB cap, the folder picker approach, the Graph API constraints, and the strict file-name rules.
+
+### Collaborative Editing (Collab v1)
+
+Collab v1 lets one or more AI agents and humans cooperate on a structured project folder in OneDrive. The design extends the same blast-radius philosophy from the markdown tools — **scoped access, human-in-the-loop for anything destructive, every approval recorded** — into a multi-agent workflow with explicit budgets, optimistic concurrency, and an append-only audit trail.
+
+**A collab project is a OneDrive folder containing:**
+
+- Exactly one **authoritative `.md` file** at the root — the document everyone is editing.
+- A `.collab/` sentinel folder with a `project.json` (binds the project to a stable id, the authoritative file, the originator, and the schema version) and a lazily-created `leases.json` (per-section advisory leases).
+- Optional sub-folders the agent may write to: `proposals/`, `drafts/`, `attachments/`.
+
+Agents can only operate inside this folder. The `.collab/` sentinel folder is **never writable from collab tools** — it is managed by graphdo-ts itself.
+
+#### Starting and joining a project
+
+There are two entry points, both human-driven through the browser:
+
+- **`session_init_project`** — call this as the **originator**. Two browser pickers run back-to-back: pick the OneDrive folder, then pick the authoritative `.md` (auto-confirmed when only one root `.md` is present). graphdo-ts writes the `.collab/project.json` sentinel and activates a session.
+- **`session_open_project`** — call this as a **collaborator**. One browser form with three entry points: recents (projects you have opened before), "shared with me" (folders shared into your OneDrive), or paste a OneDrive share URL. graphdo-ts reads the sentinel, validates write access, pins the authoritative file id on first open, and verifies the pin on every subsequent open (so a swapped or renamed authoritative file is detected and refused).
+
+Use `session_status` at any time to see the active project, current TTL, and remaining budgets. The agent does not pick a project — only the human does.
+
+#### Sessions, budgets, and renewal
+
+Every session carries three explicit limits to bound how much an agent can do without checking back in with the human:
+
+- **Write budget** (default 50 writes per session) — every `collab_write`, proposal write, apply, restore, and delete counts. `collab_read`, `collab_list_files`, `collab_list_versions`, `session_status`, and the lease tools are **free**.
+- **Destructive-approval budget** (default 10 per session) — counts only when an action overwrites another author's section, restores an old version, or deletes a file. The destructive counter is **persisted across renewals** in `<configDir>/sessions/destructive-counts.json` so it survives a restart.
+- **TTL** (default 2h) — past TTL, every collab tool reports the session as expired and the agent must call **`session_renew`**.
+
+`session_renew` opens a browser approval form. On approve, `expiresAt` is reset to now + the original TTL; counters are preserved. Renewal is itself rate-limited: **max 3 renewals per session** and **max 6 renewals per user per project per rolling 24-hour window** (the sliding window is persisted in `<configDir>/sessions/renewal-counts.json`).
+
+#### Authoritative-file frontmatter (and what to do if you reformat it)
+
+The authoritative `.md` file always carries a YAML `collab:` block at the top:
+
+```markdown
+---
+collab:
+  doc_id: 01J... # stable ULID for this document
+  schema: 1
+  proposals: [] # open / applied proposals
+  authorship: [] # per-section author trail
+---
+
+# Document body starts here…
+```
+
+graphdo-ts treats the `collab:` block as machine-managed. The body underneath is yours.
+
+> **Frontmatter reformat note.** It is safe to reformat or even delete the `collab:` block by hand in OneDrive web, VS Code, or any editor. The next `collab_write` will:
+>
+> - re-inject a canonical, deterministically-emitted YAML block (so byte-exact diffs stay clean across writes),
+> - recover the `doc_id` from the **local project metadata cache** when you stripped it,
+> - emit a `frontmatter_reset` audit entry recording what happened.
+>
+> If both the live frontmatter and your local cache are gone (e.g. you started on a fresh machine and a co-author wiped the YAML in OneDrive web), call **`session_recover_doc_id`**. It walks the authoritative file's `/versions` history newest-first (capped at 50 versions) and writes the first recoverable `doc_id` back to the local cache. No body change, no `restoreVersion` call, and no budget cost. If no historical version yields a parseable `doc_id`, it errors with `DocIdUnrecoverableError` and you can either decide to mint a fresh id (next write) or restore an older version manually.
+
+#### Read, list, write
+
+- **`collab_read`** — read any file in scope by `path` (e.g. `spec.md`, `proposals/foo.md`, `attachments/diagram.png`) or by `itemId`. The authoritative file returns parsed frontmatter + body separately, plus the cTag you'll need for the next write.
+- **`collab_list_files`** — list project files grouped into **ROOT** (top-level files), **PROPOSALS** (`proposals/*.md`), **DRAFTS** (`drafts/*.md`), and **ATTACHMENTS**. The authoritative file is marked `[authoritative]`. The total is capped at 500 entries; on overflow the response shows which groups were truncated.
+  - **Attachments are listed recursively.** Unlike `proposals/` and `drafts/` (which are flat by design), `attachments/` is treated as a junk drawer for arbitrary files and sub-folders — so `collab_list_files` walks the tree under `attachments/` and reports every nested file with its full scope-relative path. Scope enforcement still applies: nothing outside `attachments/` (and outside the project folder) is ever readable or writable.
+- **`collab_write`** — create or update a file in scope. Pass `content` (UTF-8, ≤ 4 MiB) and `source`:
+  - `chat` — the human just typed it,
+  - `project` — you read it via `collab_read` in this same session,
+  - `external` — anything else (web fetch, another file, paste from clipboard). `source: "external"` **always** opens a browser re-approval form before any Graph round-trip; cancel returns `ExternalSourceDeclinedError` and nothing is written.
+
+  For existing files supply the `cTag` from `collab_read` — graphdo-ts uses an `If-Match` header so concurrent edits raise `CollabCTagMismatchError` instead of silently overwriting. Use `conflictMode: "proposal"` to divert a cTag mismatch into a proposal write instead of failing.
+
+#### Proposals (cross-author edits)
+
+When you want to change a section that has prior history from a human or a different agent, write a **proposal** instead of overwriting:
+
+- **`collab_create_proposal`** — writes the proposed body to `/proposals/<ulid>.md` and records a `proposals[]` entry in the authoritative frontmatter. The entry pins both the target section's slug (e.g. `## Introduction` → `introduction`) **and** a hash of the section's content at create time, so a heading rename between create and apply is recovered automatically.
+- **`collab_apply_proposal`** — locates the target section by slug first, falling back to the content hash. Consults the `authorship[]` trail to decide whether the apply is destructive — if any prior author of that section is a human or a different agent, a browser **re-approval form is opened showing a unified diff** of the proposed change. On approve, the section body is replaced, an `authorship[]` entry is appended, and the matching `proposals[]` entry is marked `applied`; the file is CAS-written with the supplied `authoritativeCTag`.
+
+#### Section leases (cooperating agents)
+
+`.collab/leases.json` is a sidecar JSON file holding per-section advisory leases. It is created lazily on first `collab_acquire_section`, capped at 64 KB, and updated via cTag-protected CAS writes. Leases are **free** — they never cost write or destructive budget.
+
+- **`collab_acquire_section`** — reserve a section heading (`## Introduction`) so cooperating agents don't both write to it concurrently. Refuses with `SectionAlreadyLeasedError` (carrying the holder + expiry) when another agent holds it.
+- **`collab_release_section`** — release a lease you hold. No-op when the lease is already absent; refuses to release somebody else's lease.
+
+`session_status` reports the current `leasesCTag` — pass it to acquire/release for the CAS replace. A stale cTag raises `CollabCTagMismatchError`; re-read and retry.
+
+Leases are **advisory** — they do not block `collab_write`. They are a coordination signal between cooperating agents that respect them. Humans editing in OneDrive web are unaffected.
+
+#### Versions, restore, delete
+
+- **`collab_list_versions`** — list a file's `/versions` history, newest first. Defaults to the authoritative file. Read-only and free.
+- **`collab_restore_version`** — roll a file back to a previous revision via OneDrive's `restoreVersion` API. When the target is the authoritative file the restore is destructive and a re-approval form opens with a unified diff between the current and the target revision. Counts as 1 write always; +1 destructive only when the target is the authoritative file. Requires `authoritativeCTag` on the auth path for safety.
+- **`collab_delete_file`** — permanently delete a non-authoritative project file. **Always destructive** — a re-approval form opens for every call, the destructive budget is decremented on approve. The authoritative `.md` file and the `.collab/` sentinel folder are always refused.
+
+#### Audit log
+
+Every session start, every approval form (Approved or Cancelled), every `frontmatter_reset`, every renewal, every successful tool call, and every `agent_name_unknown` event is appended to a per-project audit log under `<configDir>/projects/<projectId>/audit.log`. Writes are best-effort `O_APPEND` (so concurrent agents can append without coordination), each envelope is capped at 4096 bytes (with redaction cascade if necessary), and Bearer tokens are rejected at the codec layer. Diffs are recorded by SHA-256 hash, never as the raw body.
+
+#### Storage layout
+
+| Where                                               | What                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `<projectFolder>/.collab/project.json` (OneDrive)   | Sentinel: project id, schema, originator, authoritative file id (the "pin")            |
+| `<projectFolder>/.collab/leases.json` (OneDrive)    | Advisory section leases (lazily created, 64 KB cap, cTag-CAS)                          |
+| `<projectFolder>/<authoritativeFile>.md` (OneDrive) | The document, with the canonical `collab:` YAML frontmatter block                      |
+| `<configDir>/projects/<projectId>.json`             | Per-project metadata cache (recovered `doc_id`, last-seen authoritative cTag/revision) |
+| `<configDir>/projects/recent.json`                  | Recently-opened projects, surfaced in the `session_open_project` browser form          |
+| `<configDir>/projects/<projectId>/audit.log`        | Append-only audit envelopes                                                            |
+| `<configDir>/sessions/destructive-counts.json`      | Persisted destructive-approval counters (survive restart, lazy-pruned after 24h)       |
+| `<configDir>/sessions/renewal-counts.json`          | Sliding 24-hour renewal window counters per `(userOid, projectId)`                     |
+
+See `docs/plans/collab-v1.md` for the full design and ADRs 0005–0008 for locked decisions (decision log, `userOid` derivation, validated Graph IDs, frontmatter codec).
 
 ---
 
@@ -240,7 +367,10 @@ graphdo-ts is designed around the principle of **minimizing blast radius** — k
 - 📧 **Email to self only** — the agent can **only send emails to yourself**. It cannot send to other recipients.
 - 📋 **Single todo list** — the agent operates on **one specific list** that you choose via the browser. It cannot switch lists on its own.
 - 📝 **Single markdown folder** — the agent operates on **one OneDrive folder** that you choose via the browser. It cannot switch folders on its own.
-- 🧑 **Human-in-the-loop** — signing in, selecting which todo list to use, and selecting which OneDrive folder to use all require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
+- 🤝 **Scoped collab projects** — collab tools operate on **one project folder at a time**, chosen via the browser. The `.collab/` sentinel folder is never writable from collab tools, the authoritative file is pinned by item id (a swap or rename is detected), and every destructive change opens a browser re-approval form showing a unified diff before any write.
+- 💸 **Bounded budgets** — every collab session has an explicit write budget, destructive-approval budget, and TTL. Renewing the TTL itself opens a browser approval form and is rate-limited per session and per rolling 24-hour window.
+- 🧑 **Human-in-the-loop** — signing in, selecting which todo list to use, selecting which OneDrive folder to use, opening or creating a collab project, renewing a session, approving any destructive collab action, and accepting any `external` content for collab writes all require **human interaction via the browser**. The AI agent cannot perform these actions programmatically.
+- 📜 **Audited** — every collab session start, approval form (Approved or Cancelled), renewal, and successful tool call is appended to a local per-project audit log.
 - 💻 **Local credentials** — your login credentials are cached **locally on your computer** and nowhere else.
 - 🌐 **Microsoft only** — no data is sent anywhere except to **Microsoft's official servers** (the same ones Outlook and To Do use).
 - 📖 **Open source** — the source code is **fully open** at [github.com/co-native-ab/graphdo-ts](https://github.com/co-native-ab/graphdo-ts) — anyone can review exactly what it does.
@@ -272,7 +402,7 @@ npm run typecheck    # tsc --noEmit
 npm run test         # Run tests via vitest
 npm run format       # Format code with Prettier
 npm run format:check # Check formatting without writing
-npm run check        # format:check + lint + typecheck + test (all four)
+npm run check        # format:check + icons:check + lint + typecheck + test (all five)
 npm run mcpb         # Build + create MCPB bundle
 ```
 
