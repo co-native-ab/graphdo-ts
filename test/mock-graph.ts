@@ -703,20 +703,88 @@ async function handleDriveRequest(
     return false;
   }
 
-  // GET by path: GET /me/drive/items/{folderId}:/{seg1}/{seg2}/.../{lastSeg}:
+  // GET by path content: GET /me/drive/items/{folderId}:/{seg1}/.../{lastSeg}:/content
+  // Must come BEFORE the bare-metadata byPath handler below (`segments[3]
+  // endsWith ":"`, no trailing-colon requirement on the last segment),
+  // otherwise that handler greedily matches `/.../{lastSeg}:/content`
+  // and tries to look up a file literally called "content".
+  if (
+    method === "GET" &&
+    segments.length >= 6 &&
+    segments[3]?.endsWith(":") &&
+    segments[segments.length - 1] === "content" &&
+    segments[segments.length - 2]?.endsWith(":")
+  ) {
+    const folderId = decodeURIComponent(segments[3].slice(0, -1));
+    const nameSegs = segments.slice(4, -1);
+    const relativeSegments = nameSegs.map((s, i, arr) => {
+      const raw = i === arr.length - 1 && s.endsWith(":") ? s.slice(0, -1) : s;
+      return decodeURIComponent(raw);
+    });
+    const folderExists =
+      state.driveFolderChildren.has(folderId) ||
+      state.driveRootChildren.some((i) => i.id === folderId);
+    if (!folderExists) {
+      errorResponse(res, 404, "itemNotFound", `folder ${folderId} not found`);
+      return true;
+    }
+    let cursor = folderId;
+    let resolved: MockDriveFile | undefined;
+    for (let i = 0; i < relativeSegments.length; i++) {
+      const segName = relativeSegments[i] ?? "";
+      const segLower = segName.toLowerCase();
+      const children = state.driveFolderChildren.get(cursor) ?? [];
+      const match = children.find((c) => c.name.toLowerCase() === segLower);
+      if (match === undefined) {
+        errorResponse(
+          res,
+          404,
+          "itemNotFound",
+          `path segment "${segName}" not found under ${cursor}`,
+        );
+        return true;
+      }
+      if (i === relativeSegments.length - 1) {
+        resolved = match;
+      } else {
+        cursor = match.id;
+      }
+    }
+    if (resolved?.content === undefined) {
+      errorResponse(res, 404, "itemNotFound", "no content for resolved byPath item");
+      return true;
+    }
+    const body = resolved.content;
+    res.writeHead(200, {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Length": String(Buffer.byteLength(body, "utf-8")),
+    });
+    res.end(body);
+    return true;
+  }
+
+  // GET by path: GET /me/drive/items/{folderId}:/{seg1}/{seg2}/.../{lastSeg}[:]
   // Walks children from `folderId` matching each segment by exact name.
   // Used by the collab v1 §4.6 scope-resolution algorithm. Returns the
   // resolved drive item via `driveItemView` so `parentReference.id /
   // .driveId / .path` plus optional `remoteItem` are populated.
-  if (
-    method === "GET" &&
-    segments.length >= 5 &&
-    segments[3]?.endsWith(":") &&
-    segments[segments.length - 1]?.endsWith(":")
-  ) {
+  //
+  // The trailing `:` on the last segment is optional — Graph accepts
+  // both `/{folder-id}:/path/to/file` (bare metadata form, used by
+  // `readSentinel` / `readLeases`) and `/{folder-id}:/path/to/file:`
+  // (separator form, used when chaining `:/content` etc.).
+  if (method === "GET" && segments.length >= 5 && segments[3]?.endsWith(":")) {
+    const lastIdx = segments.length - 1;
+    const lastSeg = segments[lastIdx] ?? "";
+    const lastEndsWithColon = lastSeg.endsWith(":");
+    // Reject when the URL still has more segments after a `path:` —
+    // e.g. `:/content` is handled by other branches below.
+    if (!lastEndsWithColon) {
+      // Bare metadata form: every segment after segments[3] is part of the relative path.
+    }
     const folderId = decodeURIComponent(segments[3].slice(0, -1));
     const relativeSegments = segments.slice(4).map((s, i, arr) => {
-      const raw = i === arr.length - 1 ? s.slice(0, -1) : s;
+      const raw = i === arr.length - 1 && s.endsWith(":") ? s.slice(0, -1) : s;
       return decodeURIComponent(raw);
     });
     const folderExists =
