@@ -322,6 +322,6 @@ describe("20-doc-id-recovery", () => {
   // -------------------------------------------------------------------------
 
   it("projectMetadataPath helper is still importable", () => {
-    expect(typeof projectMetadataPath("/tmp/x", "01J")).toBe("string");
+    expect(typeof projectMetadataPath("/tmp/x", "01JABCDE0FGHJKMNPQRSTV0WXY")).toBe("string");
   });
 });

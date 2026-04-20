@@ -108,6 +108,56 @@ describe("17-share-url-host-allowlist", () => {
       }
     });
 
+    // Regression: `1drv.ms` lives on the public `.ms` TLD which an
+    // attacker can register look-alikes of (`evil1drv.ms`,
+    // `corp1drv.ms`, …). Substring `endsWith` would accept those —
+    // exact-host matching rejects them.
+    it("refuses look-alike of 1drv.ms (unsupported_host)", () => {
+      for (const url of [
+        "https://evil1drv.ms/share",
+        "https://corp1drv.ms/share",
+        "https://x1drv.ms/share",
+      ]) {
+        try {
+          validateShareUrl(url);
+          throw new Error(`expected InvalidShareUrlError for ${url}`);
+        } catch (err) {
+          expect(err).toBeInstanceOf(InvalidShareUrlError);
+          const e = err as InvalidShareUrlError;
+          expect(e.reason).toBe("unsupported_host");
+        }
+      }
+    });
+
+    // Regression: `onedrive.live.com` lives under Microsoft-administered
+    // `live.com` so look-alike registration is blocked, but defence in
+    // depth — a future configuration drift that allowed
+    // `xonedrive.live.com` would still be wrong.
+    it("refuses look-alike of onedrive.live.com (unsupported_host)", () => {
+      try {
+        validateShareUrl("https://xonedrive.live.com/share");
+        throw new Error("expected InvalidShareUrlError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(InvalidShareUrlError);
+        const e = err as InvalidShareUrlError;
+        expect(e.reason).toBe("unsupported_host");
+      }
+    });
+
+    // The `*-my.sharepoint.com` shape is already covered by the
+    // `*.sharepoint.com` suffix rule — make sure substring spoofing
+    // of that variant is also refused.
+    it("refuses look-alike of *-my.sharepoint.com (unsupported_host)", () => {
+      try {
+        validateShareUrl("https://evil-my.sharepoint.com.attacker.example/share");
+        throw new Error("expected InvalidShareUrlError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(InvalidShareUrlError);
+        const e = err as InvalidShareUrlError;
+        expect(e.reason).toBe("unsupported_host");
+      }
+    });
+
     it("refuses malformed URL (malformed)", () => {
       try {
         validateShareUrl("not a URL at all");

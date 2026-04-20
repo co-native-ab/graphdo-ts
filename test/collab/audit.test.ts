@@ -277,6 +277,26 @@ describe("buildAuditLine", () => {
     expect(() => buildAuditLine(envelope, new Date())).toThrow(/Bearer/);
   });
 
+  // M1 — defence-in-depth scrubber must catch case variants and
+  // whitespace variants so a future log path that emits e.g.
+  // `bearer\tabc…` still fails closed.
+  it.each([
+    ["lowercase bearer with space", 'rejected: bearer eyJhbGc…'],
+    ["uppercase BEARER with newline", 'rejected: BEARER\neyJhbGc…'],
+    ["bearer with tab", 'rejected: Bearer\teyJhbGc…'],
+    ["bare JWT (no Bearer prefix)", 'rejected: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.aBcDeF-_'],
+  ])("rejects envelopes containing %s", (_label, errorMessage) => {
+    const envelope: AuditEnvelope = {
+      ...sampleEnvelope(),
+      type: "error",
+      details: {
+        errorName: "GraphRequestError",
+        errorMessage,
+      },
+    };
+    expect(() => buildAuditLine(envelope, new Date())).toThrow(/Bearer/);
+  });
+
   it(`truncates inputSummary first when the line exceeds ${AUDIT_MAX_LINE_BYTES} bytes`, () => {
     const fatPath = "x".repeat(5000);
     const envelope = {
@@ -369,7 +389,7 @@ describe("writeAudit + parseAuditLines", () => {
       details: { clientInfoPresent: false, agentIdAssigned: "abc-unknown-01jsessio" },
     };
     await writeAudit({ configDir: dir }, envelope, testSignal());
-    const scoped = await readAuditFile(dir, "anything", testSignal());
+    const scoped = await readAuditFile(dir, "01JABCDE0FGHJKMNPQRSTV0WXY", testSignal());
     const unscoped = await readAuditFile(dir, null, testSignal());
     expect(scoped.entries).toHaveLength(0);
     expect(unscoped.entries).toHaveLength(1);
@@ -377,7 +397,7 @@ describe("writeAudit + parseAuditLines", () => {
   });
 
   it("returns empty results when the audit file does not exist", async () => {
-    const result = await readAuditFile(dir, "01JNOFILE0FGHJKMNPQRSTV0WXY", testSignal());
+    const result = await readAuditFile(dir, "01JM1SS1NG0FGHJKMNPQRSTV0X", testSignal());
     expect(result.entries).toEqual([]);
     expect(result.skipped).toBe(0);
   });
@@ -470,7 +490,7 @@ describe("writeAudit per-type round-trip", () => {
       sessionId: "s",
       agentId: "a",
       userOid: "u",
-      projectId: "p",
+      projectId: "01JABCDE0FGHJKMNPQRSTV0WXY",
       type: "session_start",
       details: {
         ttlSeconds: 7200,
@@ -484,7 +504,7 @@ describe("writeAudit per-type round-trip", () => {
       sessionId: "s",
       agentId: "a",
       userOid: "u",
-      projectId: "p",
+      projectId: "01JABCDE0FGHJKMNPQRSTV0WXY",
       type: "session_end",
       details: { reason: AuditSessionEndReason.Ttl, writesUsed: 3, renewalsUsed: 0 },
     },
@@ -492,7 +512,7 @@ describe("writeAudit per-type round-trip", () => {
       sessionId: "s",
       agentId: "a",
       userOid: "u",
-      projectId: "p",
+      projectId: "01JABCDE0FGHJKMNPQRSTV0WXY",
       type: "frontmatter_reset",
       details: {
         reason: AuditFrontmatterResetReason.Missing,
@@ -504,7 +524,7 @@ describe("writeAudit per-type round-trip", () => {
       sessionId: "s",
       agentId: "a",
       userOid: "u",
-      projectId: "p",
+      projectId: "01JABCDE0FGHJKMNPQRSTV0WXY",
       type: "external_source_approval",
       details: {
         tool: "collab_write",
@@ -517,7 +537,7 @@ describe("writeAudit per-type round-trip", () => {
       sessionId: "s",
       agentId: "a",
       userOid: "u",
-      projectId: "p",
+      projectId: "01JABCDE0FGHJKMNPQRSTV0WXY",
       type: "scope_denied",
       details: { reason: "ancestry_escape", attemptedPath: "../../etc", resolvedItemId: "x" },
     },
@@ -526,7 +546,7 @@ describe("writeAudit per-type round-trip", () => {
   for (const envelope of types) {
     it(`round-trips type=${envelope.type}`, async () => {
       await writeAudit({ configDir: dir }, envelope, testSignal());
-      const result = await readAuditFile(dir, "p", testSignal());
+      const result = await readAuditFile(dir, "01JABCDE0FGHJKMNPQRSTV0WXY", testSignal());
       expect(result.entries.at(-1)!["type"]).toBe(envelope.type);
     });
   }

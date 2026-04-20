@@ -22,6 +22,18 @@ import { type GraphScope, toGraphScopes, defaultScopes } from "./scopes.js";
 
 const AUTHORITY_BASE = "https://login.microsoftonline.com";
 
+/**
+ * Allow-listed tenant identifiers per Microsoft's documented authority
+ * forms. Defence-in-depth — `tenantId` is operator-controlled today
+ * (`GRAPHDO_TENANT_ID`) but a malformed value would be silently
+ * splatted into the OAuth authority URL.
+ *
+ *   - `common`, `consumers`, `organizations` — well-known aliases.
+ *   - GUID — directory tenant id (case-insensitive).
+ *   - `<name>.onmicrosoft.com` — tenant primary domain.
+ */
+const TENANT_ID_RE = /^(?:common|consumers|organizations|[0-9a-fA-F-]{36}|[a-z0-9-]+\.onmicrosoft\.com)$/i;
+
 /** Default tenant: "common" allows any Microsoft account (personal + work/school). */
 export const DEFAULT_TENANT_ID = "common";
 
@@ -295,6 +307,12 @@ export class MsalAuthenticator implements Authenticator {
     configDir: string,
     openBrowser: (url: string) => Promise<void>,
   ) {
+    if (!TENANT_ID_RE.test(tenantId)) {
+      throw new Error(
+        `MsalAuthenticator: tenantId ${JSON.stringify(tenantId)} is not a recognised authority form ` +
+          `(expected 'common', 'consumers', 'organizations', a directory GUID, or '<name>.onmicrosoft.com')`,
+      );
+    }
     this.clientId = clientId;
     this.tenantId = tenantId;
     this.configDir = configDir;

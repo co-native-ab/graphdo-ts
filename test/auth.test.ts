@@ -146,6 +146,32 @@ describe("StaticAuthenticator", () => {
 // =========================================================================
 
 describe("MsalAuthenticator.login", () => {
+  it("rejects malformed tenantId at construction (defence in depth)", () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    expect(
+      () => new MsalAuthenticator("client-id", "evil.attacker.com/foo", dir, openBrowser),
+    ).toThrow(/tenantId/);
+    expect(() => new MsalAuthenticator("client-id", "", dir, openBrowser)).toThrow(/tenantId/);
+    expect(
+      () => new MsalAuthenticator("client-id", "common evil.example.com", dir, openBrowser),
+    ).toThrow(/tenantId/);
+  });
+
+  it("accepts the documented authority forms", () => {
+    const dir = getTempDir();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    for (const tid of [
+      "common",
+      "consumers",
+      "organizations",
+      "11111111-2222-3333-4444-555555555555",
+      "contoso.onmicrosoft.com",
+    ]) {
+      expect(() => new MsalAuthenticator("client-id", tid, dir, openBrowser)).not.toThrow();
+    }
+  });
+
   it("completes via browser login when interactive succeeds", async () => {
     const dir = getTempDir();
     const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
