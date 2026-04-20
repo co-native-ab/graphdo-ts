@@ -79,7 +79,9 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("collab_read");
     expect(names).toContain("collab_list_files");
     expect(names).toContain("collab_write");
-    expect(names).toHaveLength(30);
+    expect(names).toContain("collab_acquire_section");
+    expect(names).toContain("collab_release_section");
+    expect(names).toHaveLength(32);
   });
 
   // -------------------------------------------------------------------------

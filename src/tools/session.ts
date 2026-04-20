@@ -55,6 +55,7 @@ import {
 } from "../collab/graph.js";
 import {
   saveProjectMetadata,
+  loadProjectMetadata,
   upsertRecent,
   type ProjectMetadata,
   type RecentEntry,
@@ -62,6 +63,7 @@ import {
 import { NoActiveSessionError, SessionAlreadyActiveError } from "../collab/session.js";
 import { newUlid } from "../collab/ulid.js";
 import { writeAudit, AuditResult } from "../collab/audit.js";
+import { LeasesFileMissingError, readLeases } from "../collab/leases.js";
 import { listRootFolders } from "../graph/markdown.js";
 
 import { acquireFormSlot } from "./collab-forms.js";
@@ -157,15 +159,10 @@ export function registerSessionTools(server: McpServer, config: ServerConfig): T
           openWorldHint: false,
         },
       },
-      // eslint-disable-next-line @typescript-eslint/require-await
       async (_args, { signal }) => {
         try {
-          // `signal` is part of the convention (every async tool takes
-          // one) even though `session_status` is pure in-memory today.
-          // Future readers (lease summaries, on-demand sentinel re-read)
-          // will need it; threading it now keeps the signature stable.
           if (signal.aborted) throw signal.reason;
-          return runSessionStatus(config);
+          return await runSessionStatus(config, signal);
         } catch (err: unknown) {
           return formatError("session_status", err);
         }
@@ -505,16 +502,28 @@ async function runInitProject(
  * `session_status`, an expired session is reported as `expired: true`
  * (rather than `isError: true`) with the counters frozen so the agent
  * can call `session_renew` without first calling another tool.
+ *
+ * As of W3 Day 4 this also surfaces the current leases-sidecar `cTag`
+ * so agents have everything `collab_acquire_section` /
+ * `collab_release_section` need without a separate read (per §3.2.1).
+ * The lookup is best-effort: any Graph failure is logged and reported
+ * as `(unavailable)` so a single transient blip never breaks the
+ * read-only happy path.
  */
-function runSessionStatus(config: ServerConfig): {
+async function runSessionStatus(
+  config: ServerConfig,
+  signal: AbortSignal,
+): Promise<{
   content: { type: "text"; text: string }[];
-} {
+}> {
   const snap = config.sessionRegistry.snapshot();
   if (snap === null) {
     throw new NoActiveSessionError();
   }
   const expired = config.sessionRegistry.isExpired();
   const secondsRemaining = expired ? 0 : config.sessionRegistry.secondsRemaining();
+  const leasesCTag = await readLeasesCTagBestEffort(config, snap.projectId, signal);
+
   const lines: string[] = [];
   lines.push(`Collab session: ${expired ? "expired" : "active"}`);
   lines.push(`  projectId: ${snap.projectId}`);
@@ -534,6 +543,7 @@ function runSessionStatus(config: ServerConfig): {
       `project=${snap.sourceCounters.project} ` +
       `external=${snap.sourceCounters.external}`,
   );
+  lines.push(`  leasesCTag: ${leasesCTag}`);
   if (expired) {
     lines.push("");
     lines.push("Session is past its TTL. Use session_renew to reset the clock.");
@@ -541,6 +551,40 @@ function runSessionStatus(config: ServerConfig): {
   return {
     content: [{ type: "text", text: lines.join("\n") }],
   };
+}
+
+/**
+ * Best-effort fetch of the leases-sidecar `cTag` for the active
+ * project. Returns one of:
+ *
+ *   - the live `cTag` when the sidecar exists,
+ *   - `"(none)"` when the sidecar has not been lazy-created yet
+ *     (`LeasesFileMissingError`),
+ *   - `"(unavailable)"` for any other failure (logged at `warn`).
+ *
+ * The metadata lookup uses the local pin block so we never depend on
+ * the sentinel being readable to surface the cTag — a tampered project
+ * still gets a useful status line.
+ */
+async function readLeasesCTagBestEffort(
+  config: ServerConfig,
+  projectId: string,
+  signal: AbortSignal,
+): Promise<string> {
+  try {
+    const metadata = await loadProjectMetadata(config.configDir, projectId, signal);
+    if (metadata === null) return "(no project metadata)";
+    const projectFolderId = validateGraphId("projectFolderId", metadata.folderId);
+    const { item } = await readLeases(config.graphClient, projectFolderId, signal);
+    return item.cTag ?? "(unknown)";
+  } catch (err: unknown) {
+    if (err instanceof LeasesFileMissingError) return "(none)";
+    logger.warn("session_status: leases cTag lookup failed (best-effort)", {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "(unavailable)";
+  }
 }
 
 /**

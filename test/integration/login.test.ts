@@ -38,8 +38,10 @@ describe("integration: discovery & login", () => {
 
       expect(names).toEqual([
         "auth_status",
+        "collab_acquire_section",
         "collab_list_files",
         "collab_read",
+        "collab_release_section",
         "collab_write",
         "login",
         "logout",

@@ -296,6 +296,79 @@ export class ExternalSourceDeclinedError extends Error {
   }
 }
 
+/**
+ * Raised by `collab_acquire_section` and `collab_release_section`
+ * (W3 Day 4) when the supplied `sectionId` does not slugify to any
+ * heading currently present in the authoritative file's body.
+ *
+ * Per `docs/plans/collab-v1.md` §2.3 the error carries the list of
+ * current heading slugs as a hint so the agent can re-issue the call
+ * with the right id (e.g. after a heading rename). Lease tools use the
+ * strict slug-equality contract — there is no slug-drift / content-hash
+ * fallback (that lands with `collab_apply_proposal` in W4 Day 3).
+ */
+export class SectionNotFoundError extends Error {
+  constructor(
+    public readonly sectionId: string,
+    public readonly normalisedSlug: string,
+    public readonly currentSlugs: readonly string[],
+  ) {
+    const sample = currentSlugs.slice(0, 10).join(", ");
+    super(
+      `Section "${sectionId}" (slug "${normalisedSlug}") not found in the authoritative file. ` +
+        `Current heading slugs: ${currentSlugs.length === 0 ? "(no headings)" : sample}` +
+        (currentSlugs.length > 10 ? ", … (truncated)" : "") +
+        ". Re-read the authoritative file with collab_read and re-issue with the new slug.",
+    );
+    this.name = "SectionNotFoundError";
+  }
+}
+
+/**
+ * Raised by `collab_acquire_section` (W3 Day 4) when the requested
+ * section already has an active (non-expired) lease held by a
+ * **different** agent. Carries the holder's `agentId` and lease
+ * `expiresAt` so the agent can decide to wait or report up.
+ *
+ * Per §2.5 the error is in the typed-error table — agents need the
+ * structured `holderAgentId`/`expiresAt` to coordinate.
+ */
+export class SectionAlreadyLeasedError extends Error {
+  constructor(
+    public readonly sectionSlug: string,
+    public readonly holderAgentId: string,
+    public readonly holderAgentDisplayName: string,
+    public readonly expiresAt: string,
+  ) {
+    super(
+      `Section "${sectionSlug}" is already leased by ${holderAgentDisplayName} ` +
+        `(agentId ${holderAgentId}); lease expires at ${expiresAt}.`,
+    );
+    this.name = "SectionAlreadyLeasedError";
+  }
+}
+
+/**
+ * Raised by `collab_release_section` (W3 Day 4) when the agent tries to
+ * release a lease that is currently held by a **different** agent.
+ * Releasing a lease the caller never acquired is a programming error,
+ * not a coordination error — surface it as a hard refusal so the agent
+ * notices the bug. No-op when the lease is already absent (per §2.3).
+ */
+export class LeaseNotHeldError extends Error {
+  constructor(
+    public readonly sectionSlug: string,
+    public readonly callerAgentId: string,
+    public readonly holderAgentId: string,
+  ) {
+    super(
+      `Refusing to release lease on section "${sectionSlug}": held by ${holderAgentId}, ` +
+        `not by this agent (${callerAgentId}). Releasing a stale lease is rejected.`,
+    );
+    this.name = "LeaseNotHeldError";
+  }
+}
+
 // Note: `NoActiveSessionError` and `SessionAlreadyActiveError` live in
 // `src/collab/session.ts` next to the registry that throws them. They are
 // re-exported here for the rare consumer that wants a single import — but
