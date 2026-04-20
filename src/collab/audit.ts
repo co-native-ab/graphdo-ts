@@ -59,7 +59,7 @@ export const AUDIT_DIR_NAME = "audit";
 // Per the codebase convention (see {@link import("../scopes.js").GraphScope},
 // {@link import("../graph/client.js").HttpMethod},
 // {@link import("../graph/markdown.js").MarkdownFolderEntryKind},
-// {@link import("../tools/collab.js").DocIdSource}), audit-envelope
+// {@link import("../tools/collab/ops.js").DocIdSource}), audit-envelope
 // discriminator strings are modelled as TypeScript string enums. The
 // values match the §3.6 wire format byte-for-byte so JSON.stringify
 // produces the documented schema and consumers (e.g. operators
