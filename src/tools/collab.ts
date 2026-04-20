@@ -23,7 +23,9 @@ import {
   ExternalSourceDeclinedError,
   LeaseNotHeldError,
   OutOfScopeError,
+  ProposalIdCollisionError,
   SectionAlreadyLeasedError,
+  SectionAnchorLostError,
   SectionNotFoundError,
   UserCancelledError,
 } from "../errors.js";
@@ -68,8 +70,13 @@ import {
   type LeaseEntry,
   type LeasesFile,
 } from "../collab/leases.js";
-import { headingSlugSet, normaliseSectionId } from "../collab/slug.js";
+import { headingSlugSet, normaliseSectionId, PREAMBLE_SYNTHETIC_SLUG } from "../collab/slug.js";
 import { resolveScopedPath, MAX_ANCESTRY_HOPS } from "../collab/scope.js";
+import {
+  computeSectionContentHash,
+  findSectionByAnchor,
+  walkSectionsWithHashes,
+} from "../collab/authorship.js";
 import {
   CollabFrontmatterSchema,
   joinFrontmatter,
@@ -200,6 +207,26 @@ const COLLAB_WRITE_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+const COLLAB_CREATE_PROPOSAL_DEF: ToolDef = {
+  name: "collab_create_proposal",
+  title: "Create Section Proposal",
+  description:
+    "Propose a replacement body for one section of the authoritative file " +
+    "without overwriting it. Writes the proposed body to " +
+    "`/proposals/<ulid>.md` and records a `proposals[]` entry in the " +
+    "authoritative frontmatter (target_section_slug + " +
+    "target_section_content_hash_at_create — the latter survives heading " +
+    "renames between create and apply). Counts as 1 write toward the " +
+    "session budget. Provide `targetSectionId` (raw heading text or " +
+    "pre-computed slug), `body` (proposed section markdown), `source` " +
+    "(same enum as collab_write — 'external' triggers a browser " +
+    "re-approval), and `authoritativeCTag` (from collab_read). Errors: " +
+    "SectionAnchorLostError (target slug does not match any current " +
+    "heading), CollabCTagMismatchError, BudgetExhaustedError, " +
+    "ExternalSourceDeclinedError, ProposalIdCollisionError.",
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 const COLLAB_ACQUIRE_SECTION_DEF: ToolDef = {
   name: "collab_acquire_section",
   title: "Acquire Section Lease",
@@ -235,6 +262,7 @@ export const COLLAB_TOOL_DEFS: readonly ToolDef[] = [
   COLLAB_READ_DEF,
   COLLAB_LIST_FILES_DEF,
   COLLAB_WRITE_DEF,
+  COLLAB_CREATE_PROPOSAL_DEF,
   COLLAB_ACQUIRE_SECTION_DEF,
   COLLAB_RELEASE_SECTION_DEF,
 ];
@@ -772,6 +800,179 @@ async function persistAuthoritativeMetadata(
     },
     signal,
   );
+}
+
+// ---------------------------------------------------------------------------
+// collab_create_proposal helpers (W4 Day 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum attempts to mint a non-colliding proposal id before raising
+ * {@link ProposalIdCollisionError}. ULIDs are 80 bits of randomness, so
+ * one attempt is overwhelmingly enough; the retry budget exists for
+ * defence in depth (e.g. a misbehaving cooperator pre-creating files
+ * matching newly-minted ids) and for telemetry.
+ */
+const PROPOSAL_ID_RETRY_LIMIT = 3;
+
+/** Folder name used by the proposal-write helpers (matches §4.6 layout). */
+const PROPOSALS_FOLDER_NAME = "proposals";
+
+/**
+ * Execute the §2.3 `collab_create_proposal` two-write flow: PUT a
+ * proposal body file under `/proposals/<ulid>.md` (byPath, fresh ULID
+ * with a small retry budget for the ProposalIdCollision race), then
+ * append a `proposals[]` entry to the live authoritative frontmatter
+ * and CAS-write it back with the supplied `authoritativeCTag`.
+ *
+ * Used by both the standalone `collab_create_proposal` MCP tool and by
+ * the `collab_write` `conflictMode: "proposal"` diversion path. The
+ * latter case sets `targetSectionSlug` to {@link PREAMBLE_SYNTHETIC_SLUG}
+ * because it diverts the agent's full-file write rather than a
+ * pre-targeted section.
+ *
+ * Errors propagate as-is so the caller can map to the standard tool
+ * error envelope (CollabCTagMismatchError, MarkdownFileTooLargeError,
+ * ProposalIdCollisionError, etc.). Side effects (write counters,
+ * audit emission) live in the callers — this helper is the I/O
+ * orchestrator only.
+ */
+async function runProposalWrite(
+  args: {
+    client: GraphClient;
+    config: ServerConfig;
+    metadata: NonNullable<Awaited<ReturnType<typeof loadProjectMetadata>>>;
+    session: NonNullable<ReturnType<ServerConfig["sessionRegistry"]["snapshot"]>>;
+    targetSectionSlug: string;
+    targetSectionContentHashAtCreate: string;
+    proposalBody: string;
+    rationale: string;
+    source: "chat" | "project" | "external";
+    authoritativeCTag: string;
+    liveAuthoritativeItem: DriveItem;
+    liveAuthoritativeContent: string;
+  },
+  signal: AbortSignal,
+): Promise<{
+  proposalId: string;
+  proposalItem: DriveItem;
+  authoritativeUpdated: DriveItem;
+  newDocId: string;
+}> {
+  // 1. Resolve / lazy-create the proposals/ folder.
+  const projectFolderId = validateGraphId("projectFolderId", args.metadata.folderId);
+  const proposalsFolderId = await ensureParentFolder(
+    args.client,
+    projectFolderId,
+    [PROPOSALS_FOLDER_NAME],
+    signal,
+  );
+
+  // 2. Mint a ULID and PUT the proposal body byPath, retrying on the
+  //    astronomically-unlikely ProposalIdCollision race. The clock
+  //    source is `config.now` so deterministic-time tests are stable.
+  const now = (args.config.now ?? ((): Date => new Date()))();
+  const newUlidWithClock = (): string => newUlid(() => now.getTime());
+  let proposalId = "";
+  let proposalItem: DriveItem | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < PROPOSAL_ID_RETRY_LIMIT; attempt++) {
+    proposalId = newUlidWithClock();
+    const fileName = `${proposalId}.md`;
+    const target: WriteProjectFileTarget = {
+      kind: "create",
+      folderId: proposalsFolderId,
+      fileName,
+      contentType: COLLAB_CONTENT_TYPE_MARKDOWN,
+    };
+    try {
+      proposalItem = await writeProjectFile(args.client, target, args.proposalBody, signal);
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof ProjectFileAlreadyExistsError) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (proposalItem === null) {
+    if (lastErr instanceof ProjectFileAlreadyExistsError) {
+      throw new ProposalIdCollisionError(projectFolderId, proposalId, PROPOSAL_ID_RETRY_LIMIT);
+    }
+    if (lastErr instanceof Error) {
+      throw lastErr;
+    }
+    throw new Error("internal: proposal write loop ended without an item");
+  }
+
+  // 3. Build the next authoritative frontmatter: parse the live block
+  //    (or recover from cache if missing/malformed), append the proposal
+  //    entry, leave the body intact. The body comes from the live
+  //    content split — we never overwrite the human's prose on a
+  //    proposal-create.
+  const liveSplit = splitFrontmatter(args.liveAuthoritativeContent);
+  const liveBody = liveSplit !== null ? liveSplit.body : args.liveAuthoritativeContent;
+  const liveRead = readMarkdownFrontmatter(args.liveAuthoritativeContent);
+
+  let baseFrontmatter: CollabFrontmatter;
+  if (liveRead.kind === "parsed") {
+    baseFrontmatter = liveRead.frontmatter;
+  } else if (args.metadata.docId !== null) {
+    baseFrontmatter = {
+      collab: {
+        version: 1,
+        doc_id: args.metadata.docId,
+        created_at: now.toISOString(),
+        sections: [],
+        proposals: [],
+        authorship: [],
+      },
+    };
+  } else {
+    throw new DocIdRecoveryRequiredError(args.metadata.projectId);
+  }
+
+  const proposalEntry: CollabFrontmatter["collab"]["proposals"][number] = {
+    id: proposalId,
+    target_section_slug: args.targetSectionSlug,
+    target_section_content_hash_at_create: args.targetSectionContentHashAtCreate,
+    author_agent_id: args.session.agentId,
+    author_display_name: args.session.agentId,
+    created_at: now.toISOString(),
+    status: "open",
+    body_path: `${PROPOSALS_FOLDER_NAME}/${proposalId}.md`,
+    rationale: args.rationale,
+    source: args.source,
+  };
+
+  const nextFrontmatter: CollabFrontmatter = {
+    collab: {
+      ...baseFrontmatter.collab,
+      proposals: [...baseFrontmatter.collab.proposals, proposalEntry],
+    },
+  };
+
+  const yaml = serializeFrontmatter(nextFrontmatter);
+  const newContent = joinFrontmatter(yaml, liveBody);
+
+  // 4. CAS-write the authoritative file. A 412 here surfaces as
+  //    CollabCTagMismatchError — the agent re-reads and retries.
+  const authoritativeItemId = validateGraphId("authoritativeItemId", args.liveAuthoritativeItem.id);
+  const authoritativeUpdated = await writeAuthoritative(
+    args.client,
+    authoritativeItemId,
+    args.authoritativeCTag,
+    newContent,
+    signal,
+  );
+
+  return {
+    proposalId,
+    proposalItem,
+    authoritativeUpdated,
+    newDocId: nextFrontmatter.collab.doc_id,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1451,23 +1652,6 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
       },
       async ({ path, content, cTag, source, conflictMode, intent }, { signal }) => {
         try {
-          if (conflictMode === "proposal") {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text",
-                  text:
-                    "conflictMode='proposal' is not yet supported in this " +
-                    "milestone (W3 Day 2). Use collab_create_proposal " +
-                    "directly once W4 Day 2 ships, or retry with " +
-                    "conflictMode='fail' to surface the cTag mismatch and " +
-                    "reconcile manually.",
-                },
-              ],
-            };
-          }
-
           const { session, metadata } = await requireActiveSession(config, signal);
 
           // Pre-check the write budget so external-source writes never
@@ -1634,6 +1818,7 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           let updated: DriveItem;
           let writtenDocId: string | null = null;
           let frontmatterReset: FrontmatterResetAudit | null = null;
+          let divertedProposalId: string | null = null;
           try {
             if (isAuthoritative) {
               if (resolvedItem === null) {
@@ -1682,15 +1867,89 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
               updated = await writeProjectFile(client, target, content, signal);
             }
           } catch (err) {
+            // §2.3: `conflictMode: "proposal"` diverts an authoritative
+            // CAS-mismatch into a `/proposals/<ulid>.md` write +
+            // frontmatter `proposals[]` entry, using the live cTag the
+            // mismatch error carried. Diversion only applies to
+            // authoritative writes; non-authoritative 412s mean a
+            // cooperator overwrote a draft / proposal file under us and
+            // there is no diversion target to fall back to.
             if (
+              err instanceof CollabCTagMismatchError &&
+              conflictMode === "proposal" &&
+              isAuthoritative &&
+              resolvedItem !== null
+            ) {
+              try {
+                const liveContent = await getDriveItemContent(
+                  client,
+                  validateGraphId("authoritativeItemId", resolvedItem.id),
+                  signal,
+                );
+                const liveBody = (() => {
+                  const split = splitFrontmatter(liveContent);
+                  return split !== null ? split.body : liveContent;
+                })();
+                const sections = walkSectionsWithHashes(liveBody);
+                const preamble = sections.find((s) => s.slug === PREAMBLE_SYNTHETIC_SLUG);
+                const preambleHash = preamble?.contentHash ?? computeSectionContentHash("");
+                const liveCTag = err.currentCTag ?? "";
+                if (liveCTag.length === 0) {
+                  // Without a live cTag we cannot CAS-write the
+                  // frontmatter update; surface the original mismatch.
+                  return formatError("collab_write", err);
+                }
+                const proposalResult = await runProposalWrite(
+                  {
+                    client,
+                    config,
+                    metadata,
+                    session,
+                    targetSectionSlug: PREAMBLE_SYNTHETIC_SLUG,
+                    targetSectionContentHashAtCreate: preambleHash,
+                    proposalBody: content,
+                    rationale: intent ?? "",
+                    source,
+                    authoritativeCTag: liveCTag,
+                    liveAuthoritativeItem: err.currentItem,
+                    liveAuthoritativeContent: liveContent,
+                  },
+                  signal,
+                );
+                updated = proposalResult.proposalItem;
+                divertedProposalId = proposalResult.proposalId;
+                writtenDocId = proposalResult.newDocId;
+                // Persist the new authoritative cTag/revision under the
+                // pin block so subsequent reads see the up-to-date
+                // values without an extra round-trip.
+                await persistAuthoritativeMetadata(
+                  config,
+                  metadata,
+                  proposalResult.authoritativeUpdated,
+                  proposalResult.newDocId,
+                  signal,
+                );
+              } catch (divErr) {
+                if (
+                  divErr instanceof CollabCTagMismatchError ||
+                  divErr instanceof MarkdownFileTooLargeError ||
+                  divErr instanceof ProposalIdCollisionError ||
+                  divErr instanceof DocIdRecoveryRequiredError
+                ) {
+                  return formatError("collab_write", divErr);
+                }
+                throw divErr;
+              }
+            } else if (
               err instanceof MarkdownFileTooLargeError ||
               err instanceof CollabCTagMismatchError ||
               err instanceof ProjectFileAlreadyExistsError ||
               err instanceof DocIdRecoveryRequiredError
             ) {
               return formatError("collab_write", err);
+            } else {
+              throw err;
             }
-            throw err;
           }
 
           // Persist counters + per-write cache updates atomically with
@@ -1698,7 +1957,11 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
           await config.sessionRegistry.incrementWrites(signal);
           await config.sessionRegistry.incrementSource(source, signal);
 
-          if (isAuthoritative && writtenDocId !== null) {
+          // For non-diverted authoritative writes, refresh the pin
+          // block. The diversion path already persisted the new
+          // authoritative cTag/revision (via the proposal-write helper)
+          // before reaching this point.
+          if (isAuthoritative && divertedProposalId === null && writtenDocId !== null) {
             await persistAuthoritativeMetadata(config, metadata, updated, writtenDocId, signal);
           }
 
@@ -1736,6 +1999,9 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             conflictMode: toAuditConflictMode(conflictMode),
             contentSizeBytes: bytes,
           };
+          if (divertedProposalId !== null) {
+            inputSummary.proposalId = divertedProposalId;
+          }
           await writeAudit(
             config,
             {
@@ -1765,10 +2031,14 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             `bytes: ${updated.size ?? bytes}`,
             `cTag: ${updated.cTag ?? "unknown"}`,
             updated.version !== undefined ? `revision: ${updated.version}` : "revision: (unknown)",
-            `kind: ${writeIsCreate ? "created" : "replaced"}`,
-            `isAuthoritative: ${isAuthoritative ? "true" : "false"}`,
+            `kind: ${divertedProposalId !== null ? "diverted" : writeIsCreate ? "created" : "replaced"}`,
+            `isAuthoritative: ${isAuthoritative && divertedProposalId === null ? "true" : "false"}`,
             `source: ${source}`,
           ];
+          if (divertedProposalId !== null) {
+            lines.push(`diverted: ${path} → proposals/${divertedProposalId}.md`);
+            lines.push(`proposalId: ${divertedProposalId}`);
+          }
           const refreshed = config.sessionRegistry.snapshot();
           if (refreshed !== null) {
             lines.push(`writes: ${refreshed.writesUsed} / ${refreshed.writeBudgetTotal}`);
@@ -1785,6 +2055,290 @@ export function registerCollabTools(server: McpServer, config: ServerConfig): To
             return formatError("collab_write", err);
           }
           return formatError("collab_write", err);
+        }
+      },
+    ),
+  );
+
+  // -------------------------------------------------------------------------
+  // collab_create_proposal (W4 Day 2)
+  // -------------------------------------------------------------------------
+  entries.push(
+    defineTool(
+      server,
+      COLLAB_CREATE_PROPOSAL_DEF,
+      {
+        inputSchema: {
+          targetSectionId: z
+            .string()
+            .min(1)
+            .describe(
+              "Section to be replaced — raw heading text (e.g. " +
+                "'## Introduction') or a pre-computed GitHub-flavored slug " +
+                "(e.g. 'introduction'). Must match a current heading in the " +
+                "authoritative file at create time.",
+            ),
+          body: z
+            .string()
+            .describe(
+              "Proposed new body for the target section. Written verbatim " +
+                "to /proposals/<ulid>.md. Must be ≤ 4 MiB after UTF-8 encoding.",
+            ),
+          rationale: z
+            .string()
+            .max(8192)
+            .optional()
+            .describe(
+              "Free-text explanation persisted in the authoritative " +
+                "frontmatter `proposals[].rationale` for the human reviewer.",
+            ),
+          source: z
+            .enum(["chat", "project", "external"])
+            .describe(
+              "Where the proposal body originated. 'external' triggers a " +
+                "browser re-approval before any Graph round-trip, mirroring " +
+                "collab_write.source semantics.",
+            ),
+          authoritativeCTag: z
+            .string()
+            .min(1)
+            .describe(
+              "Opaque cTag for the authoritative file, from the most recent " +
+                "collab_read. Required — the frontmatter update is a CAS write.",
+            ),
+          intent: z
+            .string()
+            .max(2048)
+            .optional()
+            .describe(
+              "Free-text intent shown on re-prompt forms (external-source). " +
+                "Helps the human decide whether to approve.",
+            ),
+        },
+        annotations: {
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async (
+        { targetSectionId, body, rationale, source, authoritativeCTag, intent },
+        { signal },
+      ) => {
+        try {
+          const { session, metadata } = await requireActiveSession(config, signal);
+
+          // Pre-flight write-budget check (mirrors collab_write — keeps
+          // the human's time uncontested when the budget is gone).
+          if (session.writesUsed >= session.writeBudgetTotal) {
+            return formatError(
+              "collab_create_proposal",
+              new BudgetExhaustedError(session.writesUsed, session.writeBudgetTotal),
+            );
+          }
+
+          const token = await config.authenticator.token(signal);
+          const client = new GraphClient(config.graphBaseUrl, {
+            getToken: () => Promise.resolve(token),
+          });
+
+          // 1. Read the live authoritative file: needed to validate the
+          //    target section anchor and to capture the current body so
+          //    the frontmatter update step does not clobber it.
+          const authoritativeItemId = validateGraphId(
+            "authoritativeItemId",
+            metadata.pinnedAuthoritativeFileId,
+          );
+          const liveAuthoritativeItem = await getDriveItem(client, authoritativeItemId, signal);
+          const liveContent = await getDriveItemContent(client, authoritativeItemId, signal);
+          const liveSplit = splitFrontmatter(liveContent);
+          const liveBody = liveSplit !== null ? liveSplit.body : liveContent;
+
+          // 2. Validate the target section anchor: at create time the
+          //    slug must uniquely identify a current heading. The
+          //    slug-drift fallback is reserved for apply (W4 Day 3) —
+          //    create time has no `contentHashAtCreate` to fall back to.
+          const targetSlug = normaliseSectionId(targetSectionId);
+          const anchorResult = findSectionByAnchor(liveBody, targetSlug);
+          if (anchorResult.kind !== "slug_match") {
+            const currentSlugs =
+              anchorResult.kind === "anchor_lost" ? anchorResult.currentSlugs : [];
+            return formatError(
+              "collab_create_proposal",
+              new SectionAnchorLostError("(unminted)", targetSlug, "", currentSlugs),
+            );
+          }
+          const targetSection = anchorResult.section;
+          const contentHashAtCreate = targetSection.contentHash;
+
+          // 3. External-source re-approval form (before any Graph
+          //    write). Cancel → ExternalSourceDeclinedError + audit.
+          const bytes = Buffer.byteLength(body, "utf-8");
+          if (source === "external") {
+            try {
+              await runExternalSourceReprompt(
+                config,
+                {
+                  path: `proposals/<new>.md (target: ${targetSlug})`,
+                  intent,
+                  sourceCounters: session.sourceCounters,
+                  isCreate: true,
+                  bytes,
+                },
+                signal,
+              );
+            } catch (err) {
+              if (err instanceof ExternalSourceDeclinedError) {
+                await writeAudit(
+                  config,
+                  {
+                    sessionId: session.sessionId,
+                    agentId: session.agentId,
+                    userOid: session.userOid,
+                    projectId: metadata.projectId,
+                    tool: "collab_create_proposal",
+                    result: AuditResult.Failure,
+                    intent,
+                    type: "external_source_approval",
+                    details: {
+                      tool: "collab_create_proposal",
+                      path: `proposals/<new>.md`,
+                      outcome: AuditApprovalOutcome.Declined,
+                      csrfTokenMatched: true,
+                    },
+                  },
+                  signal,
+                );
+                return formatError("collab_create_proposal", err);
+              }
+              throw err;
+            }
+            await writeAudit(
+              config,
+              {
+                sessionId: session.sessionId,
+                agentId: session.agentId,
+                userOid: session.userOid,
+                projectId: metadata.projectId,
+                tool: "collab_create_proposal",
+                result: AuditResult.Success,
+                intent,
+                type: "external_source_approval",
+                details: {
+                  tool: "collab_create_proposal",
+                  path: `proposals/<new>.md`,
+                  outcome: AuditApprovalOutcome.Approved,
+                  csrfTokenMatched: true,
+                },
+              },
+              signal,
+            );
+          }
+
+          // 4. Run the two-write proposal flow.
+          const cTagBefore = liveAuthoritativeItem.cTag ?? null;
+          let proposalResult;
+          try {
+            proposalResult = await runProposalWrite(
+              {
+                client,
+                config,
+                metadata,
+                session,
+                targetSectionSlug: targetSlug,
+                targetSectionContentHashAtCreate: contentHashAtCreate,
+                proposalBody: body,
+                rationale: rationale ?? "",
+                source,
+                authoritativeCTag,
+                liveAuthoritativeItem,
+                liveAuthoritativeContent: liveContent,
+              },
+              signal,
+            );
+          } catch (err) {
+            if (
+              err instanceof CollabCTagMismatchError ||
+              err instanceof MarkdownFileTooLargeError ||
+              err instanceof ProposalIdCollisionError ||
+              err instanceof DocIdRecoveryRequiredError
+            ) {
+              return formatError("collab_create_proposal", err);
+            }
+            throw err;
+          }
+
+          // 5. Persist counters + pin block updates (mirrors
+          //    collab_write's bookkeeping).
+          await config.sessionRegistry.incrementWrites(signal);
+          await config.sessionRegistry.incrementSource(source, signal);
+          await persistAuthoritativeMetadata(
+            config,
+            metadata,
+            proposalResult.authoritativeUpdated,
+            proposalResult.newDocId,
+            signal,
+          );
+
+          // 6. §3.6 audit.
+          const inputSummary: AuditInputSummary = {
+            path: proposalResult.proposalItem.name,
+            source: toAuditWriteSource(source),
+            contentSizeBytes: bytes,
+            sectionId: targetSlug,
+            proposalId: proposalResult.proposalId,
+          };
+          if (rationale !== undefined && rationale.length > 0) {
+            inputSummary.rationaleSizeBytes = Buffer.byteLength(rationale, "utf-8");
+          }
+          await writeAudit(
+            config,
+            {
+              sessionId: session.sessionId,
+              agentId: session.agentId,
+              userOid: session.userOid,
+              projectId: metadata.projectId,
+              tool: "collab_create_proposal",
+              result: AuditResult.Success,
+              intent,
+              type: "tool_call",
+              details: {
+                inputSummary,
+                cTagBefore,
+                cTagAfter: proposalResult.authoritativeUpdated.cTag ?? null,
+                revisionAfter: proposalResult.authoritativeUpdated.version ?? null,
+                bytes,
+                source: toAuditWriteSource(source),
+                resolvedItemId: proposalResult.proposalItem.id,
+              },
+            },
+            signal,
+          );
+
+          const lines = [
+            `proposalId: ${proposalResult.proposalId}`,
+            `proposalFile: proposals/${proposalResult.proposalId}.md (${proposalResult.proposalItem.id})`,
+            `targetSectionSlug: ${targetSlug}`,
+            `targetSectionContentHashAtCreate: ${contentHashAtCreate}`,
+            `bytes: ${proposalResult.proposalItem.size ?? bytes}`,
+            `authoritativeCTag: ${proposalResult.authoritativeUpdated.cTag ?? "unknown"}`,
+            proposalResult.authoritativeUpdated.version !== undefined
+              ? `authoritativeRevision: ${proposalResult.authoritativeUpdated.version}`
+              : "authoritativeRevision: (unknown)",
+            `source: ${source}`,
+          ];
+          const refreshed = config.sessionRegistry.snapshot();
+          if (refreshed !== null) {
+            lines.push(`writes: ${refreshed.writesUsed} / ${refreshed.writeBudgetTotal}`);
+            lines.push(
+              `source counters: chat=${refreshed.sourceCounters.chat} ` +
+                `project=${refreshed.sourceCounters.project} ` +
+                `external=${refreshed.sourceCounters.external}`,
+            );
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (err) {
+          return formatError("collab_create_proposal", err);
         }
       },
     ),
