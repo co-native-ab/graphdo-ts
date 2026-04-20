@@ -18,7 +18,7 @@ import { MAIL_TOOL_DEFS, registerMailTools } from "./tools/mail.js";
 import { MARKDOWN_TOOL_DEFS, registerMarkdownTools } from "./tools/markdown.js";
 import { TODO_TOOL_DEFS, STEP_TOOL_DEFS, registerTodoTools } from "./tools/todo.js";
 import { CONFIG_TOOL_DEFS, registerConfigTools } from "./tools/config.js";
-import { COLLAB_TOOL_DEFS, registerCollabTools } from "./tools/collab.js";
+import { COLLAB_TOOL_DEFS, registerCollabTools } from "./tools/collab/index.js";
 import { SESSION_TOOL_DEFS, registerSessionTools } from "./tools/session.js";
 import { STATUS_TOOL_DEFS, registerStatusTool } from "./tools/status.js";
 import type { ToolEntry } from "./tool-registry.js";
