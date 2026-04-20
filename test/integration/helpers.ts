@@ -91,7 +91,7 @@ export async function teardownIntegrationEnv(env: IntegrationEnv): Promise<void>
 export async function createTestClient(
   env: IntegrationEnv,
   authenticator: MockAuthenticator,
-  opts?: { openBrowser?: (url: string) => Promise<void> },
+  opts?: { openBrowser?: (url: string) => Promise<void>; now?: () => Date },
 ): Promise<Client> {
   const server = await createMcpServer(
     {
@@ -99,6 +99,7 @@ export async function createTestClient(
       graphBaseUrl: env.graphUrl,
       configDir: env.configDir,
       openBrowser: opts?.openBrowser ?? (() => Promise.reject(new Error("no browser in tests"))),
+      ...(opts?.now ? { now: opts.now } : {}),
     },
     testSignal(),
   );
