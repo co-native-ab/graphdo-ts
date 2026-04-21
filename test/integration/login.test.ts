@@ -1,6 +1,7 @@
 // Integration tests for tool discovery and login flow.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { UserCancelledError } from "../../src/errors.js";
 import {
   setupIntegrationEnv,
   teardownIntegrationEnv,
@@ -183,6 +184,70 @@ describe("integration: discovery & login", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual(["auth_status", "login", "logout"]);
+    });
+
+    it("logout returns friendly message when not logged in", async () => {
+      const notAuthed = new MockAuthenticator();
+      const client = await createTestClient(env, notAuthed);
+
+      const result = (await client.callTool({
+        name: "logout",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toContain("Not logged in");
+    });
+
+    it("login returns cancelled message when user cancels", async () => {
+      class CancellingAuth extends MockAuthenticator {
+        override login(): Promise<never> {
+          return Promise.reject(new UserCancelledError("Login cancelled by user"));
+        }
+      }
+      const client = await createTestClient(env, new CancellingAuth());
+
+      const result = (await client.callTool({
+        name: "login",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toBe("Login cancelled.");
+    });
+
+    it("logout returns cancelled message when user cancels", async () => {
+      class CancellingAuth extends MockAuthenticator {
+        override logout(): Promise<never> {
+          return Promise.reject(new UserCancelledError("Logout cancelled by user"));
+        }
+      }
+      const client = await createTestClient(env, new CancellingAuth({ token: "x" }));
+
+      const result = (await client.callTool({
+        name: "logout",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(firstText(result)).toBe("Logout cancelled.");
+    });
+
+    it("logout returns a formatted error when the authenticator throws", async () => {
+      class ExplodingAuth extends MockAuthenticator {
+        override logout(): Promise<never> {
+          return Promise.reject(new Error("token cache unreadable"));
+        }
+      }
+      const client = await createTestClient(env, new ExplodingAuth({ token: "x" }));
+
+      const result = (await client.callTool({
+        name: "logout",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toMatch(/Logout failed: token cache unreadable/);
     });
   });
 });

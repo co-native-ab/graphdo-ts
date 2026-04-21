@@ -467,5 +467,49 @@ describe("LoginLoopbackClient", () => {
       const result = await authPromise;
       expect(result.code).toBe("AUTH_CODE");
     });
+
+    it("rejects POST /cancel with malformed JSON body (400)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{not json",
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toMatch(/Invalid request body/);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
+
+    it("rejects POST /cancel with payload larger than the 1 MiB cap (413)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        // 1 MiB + 1 byte of JSON-safe filler puts us over MAX_BODY_SIZE.
+        const oversized = JSON.stringify({ filler: "x".repeat(1_048_577) });
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: oversized,
+        });
+        expect(res.status).toBe(413);
+        expect(await res.text()).toMatch(/Payload Too Large/);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
   });
 });

@@ -134,6 +134,62 @@ describe("StaticAuthenticator", () => {
     const info = await auth.accountInfo(testSignal());
     expect(info).toEqual({ username: "static-token" });
   });
+
+  it("grantedScopes returns the default scope set", async () => {
+    const auth = new StaticAuthenticator("t");
+    const scopes = await auth.grantedScopes(testSignal());
+    expect(Array.isArray(scopes)).toBe(true);
+    expect(scopes.length).toBeGreaterThan(0);
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — constructor validation
+// =========================================================================
+
+describe("MsalAuthenticator constructor", () => {
+  const noopOpen = () => Promise.resolve();
+
+  it.each(["common", "consumers", "organizations"])(
+    "accepts well-known tenant alias %s",
+    (tenant) => {
+      expect(
+        () => new MsalAuthenticator("client-id", tenant, getTempDir(), noopOpen),
+      ).not.toThrow();
+    },
+  );
+
+  it("accepts a GUID tenant id", () => {
+    expect(
+      () =>
+        new MsalAuthenticator(
+          "client-id",
+          "11111111-2222-3333-4444-555555555555",
+          getTempDir(),
+          noopOpen,
+        ),
+    ).not.toThrow();
+  });
+
+  it("accepts a <name>.onmicrosoft.com tenant primary domain", () => {
+    expect(
+      () => new MsalAuthenticator("client-id", "contoso.onmicrosoft.com", getTempDir(), noopOpen),
+    ).not.toThrow();
+  });
+
+  it.each([
+    "",
+    "not a tenant",
+    "something-random",
+    "contoso.com",
+    "../../evil",
+    "common/extra",
+    "123",
+  ])("rejects malformed tenant id %j", (tenant) => {
+    expect(() => new MsalAuthenticator("client-id", tenant, getTempDir(), noopOpen)).toThrow(
+      /not a recognised authority form/,
+    );
+  });
 });
 
 // =========================================================================
