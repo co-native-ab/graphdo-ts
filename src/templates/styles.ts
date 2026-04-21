@@ -24,6 +24,7 @@ export const BASE_STYLE = `
       to { opacity: 1; transform: translateY(0); }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    [hidden] { display: none !important; }
     body {
       font-family: ${fontFamily};
       background: linear-gradient(160deg, ${purple.minus3} 0%, ${grey.grey1} 100%);

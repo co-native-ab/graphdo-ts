@@ -93,9 +93,11 @@ describe("picker template", () => {
     });
 
     it("pagination is hidden by default (toggled by JS)", () => {
-      // The server renders the bar with style="display:none"; the client
-      // script reveals it once it knows how many matches exist.
-      expect(html).toMatch(/id="pagination"[^>]*style="display:none"/);
+      // The server renders the bar with the HTML `hidden` attribute (CSP-
+      // safe primitive); the client script reveals it once it knows how
+      // many matches exist. Inline style="display:none" is forbidden — it
+      // is blocked by the strict loopback CSP.
+      expect(html).toMatch(/id="pagination"[^>]*\bhidden\b/);
     });
 
     it("script defines a page size of 10 and resets to page 0 on filter change", () => {
@@ -255,10 +257,21 @@ describe("picker template", () => {
 });
 
 describe("Done card visibility", () => {
-  it("hides Done card on initial render (display:none + hidden attribute)", () => {
+  it("hides Done card on initial render (hidden attribute, CSP-safe)", () => {
     const html = pickerPageHtml(sampleConfig);
-    // The #done element must carry both style="display:none" and the hidden attribute
-    // for accessibility and display correctness.
-    expect(html).toMatch(/id="done"[^>]*style="display:none"[^>]*hidden/);
+    // The #done element must carry the standard HTML `hidden` attribute,
+    // which the BASE_STYLE `[hidden] { display: none !important; }` rule
+    // hardens. Inline style="display:none" is blocked by the strict
+    // loopback CSP and must not be relied upon anywhere in the template.
+    expect(html).toMatch(/id="done"[^>]*\bhidden\b/);
+  });
+
+  it("never relies on inline style='display:none' for initially-hidden elements", () => {
+    const html = pickerPageHtml(sampleConfig);
+    // Defence-in-depth: `style="display:none"` (or any `display:none`
+    // inside a style attribute) is silently dropped under the strict
+    // loopback CSP. All hidden-by-default elements must use the `hidden`
+    // attribute instead.
+    expect(html).not.toMatch(/style="[^"]*display\s*:\s*none/i);
   });
 });

@@ -68,7 +68,7 @@ export function successPageHtml(nonce?: string): string {
       <h1 class="success">Authentication successful</h1>
       <p class="message">You can close this window and return to your AI assistant.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
-      <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
+      <p id="manual-close" hidden>If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
     <picture>
       <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
@@ -84,8 +84,8 @@ export function successPageHtml(nonce?: string): string {
         clearInterval(tick);
         window.close();
         setTimeout(() => {
-          document.getElementById('countdown').parentElement.style.display = 'none';
-          document.getElementById('manual-close').style.display = 'block';
+          document.getElementById('countdown').parentElement.hidden = true;
+          document.getElementById('manual-close').hidden = false;
         }, 500);
       }
     }, 1000);`,

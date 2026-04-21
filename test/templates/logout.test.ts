@@ -44,6 +44,12 @@ describe("logout template", () => {
     it("has a done-view with signed-out success message (hidden initially)", () => {
       expect(html).toContain('id="done-view"');
       expect(html).toContain("Signed out successfully");
+      // Strict-CSP defence: the success view must use the standard HTML
+      // `hidden` attribute, not an inline style="display:none" (which is
+      // blocked by the loopback CSP and would leave it visible from page
+      // load — see the "Sign out" page bug fix).
+      expect(html).toMatch(/id="done-view"[^>]*\bhidden\b/);
+      expect(html).not.toMatch(/style="[^"]*display\s*:\s*none/i);
     });
 
     it("mentions token clearing in the done-view", () => {
@@ -89,6 +95,9 @@ describe("logout template", () => {
     it("includes manual close fallback", () => {
       expect(html).toContain("manual-close");
       expect(html).toContain("close it manually");
+      // Same CSP defence as the done-view: must use the `hidden` attribute,
+      // not an inline display:none.
+      expect(html).toMatch(/id="manual-close"[^>]*\bhidden\b/);
     });
 
     it("does not contain Co-native text", () => {

@@ -145,6 +145,15 @@ describe("login templates", () => {
       expect(out).toContain('<style nonce="n1">');
       expect(out).toContain('<script nonce="n1">');
     });
+
+    it("hides the manual-close fallback via the hidden attribute (CSP-safe)", () => {
+      // Strict-CSP defence: inline style="display:none" is silently
+      // dropped on hardened loopback pages, so initially-hidden elements
+      // must use the standard HTML `hidden` attribute (paired with the
+      // BASE_STYLE [hidden] rule).
+      expect(html).toMatch(/id="manual-close"[^>]*\bhidden\b/);
+      expect(html).not.toMatch(/style="[^"]*display\s*:\s*none/i);
+    });
   });
 
   describe("errorPageHtml", () => {

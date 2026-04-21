@@ -36,12 +36,12 @@ export function logoutPageHtml(opts: LogoutPageOptions = {}): string {
           <button id="cancel-btn" class="cancel-btn">Cancel</button>
         </div>
       </div>
-      <div id="done-view" style="display:none">
+      <div id="done-view" hidden>
         <div class="checkmark">&#10003;</div>
         <h1 class="success">Signed out successfully</h1>
         <p class="message">Your cached tokens have been cleared. You can close this window.</p>
         <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
-        <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
+        <p id="manual-close" hidden>If this window didn&rsquo;t close automatically, please close it manually.</p>
       </div>
     </div>
     <picture>
@@ -64,8 +64,8 @@ export function logoutPageHtml(opts: LogoutPageOptions = {}): string {
           body: JSON.stringify({ csrfToken: csrfToken }),
         });
         if (!res.ok) throw new Error(await res.text());
-        document.getElementById('confirm-view').style.display = 'none';
-        document.getElementById('done-view').style.display = 'block';
+        document.getElementById('confirm-view').hidden = true;
+        document.getElementById('done-view').hidden = false;
         let remaining = 5;
         const el = document.getElementById('countdown');
         const tick = setInterval(() => {
@@ -75,8 +75,8 @@ export function logoutPageHtml(opts: LogoutPageOptions = {}): string {
             clearInterval(tick);
             window.close();
             setTimeout(() => {
-              document.getElementById('countdown').parentElement.style.display = 'none';
-              document.getElementById('manual-close').style.display = 'block';
+              document.getElementById('countdown').parentElement.hidden = true;
+              document.getElementById('manual-close').hidden = false;
             }, 500);
           }
         }, 1000);
