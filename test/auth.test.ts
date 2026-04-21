@@ -8,7 +8,7 @@ import type * as MsalTypes from "@azure/msal-node";
 
 import { StaticAuthenticator, MsalAuthenticator } from "../src/auth.js";
 import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
-import { testSignal } from "./helpers.js";
+import { testSignal, fetchCsrfToken } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // vi.mock must be at the top level (hoisted by vitest)
@@ -317,13 +317,22 @@ describe("MsalAuthenticator.token", () => {
 // MsalAuthenticator — logout
 // =========================================================================
 
-/** Helper: openBrowser mock that auto-POSTs to a given path after a short delay. */
+/** Helper: openBrowser mock that auto-POSTs to a given path (with CSRF) after a short delay. */
 function makeBrowserSpy(path: string): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
   return vi.fn((url: string) => {
     setTimeout(() => {
-      void fetch(`${url}${path}`, { method: "POST" }).catch(() => {
-        /* fire and forget */
-      });
+      void (async () => {
+        try {
+          const csrfToken = await fetchCsrfToken(url);
+          await fetch(`${url}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ csrfToken }),
+          });
+        } catch {
+          /* fire and forget */
+        }
+      })();
     }, 150);
     return Promise.resolve();
   });
