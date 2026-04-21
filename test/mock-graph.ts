@@ -201,6 +201,31 @@ function parseSegments(pathname: string): string[] {
 }
 
 /**
+ * Apply Graph's `$select=field1,field2,...` projection to a JSON object,
+ * returning a shallow copy that only contains the requested top-level
+ * fields. Mimics Graph closely enough that production code which over-
+ * narrows `$select` (and then trips its Zod schema) fails in tests
+ * exactly as it would in production.
+ */
+function applySelect<T extends object>(item: T, parsed: URL): Partial<T> {
+  const raw = parsed.searchParams.get("$select");
+  if (!raw) return item;
+  const requested = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+  if (requested.size === 0) return item;
+  const src = item as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of requested) {
+    if (key in src) out[key] = src[key];
+  }
+  return out as Partial<T>;
+}
+
+/**
  * Apply Graph-style `$top` + `$skip` pagination to an in-memory collection,
  * returning the page payload (plus an absolute `@odata.nextLink` when more
  * pages remain). Used by `/me/drive/root/children` and
@@ -473,7 +498,7 @@ async function handleRequest(
         errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
         return;
       }
-      jsonResponse(res, 200, driveItemView(item, state));
+      jsonResponse(res, 200, applySelect(driveItemView(item, state), parsed));
       return;
     }
 

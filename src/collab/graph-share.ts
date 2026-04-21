@@ -116,7 +116,7 @@ export async function refreshFolderMetadata(
   folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<{ name: string; folderPath: string }> {
-  const path = `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}?$select=parentReference,name`;
+  const path = `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}?$select=id,parentReference,name`;
   logger.debug("refreshing folder metadata", { driveId, folderId });
   const response = await client.request(HttpMethod.GET, path, signal);
   const item = await parseResponse(response, DriveItemSchema, HttpMethod.GET, path);
