@@ -418,10 +418,7 @@ export async function scopeCheckedResolve(
   path: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  const token = await config.authenticator.token(signal);
-  const client = new GraphClient(config.graphBaseUrl, {
-    getToken: () => Promise.resolve(token),
-  });
+  const client = config.graphClient;
 
   const result = await resolveScopedPath(
     client,
@@ -597,10 +594,7 @@ export async function resolveTargetItem(
     return { item, isAuthoritative: item.id === metadata.pinnedAuthoritativeFileId };
   }
 
-  const token = await config.authenticator.token(signal);
-  const client = new GraphClient(config.graphBaseUrl, {
-    getToken: () => Promise.resolve(token),
-  });
+  const client = config.graphClient;
 
   if (!hasItemId) {
     // Default to the authoritative file.

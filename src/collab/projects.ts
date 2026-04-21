@@ -23,13 +23,13 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 
 import { z } from "zod";
 
 import { logger } from "../logger.js";
 import { isNodeError } from "../errors.js";
-import { mkdirOptions, writeFileOptions } from "../fs-options.js";
+import { writeJsonAtomic } from "../fs-options.js";
+import { assertValidProjectId } from "./ulid.js";
 
 // ---------------------------------------------------------------------------
 // Constants & paths
@@ -43,8 +43,18 @@ export function projectsDir(configDir: string): string {
   return path.join(configDir, PROJECTS_DIR_NAME);
 }
 
-/** Returns the on-disk path for a single project's metadata file. */
+/**
+ * Returns the on-disk path for a single project's metadata file.
+ *
+ * Throws when `projectId` is not a syntactically-valid ULID — defends
+ * against `projectId = "../../etc/foo"` style path-injection that
+ * could otherwise direct writes outside `<configDir>/projects/` or
+ * read arbitrary `*.json` files. Callers that only know the
+ * directory shape (e.g. tests that probe layout) should pass a real
+ * ULID; non-ULID values were never a supported on-disk shape.
+ */
 export function projectMetadataPath(configDir: string, projectId: string): string {
+  assertValidProjectId("projectId", projectId);
   return path.join(projectsDir(configDir), `${projectId}.json`);
 }
 
@@ -147,37 +157,6 @@ export class ProjectMetadataParseError extends Error {
 // ---------------------------------------------------------------------------
 // Atomic writer
 // ---------------------------------------------------------------------------
-
-/**
- * Atomic JSON write helper shared by both files: ensures the directory
- * exists, writes a temp file in the same directory, then renames it
- * into place.
- */
-async function writeJsonAtomic(
-  filePath: string,
-  data: unknown,
-  signal: AbortSignal,
-): Promise<void> {
-  if (signal.aborted) throw signal.reason;
-
-  const dir = path.dirname(filePath);
-  await fs.mkdir(dir, mkdirOptions());
-
-  const body = JSON.stringify(data, null, 2) + "\n";
-  const tmpFile = path.join(dir, `.${path.basename(filePath)}-${crypto.randomUUID()}.tmp`);
-
-  try {
-    await fs.writeFile(tmpFile, body, writeFileOptions(signal));
-    await fs.rename(tmpFile, filePath);
-  } catch (err) {
-    try {
-      await fs.unlink(tmpFile);
-    } catch {
-      // best-effort cleanup
-    }
-    throw err;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Project metadata

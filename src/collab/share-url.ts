@@ -60,15 +60,21 @@ export function unsafeAssumeEncodedShareId(value: string): EncodedShareId {
 
 /**
  * OneDrive sharing URL hosts that `session_open_project` will accept
- * before sending to Graph. Suffix matches are performed case-insensitively
- * so `Contoso.SharePoint.com` passes.
+ * before sending to Graph. Matching is case-insensitive so
+ * `Contoso.SharePoint.com` passes.
+ *
+ * - `ALLOWED_EXACT_HOSTS` — the hostname must equal the entry verbatim.
+ *   Used for hosts on a public TLD that an attacker could register a
+ *   look-alike of (e.g. `evil1drv.ms`); textual `endsWith` would have
+ *   accepted those.
+ * - `ALLOWED_HOST_SUFFIXES` — the hostname must be the suffix itself or
+ *   end with a `.`-bound prefix of it (`contoso.sharepoint.com`,
+ *   `contoso-my.sharepoint.com`). This rejects substring spoofing such
+ *   as `evilsharepoint.com` and `evil-sharepoint.com.attacker.example`
+ *   while keeping legitimate Microsoft tenants.
  */
-const ALLOWED_HOST_SUFFIXES = [
-  ".sharepoint.com",
-  "-my.sharepoint.com",
-  "1drv.ms",
-  "onedrive.live.com",
-];
+const ALLOWED_EXACT_HOSTS = ["1drv.ms", "onedrive.live.com"];
+const ALLOWED_HOST_SUFFIXES = [".sharepoint.com"];
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -117,22 +123,24 @@ export function validateShareUrl(url: string): string {
   }
 
   // 4. Host allow-list
-  const matchesSuffix = ALLOWED_HOST_SUFFIXES.some((suffix) => {
-    // Exact match or suffix match with a leading dot/dash
-    if (hostname === suffix.toLowerCase()) return true;
-    if (hostname.endsWith(suffix.toLowerCase())) {
-      // Ensure it's truly a suffix match and not a substring spoofing attack
-      // (e.g. reject `evil-sharepoint.com.attacker.example`)
-      const prefix = hostname.slice(0, -suffix.length);
-      // For `.sharepoint.com`, prefix must not end with `.` (it's already covered)
-      // For `-my.sharepoint.com`, prefix must not end with `-` (same reason)
-      // For exact matches like `1drv.ms` or `onedrive.live.com`, we already returned
-      return prefix.length > 0;
-    }
-    return false;
-  });
+  //    Exact hosts catch entries on public TLDs (`1drv.ms`, the `.ms`
+  //    TLD is registrable; suffix-only matching would let
+  //    `evil1drv.ms` slip through).
+  //    Suffix hosts must be the suffix itself, or end with `.<suffix>`
+  //    so `contoso.sharepoint.com` passes but `evilsharepoint.com`
+  //    and `evil-sharepoint.com.attacker.example` are rejected.
+  const matchesAllowList =
+    ALLOWED_EXACT_HOSTS.includes(hostname) ||
+    ALLOWED_HOST_SUFFIXES.some((suffix) => {
+      const lower = suffix.toLowerCase();
+      if (hostname === lower) return true;
+      // Strip leading dot, then require an exact `.<suffix>` boundary
+      const bare = lower.startsWith(".") ? lower.slice(1) : lower;
+      const needle = `.${bare}`;
+      return hostname.endsWith(needle) && hostname.length > needle.length;
+    });
 
-  if (!matchesSuffix) {
+  if (!matchesAllowList) {
     throw new InvalidShareUrlError(url, "unsupported_host");
   }
 

@@ -256,38 +256,24 @@ export async function createChildFolder(
 // ---------------------------------------------------------------------------
 
 import { CollabCTagMismatchError } from "../errors.js";
-import { MAX_DIRECT_CONTENT_BYTES, MarkdownFileTooLargeError } from "../graph/markdown.js";
+import {
+  MAX_DIRECT_CONTENT_BYTES,
+  MarkdownFileTooLargeError,
+  downloadMarkdownContent,
+} from "../graph/markdown.js";
 import { MAX_ANCESTRY_HOPS } from "./scope.js";
 
 /**
  * Download a drive item's content as a UTF-8 string.
  *
- * Uses the same 4 MiB cap as `downloadMarkdownContent` in `src/graph/markdown.ts`
- * (re-uses {@link MAX_DIRECT_CONTENT_BYTES} and {@link MarkdownFileTooLargeError}
- * from that module). The cap is a graphdo-ts policy limit, not a Graph API limit.
- *
- * Used by `collab_read` for both the authoritative file and other in-scope files.
+ * Thin re-export of {@link downloadMarkdownContent} — the body was
+ * previously duplicated here under a collab-specific name. Both share
+ * the 4 MiB cap ({@link MAX_DIRECT_CONTENT_BYTES}) and
+ * {@link MarkdownFileTooLargeError}. Kept separately exported so the
+ * collab-side call sites don't have to reach into `graph/markdown.ts`
+ * for a helper that is conceptually about any drive item.
  */
-export async function getDriveItemContent(
-  client: GraphClient,
-  itemId: ValidatedGraphId,
-  signal: AbortSignal,
-): Promise<string> {
-  // Pre-flight size check via metadata fetch to fail fast on oversized files.
-  const item = await getDriveItem(client, itemId, signal);
-  if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
-    throw new MarkdownFileTooLargeError(item.size, MAX_DIRECT_CONTENT_BYTES);
-  }
-
-  const path = `/me/drive/items/${encodeURIComponent(itemId)}/content`;
-  logger.debug("downloading drive item content", { itemId });
-  const response = await client.request(HttpMethod.GET, path, signal);
-  const buf = Buffer.from(await response.arrayBuffer());
-  if (buf.byteLength > MAX_DIRECT_CONTENT_BYTES) {
-    throw new MarkdownFileTooLargeError(buf.byteLength, MAX_DIRECT_CONTENT_BYTES);
-  }
-  return buf.toString("utf-8");
-}
+export const getDriveItemContent = downloadMarkdownContent;
 
 /**
  * Represents a single entry in the recursive attachment tree returned by

@@ -26,7 +26,7 @@ import {
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MarkdownFileTooLargeError,
@@ -135,10 +135,7 @@ export function registerCollabRestoreVersion(server: McpServer, config: ServerCo
           );
         }
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         const validatedItemId = validateGraphId("resolvedItemId", item.id);
         const validatedVersionId = validateGraphId("versionId", versionId);

@@ -257,9 +257,35 @@ function handleCancel(
   });
 }
 
+/**
+ * Documented MSAL OAuth 2.0 authorization-response fields. We only
+ * forward these to MSAL so an attacker who controls the redirect URL
+ * cannot smuggle additional keys into the AuthorizeResponse the way
+ * an unconditional `for (const [k,v] of params)` would have allowed.
+ * Kept aligned with `@azure/msal-common`'s `ServerAuthorizationCodeResponse`.
+ */
+const ALLOWED_AUTH_RESPONSE_FIELDS = new Set<string>([
+  "code",
+  "state",
+  "session_state",
+  "client_info",
+  "cloud_instance_name",
+  "cloud_instance_host_name",
+  "cloud_graph_host_name",
+  "msgraph_host",
+  "error",
+  "error_description",
+  "error_uri",
+  "suberror",
+  "timestamp",
+  "trace_id",
+  "correlation_id",
+]);
+
 function parseAuthResponse(params: URLSearchParams): AuthorizeResponse {
   const response: AuthorizeResponse = {};
   for (const [key, value] of params.entries()) {
+    if (!ALLOWED_AUTH_RESPONSE_FIELDS.has(key)) continue;
     (response as Record<string, string>)[key] = value;
   }
   return response;

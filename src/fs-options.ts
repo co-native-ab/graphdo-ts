@@ -11,6 +11,8 @@
 
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
+import * as path from "node:path";
+import * as crypto from "node:crypto";
 
 /** Restrictive directory permission on POSIX (owner rwx). */
 export const POSIX_DIR_MODE = 0o700;
@@ -51,4 +53,42 @@ export function appendFileOptions(): Parameters<typeof fs.appendFile>[2] {
   return isWindows()
     ? { encoding: "utf-8" as const, flag: "a" }
     : { encoding: "utf-8" as const, flag: "a", mode: POSIX_FILE_MODE };
+}
+
+/**
+ * Atomically write `data` as JSON to `filePath`: ensure the parent
+ * directory exists, write to a unique temp file in the same directory,
+ * then `rename` it into place (POSIX atomic on the same volume). On
+ * any error the temp file is best-effort removed and the original error
+ * is re-thrown.
+ *
+ * Used by every collab on-disk codec (project metadata, recents,
+ * renewal counts, session counts) — duplicated three ways in earlier
+ * milestone code; consolidated here so file-mode policy and crash
+ * semantics never drift between callers.
+ */
+export async function writeJsonAtomic(
+  filePath: string,
+  data: unknown,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) throw signal.reason;
+
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, mkdirOptions());
+
+  const body = JSON.stringify(data, null, 2) + "\n";
+  const tmpFile = path.join(dir, `.${path.basename(filePath)}-${crypto.randomUUID()}.tmp`);
+
+  try {
+    await fs.writeFile(tmpFile, body, writeFileOptions(signal));
+    await fs.rename(tmpFile, filePath);
+  } catch (err) {
+    try {
+      await fs.unlink(tmpFile);
+    } catch {
+      // best-effort cleanup
+    }
+    throw err;
+  }
 }

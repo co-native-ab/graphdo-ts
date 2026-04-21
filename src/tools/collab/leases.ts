@@ -40,7 +40,7 @@ import {
 } from "../../collab/leases.js";
 import { splitFrontmatter } from "../../collab/frontmatter.js";
 import { AuditResult, writeAudit } from "../../collab/audit.js";
-import { formatError } from "../shared.js";
+import { formatError, nowFactory } from "../shared.js";
 
 import {
   COLLAB_ACQUIRE_SECTION_DEF,
@@ -236,10 +236,7 @@ export function registerCollabAcquireSection(server: McpServer, config: ServerCo
         const ttl = clampLeaseTtl(ttlSeconds);
         const slug = normaliseSectionId(sectionId);
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         // 1. Validate the slug exists in the live authoritative body.
         //    SectionNotFoundError is a hard refusal — no slug-drift
@@ -255,7 +252,7 @@ export function registerCollabAcquireSection(server: McpServer, config: ServerCo
 
         // 2. Read the leases sidecar (graceful 404 → empty in-memory view).
         const projectFolderId = validateGraphId("projectFolderId", metadata.folderId);
-        const now = (config.now ?? ((): Date => new Date()))();
+        const now = nowFactory(config)();
         const loaded = await loadLeasesGracefully(client, projectFolderId, now, signal);
 
         // 3. CAS pre-check on the agent-supplied leasesCTag. When the
@@ -451,13 +448,10 @@ export function registerCollabReleaseSection(server: McpServer, config: ServerCo
         const { session, metadata } = await requireActiveSession(config, signal);
         const slug = normaliseSectionId(sectionId);
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         const projectFolderId = validateGraphId("projectFolderId", metadata.folderId);
-        const now = (config.now ?? ((): Date => new Date()))();
+        const now = nowFactory(config)();
         const loaded = await loadLeasesGracefully(client, projectFolderId, now, signal);
 
         // Graceful degradation: leases sidecar gone → no active leases.

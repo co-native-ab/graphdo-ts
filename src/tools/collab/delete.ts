@@ -22,7 +22,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import {
-  AuthenticationRequiredError,
   BudgetExhaustedError,
   DestructiveApprovalDeclinedError,
   DestructiveBudgetExhaustedError,
@@ -31,7 +30,7 @@ import {
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import { deleteDriveItem } from "../../graph/markdown.js";
 import {
@@ -224,10 +223,7 @@ export function registerCollabDeleteFile(server: McpServer, config: ServerConfig
           signal,
         );
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         const validatedItemId = validateGraphId("resolvedItemId", item.id);
         try {
@@ -271,9 +267,7 @@ export function registerCollabDeleteFile(server: McpServer, config: ServerConfig
         }
         return { content: [{ type: "text", text: outLines.join("\n") }] };
       } catch (err) {
-        if (err instanceof AuthenticationRequiredError) {
-          return formatError("collab_delete_file", err);
-        }
+        // formatError already special-cases AuthenticationRequiredError.
         return formatError("collab_delete_file", err);
       }
     },

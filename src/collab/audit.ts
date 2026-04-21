@@ -29,6 +29,7 @@ import * as crypto from "node:crypto";
 
 import { logger } from "../logger.js";
 import { appendFileOptions, mkdirOptions } from "../fs-options.js";
+import { assertValidProjectId } from "./ulid.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -133,8 +134,16 @@ export function auditDir(configDir: string): string {
 /**
  * Returns the on-disk path for the audit file matching the (optional)
  * `projectId`. `null` routes to the `_unscoped.jsonl` fallback.
+ *
+ * Throws when `projectId` is not a syntactically-valid ULID — defends
+ * against `projectId = "../../etc/foo"` style path-injection that
+ * could otherwise direct audit writes outside `<configDir>/sessions/audit/`
+ * or read arbitrary `*.jsonl` files. The audit writer is the project's
+ * primary forensic record so suppressing it (by writing to an
+ * unwritable path) is itself a threat.
  */
 export function auditFilePath(configDir: string, projectId: string | null): string {
+  if (projectId !== null) assertValidProjectId("projectId", projectId);
   const file = projectId === null ? AUDIT_UNSCOPED_FILE_NAME : `${projectId}.jsonl`;
   return path.join(auditDir(configDir), file);
 }
@@ -486,9 +495,25 @@ export function buildAuditLine(envelope: AuditEnvelope, now: Date): BuiltEnvelop
   };
 }
 
-/** Returns true if the serialised envelope contains the bearer substring. */
+/**
+ * Returns true if the serialised envelope contains a bearer-shaped
+ * substring. Defence-in-depth — every legitimate code path already
+ * strips bearer tokens from error messages.
+ *
+ * Matches:
+ *  - Case-insensitive `bearer` followed by any whitespace character
+ *    (`Bearer `, `BEARER\t`) or by a JSON-escaped whitespace char
+ *    (`\\n`, `\\t`, `\\r`) since the input is the post-`JSON.stringify`
+ *    line and real `\n` is encoded as the two characters `\` `n`.
+ *  - Bare JWTs (`eyJ…\.eyJ…\.…`) in case a token leaks into a field
+ *    without the `Bearer` prefix (e.g. an `Authorization` header value
+ *    that was logged verbatim).
+ */
+const BEARER_RE = /\bbearer(?:\s|\\[ntr])/i;
+const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+
 function containsBearer(serialised: string): boolean {
-  return serialised.includes("Bearer ");
+  return BEARER_RE.test(serialised) || JWT_RE.test(serialised);
 }
 
 function byteLength(s: string): number {

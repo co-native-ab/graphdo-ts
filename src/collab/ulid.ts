@@ -81,3 +81,20 @@ const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export function isUlid(value: string): boolean {
   return ULID_RE.test(value);
 }
+
+/**
+ * Throws when `value` is not a syntactically-valid ULID. Used by
+ * filesystem-path helpers (`auditFilePath`, `projectMetadataPath`)
+ * so a maliciously-shaped `projectId` (e.g. `"../../etc/foo"`) cannot
+ * be interpolated into a path under `<configDir>/sessions/audit/` or
+ * `<configDir>/projects/`. The Error message includes the field name
+ * so the audit log shows which input failed; the value itself is
+ * truncated to 64 chars to avoid logging unbounded attacker input.
+ */
+export function assertValidProjectId(field: string, value: string): void {
+  if (isUlid(value)) return;
+  const display = value.length > 64 ? `${value.slice(0, 64)}…` : value;
+  throw new Error(
+    `${field}: expected 26-char Crockford-base32 ULID, got ${JSON.stringify(display)}`,
+  );
+}

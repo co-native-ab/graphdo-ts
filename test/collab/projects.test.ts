@@ -71,7 +71,7 @@ describe("collab/projects", () => {
     });
 
     it("returns null when the metadata file does not exist", async () => {
-      const loaded = await loadProjectMetadata(dir, "missing", testSignal());
+      const loaded = await loadProjectMetadata(dir, "01JM1SS1NG0FGHJKMNPQRSTV0X", testSignal());
       expect(loaded).toBeNull();
     });
 
@@ -159,10 +159,18 @@ describe("collab/projects", () => {
   });
 
   it("metadata and recents land in <configDir>/projects/", () => {
-    const meta = projectMetadataPath(dir, "abc");
+    const projectId = "01JABCDE0FGHJKMNPQRSTV0WXY";
+    const meta = projectMetadataPath(dir, projectId);
     const rec = recentsPath(dir);
-    expect(meta).toBe(path.join(dir, "projects", "abc.json"));
+    expect(meta).toBe(path.join(dir, "projects", `${projectId}.json`));
     expect(rec).toBe(path.join(dir, "projects", "recent.json"));
+  });
+
+  it("projectMetadataPath rejects non-ULID projectId (path-injection guard)", () => {
+    expect(() => projectMetadataPath(dir, "abc")).toThrow(/ULID/);
+    expect(() => projectMetadataPath(dir, "../../etc/foo")).toThrow(/ULID/);
+    // 26 chars but contains invalid Crockford-base32 letters (I, L, O, U)
+    expect(() => projectMetadataPath(dir, "01JABCDEILOU0FGHJKMNPQRST0")).toThrow(/ULID/);
   });
 
   it("the on-disk JSON pretty-prints with two spaces and a trailing newline", async () => {

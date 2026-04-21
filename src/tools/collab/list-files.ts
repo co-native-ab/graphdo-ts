@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import { findChildFolderByName, listChildren, walkAttachmentsTree } from "../../collab/graph.js";
 import { formatError } from "../shared.js";
@@ -39,10 +39,7 @@ export function registerCollabListFiles(server: McpServer, config: ServerConfig)
       try {
         const { metadata } = await requireActiveSession(config, signal);
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         const projectFolderId = validateGraphId("projectFolderId", metadata.folderId);
         const showAll = prefix === undefined || prefix === "/";

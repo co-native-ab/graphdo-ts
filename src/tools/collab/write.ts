@@ -20,7 +20,7 @@ import {
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId, type ValidatedGraphId } from "../../graph/ids.js";
 import { MarkdownFileTooLargeError } from "../../graph/markdown.js";
 import {
@@ -135,10 +135,7 @@ export function registerCollabWrite(server: McpServer, config: ServerConfig): To
           );
         }
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         // Resolve the target — this also enforces §4.6 scope before
         // any external re-prompt opens or any write is issued.

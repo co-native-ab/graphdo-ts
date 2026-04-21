@@ -24,7 +24,7 @@ import {
 import type { ServerConfig } from "../../index.js";
 import type { ToolEntry } from "../../tool-registry.js";
 import { defineTool } from "../../tool-registry.js";
-import { GraphClient, GraphRequestError } from "../../graph/client.js";
+import { GraphRequestError } from "../../graph/client.js";
 import { validateGraphId } from "../../graph/ids.js";
 import { MarkdownFileTooLargeError } from "../../graph/markdown.js";
 import { getDriveItem, getDriveItemContent, writeAuthoritative } from "../../collab/graph.js";
@@ -49,7 +49,7 @@ import {
   writeAudit,
   type AuditInputSummary,
 } from "../../collab/audit.js";
-import { formatError } from "../shared.js";
+import { formatError, nowFactory } from "../shared.js";
 import type { DriveItem } from "../../graph/types.js";
 
 import {
@@ -144,10 +144,7 @@ export function registerCollabCreateProposal(server: McpServer, config: ServerCo
           );
         }
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         // 1. Read the live authoritative file: needed to validate the
         //    target section anchor and to capture the current body so
@@ -404,10 +401,7 @@ export function registerCollabApplyProposal(server: McpServer, config: ServerCon
           );
         }
 
-        const token = await config.authenticator.token(signal);
-        const client = new GraphClient(config.graphBaseUrl, {
-          getToken: () => Promise.resolve(token),
-        });
+        const client = config.graphClient;
 
         // 1. Read the live authoritative file: needed to look up the
         //    proposal entry, locate the target section, and CAS-write
@@ -645,7 +639,7 @@ export function registerCollabApplyProposal(server: McpServer, config: ServerCon
         //     revision + 1 (best-effort — the actual server revision
         //     is the cTag suffix; we record a monotonically-increasing
         //     index so the trail can be re-ordered locally).
-        const now = (config.now ?? ((): Date => new Date()))();
+        const now = nowFactory(config)();
         const newAuthorship: CollabFrontmatter["collab"]["authorship"][number] = {
           target_section_slug: targetSection.slug,
           section_content_hash: newSectionContentHash,
