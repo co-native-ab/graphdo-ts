@@ -1,5 +1,5 @@
 ---
-title: "ADR-0007: Validated Graph IDs (Branded String Newtype)"
+title: "ADR-0005: Validated Graph IDs (Branded String Newtype)"
 status: "Accepted"
 date: "2026-04-19"
 authors: "co-native-ab"
@@ -8,7 +8,7 @@ supersedes: ""
 superseded_by: ""
 ---
 
-# ADR-0007: Validated Graph IDs (Branded String Newtype)
+# ADR-0005: Validated Graph IDs (Branded String Newtype)
 
 ## Status
 

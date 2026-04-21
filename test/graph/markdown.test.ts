@@ -587,7 +587,7 @@ describe("markdown version history graph operations", () => {
   });
 
   // Note: the previous "rejects empty itemId" / "rejects empty versionId"
-  // tests have moved to `test/graph/ids.test.ts` — per ADR-0007 these
+  // tests have moved to `test/graph/ids.test.ts` — per ADR-0005 these
   // calls are now compile-time errors at every helper boundary.
 });
 
@@ -828,7 +828,7 @@ describe("getRevisionContent", () => {
   });
 
   // The "rejects empty versionId" test moved to `test/graph/ids.test.ts`
-  // — per ADR-0007, passing an empty string is a compile-time error.
+  // — per ADR-0005, passing an empty string is a compile-time error.
 });
 
 // ---------------------------------------------------------------------------
@@ -899,7 +899,7 @@ describe("listRootFolders / listMarkdownFiles pagination", () => {
 // `test/graph/ids.test.ts`. The retained tests here only confirm that the
 // legacy import path (`from "../../src/graph/markdown"`) still resolves to
 // the same validator, so existing imports keep working through the
-// migration. Per ADR-0007, the previous "guards every Graph helper" test
+// migration. Per ADR-0005, the previous "guards every Graph helper" test
 // is removed because passing an unvalidated string is now a compile-time
 // error at every helper boundary.
 // ---------------------------------------------------------------------------

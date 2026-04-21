@@ -3,7 +3,7 @@
 // been checked against the opaque-Graph-identifier rules before it is
 // spliced into a Graph URL.
 //
-// See `docs/adr/0007-validated-graph-ids.md` for the rationale. The
+// See `docs/adr/0005-validated-graph-ids.md` for the rationale. The
 // short version: every Graph helper that interpolates an ID into a path
 // (`/me/drive/items/${itemId}`, `/me/todo/lists/${listId}/...`) takes a
 // `ValidatedGraphId` rather than a raw `string`, so the only way to

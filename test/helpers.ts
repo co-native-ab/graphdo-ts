@@ -12,7 +12,7 @@ export interface TestEnv {
  * Test-only shorthand that brands a string as a {@link ValidatedGraphId}
  * by running it through {@link validateGraphId}. Lets fixture code keep
  * passing string literals like `"list-1"` while still satisfying the
- * helper signatures introduced by ADR-0007.
+ * helper signatures introduced by ADR-0005.
  */
 export function gid(value: string): ValidatedGraphId {
   return validateGraphId("test-id", value);

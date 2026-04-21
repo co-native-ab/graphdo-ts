@@ -201,7 +201,7 @@ export function assertValidMarkdownFileName(name: string): string {
 // ---------------------------------------------------------------------------
 //
 // The validator + branded `ValidatedGraphId` type live in `./ids.js` (see
-// ADR-0007). This module re-exports the legacy `assertValidGraphId` name
+// ADR-0005). This module re-exports the legacy `assertValidGraphId` name
 // for back-compat so existing imports keep working; new code should call
 // {@link validateGraphId} directly. The two return the same branded
 // value — `assertValidGraphId` is now a thin alias.
