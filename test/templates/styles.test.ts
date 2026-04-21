@@ -7,8 +7,8 @@ import {
   SUCCESS_STYLE,
   ERROR_STYLE,
   PICKER_STYLE,
-  escapeHtml,
 } from "../../src/templates/styles.js";
+import { escapeHtml } from "../../src/templates/escape.js";
 import { purple, grey, complementary, fontFamily } from "../../src/templates/tokens.js";
 
 describe("shared styles", () => {
@@ -36,6 +36,15 @@ describe("shared styles", () => {
 
     it("includes dark mode media query", () => {
       expect(BASE_STYLE).toContain("prefers-color-scheme: dark");
+    });
+
+    it("hardens the [hidden] attribute with display:none !important", () => {
+      // Loopback pages rely on the standard HTML `hidden` attribute as
+      // their CSP-safe visibility primitive. The strict CSP blocks inline
+      // `style` attributes, and any page-specific `display:` rule could
+      // otherwise un-hide a [hidden] element. The !important guard keeps
+      // the primitive reliable across all templates.
+      expect(BASE_STYLE).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);
     });
   });
 

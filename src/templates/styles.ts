@@ -24,6 +24,7 @@ export const BASE_STYLE = `
       to { opacity: 1; transform: translateY(0); }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    [hidden] { display: none !important; }
     body {
       font-family: ${fontFamily};
       background: linear-gradient(160deg, ${purple.minus3} 0%, ${grey.grey1} 100%);
@@ -401,16 +402,3 @@ export const PICKER_STYLE = `
       .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
       .page-status { color: ${dark.text}; }
     }`;
-
-// ---------------------------------------------------------------------------
-// HTML utility
-// ---------------------------------------------------------------------------
-
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}

@@ -1,6 +1,7 @@
 // HTML template for the browser-based option picker page.
 
-import { escapeHtml, PICKER_STYLE } from "./styles.js";
+import { PICKER_STYLE } from "./styles.js";
+import { escapeHtml } from "./escape.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
@@ -23,6 +24,15 @@ interface PickerPageConfig {
   refreshEnabled?: boolean;
   filterPlaceholder?: string;
   createLink?: PickerPageCreateLink;
+  /**
+   * CSRF token embedded in a `<meta name="csrf-token">` tag and required
+   * by the hardened POST handlers (see `src/loopback-security.ts`). When
+   * omitted, the meta tag is not emitted (legacy callers only — new
+   * call sites must always supply it).
+   */
+  csrfToken?: string;
+  /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
+  nonce?: string;
 }
 
 function renderOptionButton(opt: PickerPageOption): string {
@@ -52,6 +62,11 @@ export function pickerPageHtml(config: PickerPageConfig): string {
   return layoutHtml({
     title: `graphdo - ${escapeHtml(config.title)}`,
     extraStyles: PICKER_STYLE,
+    nonce: config.nonce,
+    extraHead:
+      config.csrfToken !== undefined
+        ? `<meta name="csrf-token" content="${escapeHtml(config.csrfToken)}">`
+        : "",
     body: `<div class="container">
     <div class="card" id="picker">
       <h1>${escapeHtml(config.title)}</h1>
@@ -63,8 +78,8 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       <div id="options-list">
         ${optionButtons}
       </div>
-      <p id="no-match" class="no-match" style="display:none">No matches.</p>
-      <div id="pagination" class="pagination" style="display:none">
+      <p id="no-match" class="no-match" hidden>No matches.</p>
+      <div id="pagination" class="pagination" hidden>
         <button id="prev-btn" class="page-btn" type="button" aria-label="Previous page">&laquo; Prev</button>
         <span id="page-status" class="page-status" aria-live="polite"></span>
         <button id="next-btn" class="page-btn" type="button" aria-label="Next page">Next &raquo;</button>
@@ -74,14 +89,14 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
       </div>
     </div>
-    <div class="card done" id="done" style="display:none">
+    <div class="card done" id="done" hidden>
       <h1>&#10003; Done</h1>
       <p class="message">Selected: <strong id="selected-label"></strong></p>
       <p class="message" style="margin-top: 16px;">You can switch back to your AI assistant now.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
-      <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
+      <p id="manual-close" hidden>If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
-    <div id="error" class="error" style="display:none"></div>
+    <div id="error" class="error" hidden></div>
     <picture>
       <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
       <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
@@ -89,6 +104,8 @@ export function pickerPageHtml(config: PickerPageConfig): string {
   </div>`,
     script: `    const refreshEnabled = ${String(config.refreshEnabled === true)};
     const PAGE_SIZE = 10;
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
     const list = document.getElementById('options-list');
     const noMatch = document.getElementById('no-match');
     const filterInput = document.getElementById('filter-input');
@@ -107,6 +124,26 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         .replace(/'/g, '&#39;');
     }
 
+    function showDoneCard(label) {
+      document.getElementById('picker').hidden = true;
+      document.getElementById('selected-label').textContent = label;
+      document.getElementById('done').hidden = false;
+      let remaining = 5;
+      const el = document.getElementById('countdown');
+      const tick = setInterval(() => {
+        remaining--;
+        el.textContent = String(remaining);
+        if (remaining <= 0) {
+          clearInterval(tick);
+          window.close();
+          setTimeout(() => {
+            document.getElementById('countdown').parentElement.hidden = true;
+            document.getElementById('manual-close').hidden = false;
+          }, 500);
+        }
+      }, 1000);
+    }
+
     // Applies the filter across ALL options, then paginates the filtered
     // subset so at most PAGE_SIZE buttons are visible at a time. Filter
     // text is always evaluated over the full option list (never just the
@@ -122,7 +159,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         if (isMatch) {
           matched.push(btn);
         } else {
-          btn.style.display = 'none';
+          btn.hidden = true;
         }
       }
 
@@ -133,18 +170,18 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       const start = currentPage * PAGE_SIZE;
       const end = start + PAGE_SIZE;
       for (let i = 0; i < matched.length; i++) {
-        matched[i].style.display = (i >= start && i < end) ? '' : 'none';
+        matched[i].hidden = !(i >= start && i < end);
       }
 
-      noMatch.style.display = matched.length === 0 ? 'block' : 'none';
+      noMatch.hidden = matched.length !== 0;
 
       if (matched.length > PAGE_SIZE) {
-        pagination.style.display = '';
+        pagination.hidden = false;
         pageStatus.textContent = 'Page ' + (currentPage + 1) + ' of ' + totalPages + ' (' + matched.length + ' total)';
         prevBtn.disabled = currentPage === 0;
         nextBtn.disabled = currentPage >= totalPages - 1;
       } else {
-        pagination.style.display = 'none';
+        pagination.hidden = true;
       }
     }
 
@@ -160,28 +197,12 @@ export function pickerPageHtml(config: PickerPageConfig): string {
             const res = await fetch('/select', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: id, label: label }),
+              body: JSON.stringify({ id: id, label: label, csrfToken: csrfToken }),
             });
             if (!res.ok) throw new Error(await res.text());
-            document.getElementById('picker').style.display = 'none';
-            document.getElementById('selected-label').textContent = label;
-            document.getElementById('done').style.display = 'block';
-            let remaining = 5;
-            const el = document.getElementById('countdown');
-            const tick = setInterval(() => {
-              remaining--;
-              el.textContent = String(remaining);
-              if (remaining <= 0) {
-                clearInterval(tick);
-                window.close();
-                setTimeout(() => {
-                  document.getElementById('countdown').parentElement.style.display = 'none';
-                  document.getElementById('manual-close').style.display = 'block';
-                }, 500);
-              }
-            }, 1000);
+            showDoneCard(label);
           } catch (err) {
-            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').hidden = false;
             document.getElementById('error').textContent = 'Failed: ' + err.message;
             list.querySelectorAll('.option-btn').forEach(b => { b.disabled = false; });
             document.getElementById('cancel-btn').disabled = false;
@@ -215,7 +236,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       refreshBtn.addEventListener('click', async () => {
         refreshBtn.disabled = true;
         refreshBtn.classList.add('loading');
-        document.getElementById('error').style.display = 'none';
+        document.getElementById('error').hidden = true;
         try {
           const res = await fetch('/options');
           if (!res.ok) throw new Error('Refresh failed: ' + res.status);
@@ -228,7 +249,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
           currentPage = 0;
           applyFilterAndPaginate();
         } catch (err) {
-          document.getElementById('error').style.display = 'block';
+          document.getElementById('error').hidden = false;
           document.getElementById('error').textContent = 'Refresh failed: ' + err.message;
         } finally {
           refreshBtn.classList.remove('loading');
@@ -240,7 +261,11 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     document.getElementById('cancel-btn').addEventListener('click', async () => {
       document.getElementById('cancel-btn').disabled = true;
       list.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
-      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      await fetch('/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrfToken: csrfToken }),
+      }).catch(() => {});
       window.close();
     });`,
   });

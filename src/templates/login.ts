@@ -1,15 +1,34 @@
 // HTML templates for the MSAL login loopback pages.
 
-import { escapeHtml, LOGIN_STYLE, SUCCESS_STYLE, ERROR_STYLE } from "./styles.js";
+import { LOGIN_STYLE, SUCCESS_STYLE, ERROR_STYLE } from "./styles.js";
+import { escapeHtml } from "./escape.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
-export function landingPageHtml(authUrl: string): string {
+export interface LoginPageOptions {
+  /**
+   * CSRF token. Embedded in a `<meta name="csrf-token">` tag — the landing
+   * page reads it from the meta tag and includes it in the `POST /cancel`
+   * body. The success and error pages don't have any state-changing
+   * controls, so the token is unused there but is accepted for API
+   * symmetry across the three login templates.
+   */
+  csrfToken?: string;
+  /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
+  nonce?: string;
+}
+
+export function landingPageHtml(authUrl: string, opts: LoginPageOptions = {}): string {
   const safeAuthUrl = escapeHtml(authUrl);
 
   return layoutHtml({
     title: "graphdo - Sign In",
     extraStyles: LOGIN_STYLE,
+    nonce: opts.nonce,
+    extraHead:
+      opts.csrfToken !== undefined
+        ? `<meta name="csrf-token" content="${escapeHtml(opts.csrfToken)}">`
+        : "",
     body: `<div class="container">
     <div class="card">
       <h1>Sign in to continue</h1>
@@ -24,25 +43,32 @@ export function landingPageHtml(authUrl: string): string {
       <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
     </picture>
   </div>`,
-    script: `    document.getElementById('cancel-btn').addEventListener('click', async () => {
+    script: `    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
+    document.getElementById('cancel-btn').addEventListener('click', async () => {
       document.getElementById('cancel-btn').disabled = true;
-      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      await fetch('/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrfToken: csrfToken }),
+      }).catch(() => {});
       window.close();
     });`,
   });
 }
 
-export function successPageHtml(): string {
+export function successPageHtml(nonce?: string): string {
   return layoutHtml({
     title: "graphdo - Signed In",
     extraStyles: SUCCESS_STYLE,
+    nonce,
     body: `<div class="container">
     <div class="card">
       <div class="checkmark">&#10003;</div>
       <h1 class="success">Authentication successful</h1>
       <p class="message">You can close this window and return to your AI assistant.</p>
       <p class="countdown">Closing in <span id="countdown">5</span>s&hellip;</p>
-      <p id="manual-close" style="display:none">If this window didn&rsquo;t close automatically, please close it manually.</p>
+      <p id="manual-close" hidden>If this window didn&rsquo;t close automatically, please close it manually.</p>
     </div>
     <picture>
       <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
@@ -58,20 +84,21 @@ export function successPageHtml(): string {
         clearInterval(tick);
         window.close();
         setTimeout(() => {
-          document.getElementById('countdown').parentElement.style.display = 'none';
-          document.getElementById('manual-close').style.display = 'block';
+          document.getElementById('countdown').parentElement.hidden = true;
+          document.getElementById('manual-close').hidden = false;
         }, 500);
       }
     }, 1000);`,
   });
 }
 
-export function errorPageHtml(errorMessage: string): string {
+export function errorPageHtml(errorMessage: string, nonce?: string): string {
   const safeMessage = escapeHtml(errorMessage);
 
   return layoutHtml({
     title: "graphdo - Sign In Failed",
     extraStyles: ERROR_STYLE,
+    nonce,
     body: `<div class="container">
     <div class="card">
       <div class="icon">&#10007;</div>

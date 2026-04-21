@@ -8,7 +8,7 @@ import type * as MsalTypes from "@azure/msal-node";
 
 import { StaticAuthenticator, MsalAuthenticator } from "../src/auth.js";
 import { AuthenticationRequiredError, UserCancelledError } from "../src/errors.js";
-import { testSignal } from "./helpers.js";
+import { testSignal, fetchCsrfToken } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // vi.mock must be at the top level (hoisted by vitest)
@@ -133,6 +133,62 @@ describe("StaticAuthenticator", () => {
     const auth = new StaticAuthenticator("t");
     const info = await auth.accountInfo(testSignal());
     expect(info).toEqual({ username: "static-token" });
+  });
+
+  it("grantedScopes returns the default scope set", async () => {
+    const auth = new StaticAuthenticator("t");
+    const scopes = await auth.grantedScopes(testSignal());
+    expect(Array.isArray(scopes)).toBe(true);
+    expect(scopes.length).toBeGreaterThan(0);
+  });
+});
+
+// =========================================================================
+// MsalAuthenticator — constructor validation
+// =========================================================================
+
+describe("MsalAuthenticator constructor", () => {
+  const noopOpen = () => Promise.resolve();
+
+  it.each(["common", "consumers", "organizations"])(
+    "accepts well-known tenant alias %s",
+    (tenant) => {
+      expect(
+        () => new MsalAuthenticator("client-id", tenant, getTempDir(), noopOpen),
+      ).not.toThrow();
+    },
+  );
+
+  it("accepts a GUID tenant id", () => {
+    expect(
+      () =>
+        new MsalAuthenticator(
+          "client-id",
+          "11111111-2222-3333-4444-555555555555",
+          getTempDir(),
+          noopOpen,
+        ),
+    ).not.toThrow();
+  });
+
+  it("accepts a <name>.onmicrosoft.com tenant primary domain", () => {
+    expect(
+      () => new MsalAuthenticator("client-id", "contoso.onmicrosoft.com", getTempDir(), noopOpen),
+    ).not.toThrow();
+  });
+
+  it.each([
+    "",
+    "not a tenant",
+    "something-random",
+    "contoso.com",
+    "../../evil",
+    "common/extra",
+    "123",
+  ])("rejects malformed tenant id %j", (tenant) => {
+    expect(() => new MsalAuthenticator("client-id", tenant, getTempDir(), noopOpen)).toThrow(
+      /not a recognised authority form/,
+    );
   });
 });
 
@@ -283,14 +339,26 @@ describe("MsalAuthenticator.token", () => {
 // MsalAuthenticator — logout
 // =========================================================================
 
-/** Helper: openBrowser mock that auto-POSTs to a given path after a short delay. */
-function makeBrowserSpy(path: string): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
+/**
+ * Helper: openBrowser mock that auto-POSTs to a given path after a short
+ * delay. Now includes proper CSRF token handling (§5.4 hardening).
+ */
+function makeBrowserSpy(
+  endpointPath: string,
+): ReturnType<typeof vi.fn<(url: string) => Promise<void>>> {
   return vi.fn((url: string) => {
-    setTimeout(() => {
-      void fetch(`${url}${path}`, { method: "POST" }).catch(() => {
+    void (async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      // Fetch the CSRF token from the page before posting
+      const csrfToken = await fetchCsrfToken(url);
+      await fetch(`${url}${endpointPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrfToken }),
+      }).catch(() => {
         /* fire and forget */
       });
-    }, 150);
+    })();
     return Promise.resolve();
   });
 }

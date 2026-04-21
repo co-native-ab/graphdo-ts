@@ -16,6 +16,7 @@ import {
   createMcpServer,
   InMemoryTransport,
   Client,
+  fetchCsrfToken,
   testSignal,
   type IntegrationEnv,
   type ToolResult,
@@ -80,11 +81,14 @@ describe("integration: todo", () => {
         const browserSpy = (url: string): Promise<void> => {
           capturedUrl = url;
           setTimeout(() => {
-            void fetch(`${url}/select`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: "list-2", label: "Work" }),
-            });
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              await fetch(`${url}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: "list-2", label: "Work", csrfToken }),
+              });
+            })();
           }, 150);
           return Promise.resolve();
         };
@@ -138,11 +142,14 @@ describe("integration: todo", () => {
         const failingBrowser = (url: string): Promise<void> => {
           capturedUrl = url;
           setTimeout(() => {
-            void fetch(`${url}/select`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: "list-1", label: "My Tasks" }),
-            });
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              await fetch(`${url}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: "list-1", label: "My Tasks", csrfToken }),
+              });
+            })();
           }, 150);
           return Promise.reject(new Error("xdg-open failed"));
         };
@@ -201,6 +208,118 @@ describe("integration: todo", () => {
         expect(names).toContain("todo_select_list");
       } finally {
         env.graphState.todoLists = originalLists;
+      }
+    });
+
+    it("returns cancelled message when user cancels the picker", async () => {
+      const originalLists = env.graphState.todoLists;
+      env.graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
+
+      const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-config-cancel-"));
+
+      try {
+        const cancelBrowser = (url: string): Promise<void> => {
+          setTimeout(() => {
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              await fetch(`${url}/cancel`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ csrfToken }),
+              });
+            })();
+          }, 150);
+          return Promise.resolve();
+        };
+
+        const configAuth = new MockAuthenticator({ token: "cancel-token" });
+        const server = await createMcpServer(
+          {
+            authenticator: configAuth,
+            graphBaseUrl: env.graphUrl,
+            configDir: tempConfigDir,
+            openBrowser: cancelBrowser,
+          },
+          testSignal(),
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_select_list",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        expect(firstText(result)).toContain("Todo list selection cancelled");
+      } finally {
+        env.graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("refreshes option list when refresh is triggered", async () => {
+      // Exercises the refreshOptions callback in src/tools/config.ts.
+      const originalLists = env.graphState.todoLists;
+      env.graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
+
+      const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-config-refresh-"));
+
+      try {
+        const refreshBrowser = (url: string): Promise<void> => {
+          setTimeout(() => {
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              // Simulate a new list being created between the initial render
+              // and the user clicking Refresh.
+              env.graphState.todoLists = [
+                { id: "list-1", displayName: "My Tasks" },
+                { id: "list-new", displayName: "Fresh List" },
+              ];
+              const refreshRes = await fetch(`${url}/options`);
+              const refreshed = (await refreshRes.json()) as {
+                options: { id: string; label: string }[];
+              };
+              // The refreshed set must include the newly created list.
+              expect(refreshed.options.some((o) => o.id === "list-new")).toBe(true);
+
+              await fetch(`${url}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: "list-new", label: "Fresh List", csrfToken }),
+              });
+            })();
+          }, 150);
+          return Promise.resolve();
+        };
+
+        const configAuth = new MockAuthenticator({ token: "refresh-token" });
+        const server = await createMcpServer(
+          {
+            authenticator: configAuth,
+            graphBaseUrl: env.graphUrl,
+            configDir: tempConfigDir,
+            openBrowser: refreshBrowser,
+          },
+          testSignal(),
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "todo_select_list",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        expect(firstText(result)).toContain("Fresh List");
+      } finally {
+        env.graphState.todoLists = originalLists;
+        await rm(tempConfigDir, { recursive: true, force: true });
       }
     });
   });

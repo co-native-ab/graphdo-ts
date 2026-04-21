@@ -28,3 +28,17 @@ export function formatError(
   const text = `${options?.prefix ?? ""}${message}${options?.suffix ?? ""}`;
   return { content: [{ type: "text", text }], isError: true };
 }
+
+/**
+ * Retry-hint suffix shared by every browser-picker-backed tool
+ * (`todo_select_list`, `markdown_select_root_folder`). When the
+ * underlying picker times out the user gets a friendlier phrasing
+ * than the generic retry hint. Centralised so wording stays uniform.
+ */
+export function retryHintForPickerError(err: unknown): string {
+  const isTimeout = err instanceof Error && err.message.toLowerCase().includes("timed out");
+  return isTimeout
+    ? "\n\nThe user did not make a selection in time. " +
+        "You can call this tool again if the user would like to retry."
+    : "\n\nYou can call this tool again if the user would like to retry.";
+}

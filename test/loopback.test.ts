@@ -1,8 +1,10 @@
 // Tests for the custom MSAL loopback client (login landing page).
 
 import { describe, it, expect, afterEach } from "vitest";
+import { request as httpRequest } from "node:http";
 
 import { LoginLoopbackClient } from "../src/loopback.js";
+import { fetchCsrfToken } from "./helpers.js";
 
 // Helper: start the loopback client and wait for it to be ready.
 async function startClient(): Promise<{
@@ -25,6 +27,51 @@ async function request(
   return fetch(url, {
     method: opts?.method ?? "GET",
     redirect: opts?.redirect ?? "manual",
+  });
+}
+
+/** POST /cancel with a properly-formed CSRF body. */
+async function postCancel(uri: string, csrfToken: string): Promise<Response> {
+  return fetch(`${uri}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrfToken }),
+  });
+}
+
+/**
+ * Issue a raw HTTP POST via `node:http` so the test can set the `Host`
+ * header (forbidden via the fetch API). Used by the Host-pin tests.
+ */
+function rawHttpPost(
+  url: string,
+  opts: { hostHeader: string; body: string; contentType?: string },
+): Promise<{ status: number; body: string }> {
+  const parsed = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.pathname,
+        method: "POST",
+        headers: {
+          Host: opts.hostHeader,
+          "Content-Type": opts.contentType ?? "application/json",
+          "Content-Length": Buffer.byteLength(opts.body).toString(),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.write(opts.body);
+    req.end();
   });
 }
 
@@ -250,8 +297,11 @@ describe("LoginLoopbackClient", () => {
     const { client: c, uri, authPromise } = await startClient();
     client = c;
 
+    c.setAuthUrl("https://login.microsoftonline.com/test");
+    const csrfToken = await fetchCsrfToken(uri);
+
     const [res] = await Promise.all([
-      fetch(`${uri}/cancel`, { method: "POST" }),
+      postCancel(uri, csrfToken),
       expect(authPromise).rejects.toThrow("Login cancelled by user"),
     ]);
     expect(res.status).toBe(200);
@@ -268,5 +318,198 @@ describe("LoginLoopbackClient", () => {
 
     expect(html).toContain('id="cancel-btn"');
     expect(html).toContain("Cancel");
+  });
+
+  // -------------------------------------------------------------------------
+  // §5.4 Loopback hardening rows for the login server. The picker tests
+  // exhaustively cover every row; here we only smoke-test the equivalent
+  // behaviour on the login server's `/cancel` endpoint and the hardened CSP.
+  // -------------------------------------------------------------------------
+
+  describe("§5.4 hardening", () => {
+    it("CSP header forbids framing and uses a per-request nonce", async () => {
+      const { client: c, uri } = await startClient();
+      client = c;
+
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const res = await request(uri);
+      const csp = res.headers.get("content-security-policy") ?? "";
+      expect(csp).toContain("frame-ancestors 'none'");
+      expect(csp).toContain("base-uri 'none'");
+      expect(csp).toContain("form-action 'self'");
+      expect(csp).not.toContain("'unsafe-inline'");
+      expect(csp).toMatch(/script-src 'nonce-[0-9a-f]{64}'/);
+      expect(csp).toMatch(/style-src 'nonce-[0-9a-f]{64}'/);
+    });
+
+    it("landing page embeds CSRF meta and inline <script> nonce", async () => {
+      const { client: c, uri } = await startClient();
+      client = c;
+
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const html = await (await request(uri)).text();
+      expect(html).toMatch(/<meta name="csrf-token" content="[0-9a-f]{64}">/);
+      expect(html).toMatch(/<script nonce="[0-9a-f]{64}">/);
+      expect(html).toMatch(/<style nonce="[0-9a-f]{64}">/);
+    });
+
+    it("rejects POST /cancel without CSRF token (403)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        expect(res.status).toBe(403);
+      } finally {
+        c.setAuthUrl("https://login.microsoftonline.com/test");
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
+
+    it("rejects POST /cancel with wrong Content-Type (415)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        const csrfToken = await fetchCsrfToken(uri);
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({ csrfToken }),
+        });
+        expect(res.status).toBe(415);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
+
+    it("rejects POST /cancel when Host is not loopback (defends DNS rebinding)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        const csrfToken = await fetchCsrfToken(uri);
+        const res = await rawHttpPost(`${uri}/cancel`, {
+          hostHeader: "evil.example:80",
+          body: JSON.stringify({ csrfToken }),
+        });
+        expect(res.status).toBe(403);
+        expect(res.body).toMatch(/Host/);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
+
+    it("accepts POST /cancel when Host is `localhost:<port>` (MSAL's default redirect URI)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const port = new URL(uri).port;
+      const csrfToken = await fetchCsrfToken(uri);
+
+      const [res] = await Promise.all([
+        rawHttpPost(`${uri}/cancel`, {
+          hostHeader: `localhost:${port}`,
+          body: JSON.stringify({ csrfToken }),
+        }),
+        expect(authPromise).rejects.toThrow("Login cancelled by user"),
+      ]);
+      expect(res.status).toBe(200);
+    });
+
+    it("accepts POST /cancel when Host is `127.0.0.1:<port>`", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const port = new URL(uri).port;
+      const csrfToken = await fetchCsrfToken(uri);
+
+      const [res] = await Promise.all([
+        rawHttpPost(`${uri}/cancel`, {
+          hostHeader: `127.0.0.1:${port}`,
+          body: JSON.stringify({ csrfToken }),
+        }),
+        expect(authPromise).rejects.toThrow("Login cancelled by user"),
+      ]);
+      expect(res.status).toBe(200);
+    });
+
+    it("does not require CSRF on the OAuth callback (cross-site GET from Microsoft)", async () => {
+      // The /?code=... callback originates cross-site from Microsoft as a
+      // top-level GET navigation. CSRF/Origin/Sec-Fetch-Site checks must be
+      // skipped for it; otherwise login would be unreachable.
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+
+      const res = await request(`${uri}/?code=AUTH_CODE&state=STATE`, { redirect: "manual" });
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("/done");
+
+      const result = await authPromise;
+      expect(result.code).toBe("AUTH_CODE");
+    });
+
+    it("rejects POST /cancel with malformed JSON body (400)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{not json",
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toMatch(/Invalid request body/);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
+
+    it("rejects POST /cancel with payload larger than the 1 MiB cap (413)", async () => {
+      const { client: c, uri, authPromise } = await startClient();
+      client = c;
+      c.setAuthUrl("https://login.microsoftonline.com/test");
+
+      const cleanup = authPromise.catch(() => undefined);
+      try {
+        // 1 MiB + 1 byte of JSON-safe filler puts us over MAX_BODY_SIZE.
+        const oversized = JSON.stringify({ filler: "x".repeat(1_048_577) });
+        const res = await fetch(`${uri}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: oversized,
+        });
+        expect(res.status).toBe(413);
+        expect(await res.text()).toMatch(/Payload Too Large/);
+      } finally {
+        const csrfToken = await fetchCsrfToken(uri);
+        await postCancel(uri, csrfToken).catch(() => undefined);
+        await cleanup;
+      }
+    });
   });
 });

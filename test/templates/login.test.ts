@@ -73,6 +73,38 @@ describe("login templates", () => {
       expect(xssHtml).not.toContain("<script>alert(1)</script>");
       expect(xssHtml).toContain("&lt;script&gt;");
     });
+
+    describe("loopback hardening", () => {
+      it("embeds the CSRF token in a <meta> tag when provided", () => {
+        const out = landingPageHtml("https://login.example.com/", {
+          csrfToken: "deadbeef".repeat(8),
+        });
+        expect(out).toContain(`<meta name="csrf-token" content="${"deadbeef".repeat(8)}">`);
+      });
+
+      it("does not emit the CSRF meta tag when not provided", () => {
+        expect(html).not.toContain('<meta name="csrf-token"');
+      });
+
+      it("escapes the CSRF token (defense in depth)", () => {
+        const out = landingPageHtml("https://login.example.com/", { csrfToken: '"><script>' });
+        expect(out).not.toContain('content=""><script>');
+        expect(out).toContain("&quot;&gt;&lt;script&gt;");
+      });
+
+      it("threads the CSP nonce through to inline <style> and <script>", () => {
+        const out = landingPageHtml("https://login.example.com/", { nonce: "abc123" });
+        expect(out).toContain('<style nonce="abc123">');
+        expect(out).toContain('<script nonce="abc123">');
+      });
+
+      it("client-side cancel handler reads the meta tag and POSTs JSON", () => {
+        const out = landingPageHtml("https://login.example.com/", { csrfToken: "tok" });
+        expect(out).toContain("querySelector('meta[name=\"csrf-token\"]')");
+        expect(out).toContain("'Content-Type': 'application/json'");
+        expect(out).toContain("csrfToken: csrfToken");
+      });
+    });
   });
 
   describe("successPageHtml", () => {
@@ -106,6 +138,21 @@ describe("login templates", () => {
 
     it("does not contain Co-native text", () => {
       expect(html.toLowerCase()).not.toContain("co-native");
+    });
+
+    it("threads the CSP nonce through to inline <style> and <script>", () => {
+      const out = successPageHtml("n1");
+      expect(out).toContain('<style nonce="n1">');
+      expect(out).toContain('<script nonce="n1">');
+    });
+
+    it("hides the manual-close fallback via the hidden attribute (CSP-safe)", () => {
+      // Strict-CSP defence: inline style="display:none" is silently
+      // dropped on hardened loopback pages, so initially-hidden elements
+      // must use the standard HTML `hidden` attribute (paired with the
+      // BASE_STYLE [hidden] rule).
+      expect(html).toMatch(/id="manual-close"[^>]*\bhidden\b/);
+      expect(html).not.toMatch(/style="[^"]*display\s*:\s*none/i);
     });
   });
 

@@ -183,5 +183,75 @@ describe("integration: status & errors", () => {
         await rm(emptyConfigDir, { recursive: true, force: true });
       }
     });
+
+    it("shows configured markdown root folder", async () => {
+      const mdConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-test-mdstatus-"));
+
+      try {
+        await saveConfig(
+          {
+            todoListId: "list-1",
+            todoListName: "My Tasks",
+            markdown: {
+              rootFolderId: "folder-1",
+              rootFolderName: "Notes",
+              rootFolderPath: "/drive/root:/Notes",
+            },
+          },
+          mdConfigDir,
+          testSignal(),
+        );
+
+        const authed = new MockAuthenticator({ token: "status-token" });
+
+        const server = await createMcpServer(
+          {
+            authenticator: authed,
+            graphBaseUrl: env.graphUrl,
+            configDir: mdConfigDir,
+            openBrowser: () => Promise.reject(new Error("no browser in tests")),
+          },
+          testSignal(),
+        );
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const c = new Client({ name: "test", version: "1.0" });
+
+        await server.connect(st);
+        await c.connect(ct);
+
+        const result = (await c.callTool({
+          name: "auth_status",
+          arguments: {},
+        })) as ToolResult;
+
+        expect(result.isError).toBeFalsy();
+        const text = firstText(result);
+        expect(text).toContain("Markdown root folder:");
+        expect(text).toContain("folder-1");
+        // The preferred label order is rootFolderPath > rootFolderName > ""
+        expect(text).toContain("/drive/root:/Notes");
+      } finally {
+        await rm(mdConfigDir, { recursive: true, force: true });
+      }
+    });
+
+    it("returns a structured error when status check itself fails", async () => {
+      // Authenticator that throws from isAuthenticated → exercises the catch
+      // block / formatError path in the status tool.
+      class ExplodingAuth extends MockAuthenticator {
+        override isAuthenticated(): Promise<boolean> {
+          return Promise.reject(new Error("auth subsystem offline"));
+        }
+      }
+      const c = await createTestClient(env, new ExplodingAuth({ token: "t" }));
+
+      const result = (await c.callTool({
+        name: "auth_status",
+        arguments: {},
+      })) as ToolResult;
+
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toMatch(/Status check failed: auth subsystem offline/);
+    });
   });
 });

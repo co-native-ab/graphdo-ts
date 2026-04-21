@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createTestEnv, testSignal, type TestEnv } from "../helpers.js";
+import { createTestEnv, gid, testSignal, type TestEnv } from "../helpers.js";
 import { GraphClient } from "../../src/graph/client.js";
 import { GraphRequestError } from "../../src/graph/client.js";
 import {
@@ -15,6 +15,12 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
 } from "../../src/graph/todo.js";
+
+// Branded fixture IDs — same string values the mock-graph server seeds.
+// Constructed once per file so the test bodies can keep reading like
+// `listTodos(client, LIST_1, ...)` rather than re-validating in every call.
+const LIST_1 = gid("list-1");
+const TASK_1 = gid("task-1");
 
 describe("todo operations", () => {
   let env: TestEnv;
@@ -40,7 +46,7 @@ describe("todo operations", () => {
 
   describe("listTodos", () => {
     it("returns items for a list", async () => {
-      const items = await listTodos(client, "list-1", 0, 0, undefined, undefined, testSignal());
+      const items = await listTodos(client, LIST_1, 0, 0, undefined, undefined, testSignal());
       expect(items).toHaveLength(1);
       expect(items[0]!.id).toBe("task-1");
       expect(items[0]!.title).toBe("Buy milk");
@@ -54,17 +60,17 @@ describe("todo operations", () => {
         { id: "t4", title: "Task 4", status: "notStarted" },
       ]);
 
-      const page1 = await listTodos(client, "list-1", 2, 0, undefined, undefined, testSignal());
+      const page1 = await listTodos(client, LIST_1, 2, 0, undefined, undefined, testSignal());
       expect(page1).toHaveLength(2);
       expect(page1[0]!.id).toBe("t1");
       expect(page1[1]!.id).toBe("t2");
 
-      const page2 = await listTodos(client, "list-1", 2, 2, undefined, undefined, testSignal());
+      const page2 = await listTodos(client, LIST_1, 2, 2, undefined, undefined, testSignal());
       expect(page2).toHaveLength(2);
       expect(page2[0]!.id).toBe("t3");
       expect(page2[1]!.id).toBe("t4");
 
-      const page3 = await listTodos(client, "list-1", 2, 4, undefined, undefined, testSignal());
+      const page3 = await listTodos(client, LIST_1, 2, 4, undefined, undefined, testSignal());
       expect(page3).toHaveLength(0);
     });
 
@@ -77,7 +83,7 @@ describe("todo operations", () => {
 
       const filtered = await listTodos(
         client,
-        "list-1",
+        LIST_1,
         0,
         0,
         "status eq 'notStarted'",
@@ -100,7 +106,7 @@ describe("todo operations", () => {
         },
       ]);
 
-      const sorted = await listTodos(client, "list-1", 0, 0, undefined, "importance", testSignal());
+      const sorted = await listTodos(client, LIST_1, 0, 0, undefined, "importance", testSignal());
       expect(sorted[0]!.importance).toBe("high");
       expect(sorted[1]!.importance).toBe("low");
       expect(sorted[2]!.importance).toBe("normal");
@@ -109,14 +115,14 @@ describe("todo operations", () => {
 
   describe("getTodo", () => {
     it("returns a single item", async () => {
-      const item = await getTodo(client, "list-1", "task-1", testSignal());
+      const item = await getTodo(client, LIST_1, TASK_1, testSignal());
       expect(item.id).toBe("task-1");
       expect(item.title).toBe("Buy milk");
       expect(item.status).toBe("notStarted");
     });
 
     it("throws on non-existent ID", async () => {
-      await expect(getTodo(client, "list-1", "no-such-task", testSignal())).rejects.toThrow(
+      await expect(getTodo(client, LIST_1, gid("no-such-task"), testSignal())).rejects.toThrow(
         GraphRequestError,
       );
     });
@@ -124,7 +130,7 @@ describe("todo operations", () => {
 
   describe("createTodo", () => {
     it("creates and returns new item", async () => {
-      const item = await createTodo(client, "list-1", { title: "New Task" }, testSignal());
+      const item = await createTodo(client, LIST_1, { title: "New Task" }, testSignal());
       expect(item.id).toBeTruthy();
       expect(item.title).toBe("New Task");
       expect(item.status).toBe("notStarted");
@@ -136,7 +142,7 @@ describe("todo operations", () => {
     it("with body includes the body content", async () => {
       const item = await createTodo(
         client,
-        "list-1",
+        LIST_1,
         {
           title: "Task With Body",
           body: "Some details here",
@@ -151,7 +157,7 @@ describe("todo operations", () => {
     it("with importance sets importance", async () => {
       const item = await createTodo(
         client,
-        "list-1",
+        LIST_1,
         {
           title: "Important Task",
           importance: "high",
@@ -165,7 +171,7 @@ describe("todo operations", () => {
       const dueDateTime = { dateTime: "2025-12-31T00:00:00.0000000", timeZone: "UTC" };
       const item = await createTodo(
         client,
-        "list-1",
+        LIST_1,
         {
           title: "Due Task",
           dueDateTime,
@@ -179,7 +185,7 @@ describe("todo operations", () => {
       const reminderDateTime = { dateTime: "2025-12-30T09:00:00.0000000", timeZone: "UTC" };
       const item = await createTodo(
         client,
-        "list-1",
+        LIST_1,
         {
           title: "Reminder Task",
           isReminderOn: true,
@@ -198,7 +204,7 @@ describe("todo operations", () => {
       };
       const item = await createTodo(
         client,
-        "list-1",
+        LIST_1,
         {
           title: "Daily Task",
           recurrence,
@@ -213,8 +219,8 @@ describe("todo operations", () => {
     it("updates title", async () => {
       const updated = await updateTodo(
         client,
-        "list-1",
-        "task-1",
+        LIST_1,
+        TASK_1,
         {
           title: "Updated Title",
         },
@@ -226,8 +232,8 @@ describe("todo operations", () => {
     it("updates body", async () => {
       const updated = await updateTodo(
         client,
-        "list-1",
-        "task-1",
+        LIST_1,
+        TASK_1,
         {
           body: "New body content",
         },
@@ -240,8 +246,8 @@ describe("todo operations", () => {
     it("updates importance", async () => {
       const updated = await updateTodo(
         client,
-        "list-1",
-        "task-1",
+        LIST_1,
+        TASK_1,
         {
           importance: "high",
         },
@@ -252,7 +258,7 @@ describe("todo operations", () => {
 
     it("sets due date", async () => {
       const dueDateTime = { dateTime: "2025-06-15T00:00:00.0000000", timeZone: "UTC" };
-      const updated = await updateTodo(client, "list-1", "task-1", { dueDateTime }, testSignal());
+      const updated = await updateTodo(client, LIST_1, TASK_1, { dueDateTime }, testSignal());
       expect(updated.dueDateTime).toEqual(dueDateTime);
     });
 
@@ -267,13 +273,7 @@ describe("todo operations", () => {
         },
       ]);
 
-      const updated = await updateTodo(
-        client,
-        "list-1",
-        "task-1",
-        { dueDateTime: null },
-        testSignal(),
-      );
+      const updated = await updateTodo(client, LIST_1, TASK_1, { dueDateTime: null }, testSignal());
       expect(updated.dueDateTime).toBeUndefined();
     });
 
@@ -281,8 +281,8 @@ describe("todo operations", () => {
       const reminderDateTime = { dateTime: "2025-06-15T09:00:00.0000000", timeZone: "UTC" };
       const withReminder = await updateTodo(
         client,
-        "list-1",
-        "task-1",
+        LIST_1,
+        TASK_1,
         {
           isReminderOn: true,
           reminderDateTime,
@@ -294,8 +294,8 @@ describe("todo operations", () => {
 
       const cleared = await updateTodo(
         client,
-        "list-1",
-        "task-1",
+        LIST_1,
+        TASK_1,
         {
           isReminderOn: false,
           reminderDateTime: null,
@@ -311,29 +311,17 @@ describe("todo operations", () => {
         pattern: { type: "weekly" as const, interval: 1, daysOfWeek: ["monday"] },
         range: { type: "noEnd" as const, startDate: "2025-01-06" },
       };
-      const withRecurrence = await updateTodo(
-        client,
-        "list-1",
-        "task-1",
-        { recurrence },
-        testSignal(),
-      );
+      const withRecurrence = await updateTodo(client, LIST_1, TASK_1, { recurrence }, testSignal());
       expect(withRecurrence.recurrence).toEqual(recurrence);
 
-      const cleared = await updateTodo(
-        client,
-        "list-1",
-        "task-1",
-        { recurrence: null },
-        testSignal(),
-      );
+      const cleared = await updateTodo(client, LIST_1, TASK_1, { recurrence: null }, testSignal());
       expect(cleared.recurrence).toBeUndefined();
     });
   });
 
   describe("completeTodo", () => {
     it("sets status to completed", async () => {
-      await completeTodo(client, "list-1", "task-1", testSignal());
+      await completeTodo(client, LIST_1, TASK_1, testSignal());
 
       const todos = env.state.getTodos("list-1");
       const task = todos.find((t) => t.id === "task-1");
@@ -344,7 +332,7 @@ describe("todo operations", () => {
 
   describe("deleteTodo", () => {
     it("removes the item", async () => {
-      await deleteTodo(client, "list-1", "task-1", testSignal());
+      await deleteTodo(client, LIST_1, TASK_1, testSignal());
 
       const todos = env.state.getTodos("list-1");
       expect(todos.find((t) => t.id === "task-1")).toBeUndefined();
@@ -355,19 +343,19 @@ describe("todo operations", () => {
         { id: "ci-1", displayName: "Step 1", isChecked: false },
       ]);
 
-      await deleteTodo(client, "list-1", "task-1", testSignal());
+      await deleteTodo(client, LIST_1, TASK_1, testSignal());
       expect(env.state.getChecklistItems("task-1")).toHaveLength(0);
     });
   });
 
   describe("checklistItems", () => {
     it("lists empty checklist", async () => {
-      const items = await listChecklistItems(client, "list-1", "task-1", testSignal());
+      const items = await listChecklistItems(client, LIST_1, TASK_1, testSignal());
       expect(items).toHaveLength(0);
     });
 
     it("creates a checklist item", async () => {
-      const item = await createChecklistItem(client, "list-1", "task-1", "Buy eggs", testSignal());
+      const item = await createChecklistItem(client, LIST_1, TASK_1, "Buy eggs", testSignal());
       expect(item.id).toBeTruthy();
       expect(item.displayName).toBe("Buy eggs");
       expect(item.isChecked).toBe(false);
@@ -378,28 +366,22 @@ describe("todo operations", () => {
     });
 
     it("lists checklist items after creation", async () => {
-      await createChecklistItem(client, "list-1", "task-1", "Step 1", testSignal());
-      await createChecklistItem(client, "list-1", "task-1", "Step 2", testSignal());
+      await createChecklistItem(client, LIST_1, TASK_1, "Step 1", testSignal());
+      await createChecklistItem(client, LIST_1, TASK_1, "Step 2", testSignal());
 
-      const items = await listChecklistItems(client, "list-1", "task-1", testSignal());
+      const items = await listChecklistItems(client, LIST_1, TASK_1, testSignal());
       expect(items).toHaveLength(2);
       expect(items[0]!.displayName).toBe("Step 1");
       expect(items[1]!.displayName).toBe("Step 2");
     });
 
     it("updates checklist item name", async () => {
-      const created = await createChecklistItem(
-        client,
-        "list-1",
-        "task-1",
-        "Old Name",
-        testSignal(),
-      );
+      const created = await createChecklistItem(client, LIST_1, TASK_1, "Old Name", testSignal());
       const updated = await updateChecklistItem(
         client,
-        "list-1",
-        "task-1",
-        created.id,
+        LIST_1,
+        TASK_1,
+        gid(created.id),
         {
           displayName: "New Name",
         },
@@ -410,12 +392,12 @@ describe("todo operations", () => {
     });
 
     it("checks a checklist item", async () => {
-      const created = await createChecklistItem(client, "list-1", "task-1", "Step", testSignal());
+      const created = await createChecklistItem(client, LIST_1, TASK_1, "Step", testSignal());
       const checked = await updateChecklistItem(
         client,
-        "list-1",
-        "task-1",
-        created.id,
+        LIST_1,
+        TASK_1,
+        gid(created.id),
         {
           isChecked: true,
         },
@@ -426,20 +408,20 @@ describe("todo operations", () => {
     });
 
     it("unchecks a checklist item", async () => {
-      const created = await createChecklistItem(client, "list-1", "task-1", "Step", testSignal());
+      const created = await createChecklistItem(client, LIST_1, TASK_1, "Step", testSignal());
       await updateChecklistItem(
         client,
-        "list-1",
-        "task-1",
-        created.id,
+        LIST_1,
+        TASK_1,
+        gid(created.id),
         { isChecked: true },
         testSignal(),
       );
       const unchecked = await updateChecklistItem(
         client,
-        "list-1",
-        "task-1",
-        created.id,
+        LIST_1,
+        TASK_1,
+        gid(created.id),
         {
           isChecked: false,
         },
@@ -450,14 +432,8 @@ describe("todo operations", () => {
     });
 
     it("deletes a checklist item", async () => {
-      const created = await createChecklistItem(
-        client,
-        "list-1",
-        "task-1",
-        "Temporary",
-        testSignal(),
-      );
-      await deleteChecklistItem(client, "list-1", "task-1", created.id, testSignal());
+      const created = await createChecklistItem(client, LIST_1, TASK_1, "Temporary", testSignal());
+      await deleteChecklistItem(client, LIST_1, TASK_1, gid(created.id), testSignal());
 
       const items = env.state.getChecklistItems("task-1");
       expect(items).toHaveLength(0);
@@ -467,9 +443,9 @@ describe("todo operations", () => {
       await expect(
         updateChecklistItem(
           client,
-          "list-1",
-          "task-1",
-          "no-such-item",
+          LIST_1,
+          TASK_1,
+          gid("no-such-item"),
           { isChecked: true },
           testSignal(),
         ),
@@ -478,82 +454,29 @@ describe("todo operations", () => {
 
     it("throws on non-existent checklist item delete", async () => {
       await expect(
-        deleteChecklistItem(client, "list-1", "task-1", "no-such-item", testSignal()),
+        deleteChecklistItem(client, LIST_1, TASK_1, gid("no-such-item"), testSignal()),
       ).rejects.toThrow(GraphRequestError);
     });
   });
 
   describe("validation", () => {
-    it("empty listId throws on listTodos", async () => {
-      await expect(
-        listTodos(client, "", 10, 0, undefined, undefined, testSignal()),
-      ).rejects.toThrow("listTodos: listId must not be empty");
-    });
-
-    it("empty listId throws on getTodo", async () => {
-      await expect(getTodo(client, "", "task-1", testSignal())).rejects.toThrow(
-        "getTodo: listId must not be empty",
-      );
-    });
-
-    it("empty taskId throws on getTodo", async () => {
-      await expect(getTodo(client, "list-1", "", testSignal())).rejects.toThrow(
-        "getTodo: taskId must not be empty",
-      );
-    });
-
-    it("empty listId throws on createTodo", async () => {
-      await expect(createTodo(client, "", { title: "title" }, testSignal())).rejects.toThrow(
-        "createTodo: listId must not be empty",
-      );
-    });
+    // The branded `ValidatedGraphId` type makes it a compile-time error
+    // to pass an unvalidated string to any of the helpers above. The
+    // validator's own behaviour is covered exhaustively in
+    // `test/graph/ids.test.ts`. The handful of payload-shape checks
+    // (e.g. `displayName must not be empty`) that survive the migration
+    // are kept here because they are not about identifier validation.
 
     it("empty title throws on createTodo", async () => {
-      await expect(createTodo(client, "list-1", { title: "" }, testSignal())).rejects.toThrow(
+      await expect(createTodo(client, LIST_1, { title: "" }, testSignal())).rejects.toThrow(
         "createTodo: title must not be empty",
       );
     });
 
-    it("empty listId throws on deleteTodo", async () => {
-      await expect(deleteTodo(client, "", "task-1", testSignal())).rejects.toThrow(
-        "deleteTodo: listId must not be empty",
-      );
-    });
-
-    it("empty taskId throws on deleteTodo", async () => {
-      await expect(deleteTodo(client, "list-1", "", testSignal())).rejects.toThrow(
-        "deleteTodo: taskId must not be empty",
-      );
-    });
-
-    it("empty listId throws on listChecklistItems", async () => {
-      await expect(listChecklistItems(client, "", "task-1", testSignal())).rejects.toThrow(
-        "listChecklistItems: listId must not be empty",
-      );
-    });
-
-    it("empty taskId throws on listChecklistItems", async () => {
-      await expect(listChecklistItems(client, "list-1", "", testSignal())).rejects.toThrow(
-        "listChecklistItems: taskId must not be empty",
-      );
-    });
-
     it("empty displayName throws on createChecklistItem", async () => {
-      await expect(
-        createChecklistItem(client, "list-1", "task-1", "", testSignal()),
-      ).rejects.toThrow("createChecklistItem: displayName must not be empty");
-    });
-
-    it("empty itemId throws on updateChecklistItem", async () => {
-      await expect(
-        updateChecklistItem(client, "list-1", "task-1", "", { isChecked: true }, testSignal()),
-      ).rejects.toThrow("updateChecklistItem: itemId must not be empty");
-    });
-
-    it("empty itemId throws on deleteChecklistItem", async () => {
-      await expect(
-        deleteChecklistItem(client, "list-1", "task-1", "", testSignal()),
-      ).rejects.toThrow("deleteChecklistItem: itemId must not be empty");
+      await expect(createChecklistItem(client, LIST_1, TASK_1, "", testSignal())).rejects.toThrow(
+        "createChecklistItem: displayName must not be empty",
+      );
     });
   });
 });

@@ -15,6 +15,7 @@ import {
   createMcpServer,
   InMemoryTransport,
   Client,
+  fetchCsrfToken,
   testSignal,
   saveConfig,
   loadConfig,
@@ -233,11 +234,14 @@ describe("integration: markdown", () => {
       const browserSpy = (url: string): Promise<void> => {
         capturedUrl = url;
         setTimeout(() => {
-          void fetch(`${url}/select`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: "folder-2", label: "/Work" }),
-          });
+          void (async () => {
+            const csrfToken = await fetchCsrfToken(url);
+            await fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "folder-2", label: "/Work", csrfToken }),
+            });
+          })();
         }, 150);
         return Promise.resolve();
       };
@@ -294,11 +298,12 @@ describe("integration: markdown", () => {
         // Fetch the picker page while the server is still running.
         const res = await fetch(url);
         capturedHtml = await res.text();
+        const csrfToken = await fetchCsrfToken(url);
         setTimeout(() => {
           void fetch(`${url}/select`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
+            body: JSON.stringify({ id: "folder-1", label: "/Notes", csrfToken }),
           });
         }, 50);
       };
@@ -341,11 +346,12 @@ describe("integration: markdown", () => {
       const browserSpy = async (url: string): Promise<void> => {
         const res = await fetch(url);
         capturedHtml = await res.text();
+        const csrfToken = await fetchCsrfToken(url);
         setTimeout(() => {
           void fetch(`${url}/select`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
+            body: JSON.stringify({ id: "folder-1", label: "/Notes", csrfToken }),
           });
         }, 50);
       };
@@ -386,11 +392,14 @@ describe("integration: markdown", () => {
 
       const browserSpy = (url: string): Promise<void> => {
         setTimeout(() => {
-          void fetch(`${url}/select`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: "folder-1", label: "/Notes" }),
-          });
+          void (async () => {
+            const csrfToken = await fetchCsrfToken(url);
+            await fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "folder-1", label: "/Notes", csrfToken }),
+            });
+          })();
         }, 150);
         return Promise.resolve();
       };

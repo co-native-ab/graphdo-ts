@@ -13,6 +13,7 @@ import {
 } from "./types.js";
 import type { GraphClient } from "./client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "./client.js";
+import { validateGraphId, type ValidatedGraphId } from "./ids.js";
 import { logger } from "../logger.js";
 
 /**
@@ -198,61 +199,13 @@ export function assertValidMarkdownFileName(name: string): string {
 // ---------------------------------------------------------------------------
 // Opaque Graph identifier validation
 // ---------------------------------------------------------------------------
-
-/**
- * Maximum length we accept for an opaque Graph identifier.
- *
- * Real OneDrive drive item IDs are well under 100 chars, drive item version
- * IDs are short numeric strings (e.g. `"1.0"`, `"2.0"`), and we use the same
- * shape internally for mock IDs. 256 is a generous cap that keeps the URL
- * length bounded so a hand-edited config or a hostile caller cannot push an
- * arbitrarily large blob through `encodeURIComponent` into a Graph URL.
- */
-const MAX_GRAPH_ID_LENGTH = 256;
-
-/**
- * Validate that a value looks like an opaque Microsoft Graph identifier
- * (drive item ID, version ID, etc.) before we splice it into a Graph URL.
- *
- * Real Graph IDs are short, opaque, ASCII tokens — they never contain path
- * separators, whitespace, control characters, or non-ASCII. While we always
- * `encodeURIComponent` IDs before they hit the wire (so injection of
- * additional path segments is blocked at the URL layer), this is defence in
- * depth: a value that looks nothing like a real Graph ID is almost
- * certainly the result of a config bug, a confused agent, or a malicious
- * caller, and should fail loudly at the boundary instead of producing a
- * confusing 404 / 400 from Graph.
- *
- * @throws Error with the supplied label when the value is empty, too long,
- *   contains whitespace, control characters, path separators (`/`, `\`),
- *   non-ASCII characters, or is otherwise not a plausible Graph ID.
- */
-export function assertValidGraphId(label: string, value: unknown): string {
-  if (typeof value !== "string") {
-    throw new Error(`${label} must be a string`);
-  }
-  if (value.length === 0) {
-    throw new Error(`${label} must not be empty`);
-  }
-  if (value.length > MAX_GRAPH_ID_LENGTH) {
-    throw new Error(`${label} is longer than ${String(MAX_GRAPH_ID_LENGTH)} characters`);
-  }
-  if (/\s/.test(value)) {
-    throw new Error(`${label} must not contain whitespace`);
-  }
-  if (/[\x00-\x1f\x7f]/u.test(value)) {
-    throw new Error(`${label} must not contain control characters`);
-  }
-  if (value.includes("/") || value.includes("\\")) {
-    throw new Error(`${label} must not contain path separators (/ or \\)`);
-  }
-  // Non-ASCII would be silently re-encoded by encodeURIComponent and is not
-  // a shape any real Graph ID has.
-  if (/[^\x00-\x7f]/u.test(value)) {
-    throw new Error(`${label} must be ASCII`);
-  }
-  return value;
-}
+//
+// The validator + branded `ValidatedGraphId` type live in `./ids.js` (see
+// ADR-0005). This module re-exports the legacy `assertValidGraphId` name
+// for back-compat so existing imports keep working; new code should call
+// {@link validateGraphId} directly. The two return the same branded
+// value — `assertValidGraphId` is now a thin alias.
+export { validateGraphId as assertValidGraphId } from "./ids.js";
 
 // ---------------------------------------------------------------------------
 // Folder listing (used by the folder picker)
@@ -415,10 +368,9 @@ export function buildMarkdownPreviewUrl(drive: Drive, item: DriveItem): string {
 /** Fetch all immediate children of the configured folder, unfiltered. */
 async function listFolderChildren(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  assertValidGraphId("folderId", folderId);
   return listAllPages(
     client,
     `/me/drive/items/${encodeURIComponent(folderId)}/children?$top=200`,
@@ -501,7 +453,7 @@ function extractNextPath(nextLink: unknown): string | null {
  */
 export async function listMarkdownFolderEntries(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<MarkdownFolderEntry[]> {
   logger.debug("listing markdown folder entries", { folderId });
@@ -548,7 +500,7 @@ export async function listMarkdownFolderEntries(
  */
 export async function listMarkdownFiles(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
   const entries = await listMarkdownFolderEntries(client, folderId, signal);
@@ -564,11 +516,10 @@ export async function listMarkdownFiles(
  */
 export async function findMarkdownFileByName(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   name: string,
   signal: AbortSignal,
 ): Promise<DriveItem | null> {
-  assertValidGraphId("folderId", folderId);
   assertValidMarkdownFileName(name);
 
   const files = await listMarkdownFiles(client, folderId, signal);
@@ -579,10 +530,9 @@ export async function findMarkdownFileByName(
 /** Fetch a drive item's metadata (without downloading content). */
 export async function getDriveItem(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  assertValidGraphId("itemId", itemId);
   logger.debug("getting drive item", { itemId });
 
   const path = `/me/drive/items/${encodeURIComponent(itemId)}`;
@@ -619,11 +569,9 @@ export class MarkdownFileTooLargeError extends Error {
  */
 export async function downloadMarkdownContent(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<string> {
-  assertValidGraphId("itemId", itemId);
-
   const item = await getDriveItem(client, itemId, signal);
   if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
     throw new MarkdownFileTooLargeError(item.size, MAX_DIRECT_CONTENT_BYTES);
@@ -691,12 +639,11 @@ export class MarkdownCTagMismatchError extends Error {
  */
 export async function createMarkdownFile(
   client: GraphClient,
-  folderId: string,
+  folderId: ValidatedGraphId,
   fileName: string,
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  assertValidGraphId("folderId", folderId);
   assertValidMarkdownFileName(fileName);
 
   const bytes = Buffer.byteLength(content, "utf-8");
@@ -739,12 +686,11 @@ export async function createMarkdownFile(
  */
 export async function updateMarkdownFile(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   cTag: string,
   content: string,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  assertValidGraphId("itemId", itemId);
   if (!cTag) throw new Error("updateMarkdownFile: cTag must not be empty");
 
   const bytes = Buffer.byteLength(content, "utf-8");
@@ -775,10 +721,9 @@ export async function updateMarkdownFile(
 /** Permanently delete a drive item. */
 export async function deleteDriveItem(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<void> {
-  assertValidGraphId("itemId", itemId);
   logger.debug("deleting drive item", { itemId });
   await client.request(HttpMethod.DELETE, `/me/drive/items/${encodeURIComponent(itemId)}`, signal);
 }
@@ -799,10 +744,9 @@ export async function deleteDriveItem(
  */
 export async function listDriveItemVersions(
   client: GraphClient,
-  itemId: string,
+  itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItemVersion[]> {
-  assertValidGraphId("itemId", itemId);
   logger.debug("listing drive item versions", { itemId });
 
   const path = `/me/drive/items/${encodeURIComponent(itemId)}/versions`;
@@ -839,8 +783,13 @@ export async function resolveCurrentRevision(
   signal: AbortSignal,
 ): Promise<string | undefined> {
   if (item.version !== undefined) return item.version;
+  // `item.id` is sourced from a Zod-parsed Graph response; re-validate
+  // before splicing into a Graph URL (defence in depth — a buggy mock
+  // server or a future schema change should not silently send a
+  // malformed value through encodeURIComponent).
+  const itemId = validateGraphId("item.id", item.id);
   try {
-    const history = await listDriveItemVersions(client, item.id, signal);
+    const history = await listDriveItemVersions(client, itemId, signal);
     return history[0]?.id;
   } catch (err: unknown) {
     if (signal.aborted) throw err;
@@ -863,13 +812,10 @@ export async function resolveCurrentRevision(
  */
 export async function downloadDriveItemVersionContent(
   client: GraphClient,
-  itemId: string,
-  versionId: string,
+  itemId: ValidatedGraphId,
+  versionId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<string> {
-  assertValidGraphId("itemId", itemId);
-  assertValidGraphId("versionId", versionId);
-
   const path =
     `/me/drive/items/${encodeURIComponent(itemId)}` +
     `/versions/${encodeURIComponent(versionId)}/content`;
@@ -924,21 +870,20 @@ export interface RevisionContent {
 export async function getRevisionContent(
   client: GraphClient,
   item: DriveItem,
-  versionId: string,
+  versionId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<RevisionContent> {
-  assertValidGraphId("versionId", versionId);
-  assertValidGraphId("item.id", item.id);
+  const itemIdValidated = validateGraphId("item.id", item.id);
 
   // Fast path: item.version is populated (sometimes returned by Graph; with
   // our mock and many real OneDrive responses the field is omitted, in
   // which case we fall through to the /versions-driven lookup below).
   if (item.version === versionId) {
-    const content = await downloadMarkdownContent(client, item.id, signal);
+    const content = await downloadMarkdownContent(client, itemIdValidated, signal);
     return { content, isCurrent: true };
   }
 
-  const history = await listDriveItemVersions(client, item.id, signal);
+  const history = await listDriveItemVersions(client, itemIdValidated, signal);
 
   // The versions list is returned newest-first. OneDrive includes the current
   // version as the first entry but rejects GET /versions/{id}/content for it
@@ -946,7 +891,7 @@ export async function getRevisionContent(
   // version"). When item.version is unavailable (real OneDrive does not always
   // surface it), detect the current version by its position at history[0].
   if (history[0]?.id === versionId) {
-    const content = await downloadMarkdownContent(client, item.id, signal);
+    const content = await downloadMarkdownContent(client, itemIdValidated, signal);
     return { content, isCurrent: true };
   }
 
@@ -960,6 +905,6 @@ export async function getRevisionContent(
     throw new MarkdownUnknownVersionError(item.id, versionId, known);
   }
 
-  const content = await downloadDriveItemVersionContent(client, item.id, versionId, signal);
+  const content = await downloadDriveItemVersionContent(client, itemIdValidated, versionId, signal);
   return { content, isCurrent: false };
 }
