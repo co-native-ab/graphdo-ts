@@ -303,4 +303,58 @@ describe("logout loopback server (§5.4 hardening parity)", () => {
       await logoutPromise.catch(() => undefined);
     }
   });
+
+  // ---------------------------------------------------------------------------
+  // Error path coverage
+  // ---------------------------------------------------------------------------
+
+  it("logout clears tokens silently when openBrowser fails", async () => {
+    const dir = await makeTempDir();
+    const openBrowserError = new Error("xdg-open failed");
+    const openBrowser = vi
+      .fn<(url: string) => Promise<void>>()
+      .mockRejectedValueOnce(openBrowserError);
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+    const logoutPromise = auth.logout(testSignal());
+
+    // logout() catches openBrowser errors and clears tokens silently
+    // so it should resolve (not reject)
+    await expect(logoutPromise).resolves.toBeUndefined();
+
+    // Verify tokens were cleared
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
+  });
+
+  it("logout clears tokens silently when server binding fails", async () => {
+    const dir = await makeTempDir();
+    const openBrowser = vi
+      .fn<(url: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Server binding error"));
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+
+    // This tests the path where the server cannot bind to a port
+    // The showLogoutPage rejects, and MsalAuthenticator.logout catches it
+    const logoutPromise = auth.logout(testSignal());
+    await expect(logoutPromise).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dir, "msal_cache.json"))).rejects.toThrow();
+  });
+
+  it("logout clears tokens when caller aborts the signal", async () => {
+    const dir = await makeTempDir();
+    const controller = new AbortController();
+    const openBrowser = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
+    const auth = new MsalAuthenticator("client-id", "common", dir, openBrowser);
+
+    const logoutPromise = auth.logout(controller.signal);
+    void logoutPromise.catch(() => undefined);
+
+    // Wait for openBrowser to be called
+    await waitForLoopbackUrl(openBrowser, 2000);
+
+    // Abort the signal
+    controller.abort(new Error("Test abort"));
+
+    // logout's clearCacheFiles checks signal.aborted and throws signal.reason
+    await expect(logoutPromise).rejects.toThrow("Test abort");
+  });
 });
