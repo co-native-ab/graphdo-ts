@@ -14,6 +14,7 @@ import {
   listChecklistItems,
 } from "../graph/todo.js";
 import { loadAndValidateTodoConfig } from "../config.js";
+import { validateGraphId } from "../graph/ids.js";
 import type { ServerConfig } from "../index.js";
 import { formatError } from "./shared.js";
 import {
@@ -209,9 +210,10 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-          const item = await getTodo(client, todoConfig.todoListId, args.taskId, signal);
+          const item = await getTodo(client, todoConfig.todoListId, taskId, signal);
 
           const lines = [
             `Title: ${item.title}`,
@@ -241,7 +243,7 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
           const checklistItems = await listChecklistItems(
             client,
             todoConfig.todoListId,
-            args.taskId,
+            taskId,
             signal,
           );
           if (checklistItems.length > 0) {
@@ -385,13 +387,14 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
         }
 
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
 
           const item = await updateTodo(
             client,
             todoConfig.todoListId,
-            args.taskId,
+            taskId,
             {
               title: args.title || undefined,
               body: args.body || undefined,
@@ -442,9 +445,10 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-          await completeTodo(client, todoConfig.todoListId, args.taskId, signal);
+          await completeTodo(client, todoConfig.todoListId, taskId, signal);
 
           return {
             content: [
@@ -479,9 +483,10 @@ export function registerTodoTools(server: McpServer, config: ServerConfig): Tool
       },
       async (args, { signal }) => {
         try {
+          const taskId = validateGraphId("taskId", args.taskId);
           const client = config.graphClient;
           const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-          await deleteTodo(client, todoConfig.todoListId, args.taskId, signal);
+          await deleteTodo(client, todoConfig.todoListId, taskId, signal);
 
           return {
             content: [{ type: "text", text: `Todo "${args.taskId}" deleted.` }],

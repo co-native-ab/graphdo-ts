@@ -7,8 +7,8 @@ import {
   SUCCESS_STYLE,
   ERROR_STYLE,
   PICKER_STYLE,
-  escapeHtml,
 } from "../../src/templates/styles.js";
+import { escapeHtml } from "../../src/templates/escape.js";
 import { purple, grey, complementary, fontFamily } from "../../src/templates/tokens.js";
 
 describe("shared styles", () => {

@@ -1,12 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import * as crypto from "node:crypto";
 
 import { z } from "zod";
 
 import { isNodeError } from "./errors.js";
+import { validateGraphId, type ValidatedGraphId } from "./graph/ids.js";
 import { logger } from "./logger.js";
+import { writeJsonAtomic } from "./fs-options.js";
 
 export interface MarkdownConfig {
   rootFolderId?: string;
@@ -103,35 +104,10 @@ export async function loadConfig(dir: string, signal: AbortSignal): Promise<Conf
 
 /** Writes config atomically: writes to a temp file then renames into place. */
 export async function saveConfig(config: Config, dir: string, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) throw signal.reason;
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
-
-  const isWindows = os.platform() === "win32";
-  const mkdirOptions: Parameters<typeof fs.mkdir>[1] = isWindows
-    ? { recursive: true }
-    : { recursive: true, mode: 0o700 };
-  await fs.mkdir(dir, mkdirOptions);
-
-  const data = JSON.stringify(config, null, 2) + "\n";
-  const tmpFile = path.join(dir, `.config-${crypto.randomUUID()}.tmp`);
-
-  try {
-    const writeOptions: Parameters<typeof fs.writeFile>[2] = isWindows
-      ? { encoding: "utf-8" as const, signal }
-      : { encoding: "utf-8" as const, mode: 0o600, signal };
-    await fs.writeFile(tmpFile, data, writeOptions);
-    await fs.rename(tmpFile, filePath);
-    logger.debug("config saved", { path: filePath });
-  } catch (err: unknown) {
-    // Best-effort cleanup of the temp file
-    try {
-      await fs.unlink(tmpFile);
-    } catch {
-      // ignore cleanup errors
-    }
-    throw err;
-  }
+  await writeJsonAtomic(filePath, config, signal);
+  logger.debug("config saved", { path: filePath });
 }
 
 /**
@@ -191,16 +167,31 @@ export function hasMarkdownConfig(
  * Loads config from disk and validates that a todo list is configured.
  * Throws a user-friendly error if missing or invalid (e.g. picker has not
  * been run yet — in which case the user is directed to re-run the picker).
+ *
+ * Returns the validated config with `todoListId` re-typed as
+ * {@link ValidatedGraphId} so it can be passed straight to Graph helpers
+ * without an additional validation step. A persisted-but-corrupted
+ * `todoListId` (hand-edited config.json) fails loudly here rather than
+ * splicing into a Graph URL downstream.
  */
 export async function loadAndValidateTodoConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { todoListId: string; todoListName: string }> {
+): Promise<Config & { todoListId: ValidatedGraphId; todoListName: string }> {
   const config = await loadConfig(dir, signal);
   if (!hasTodoConfig(config)) {
     throw new Error("todo list not configured - use the todo_select_list tool to select one");
   }
-  return config;
+  let validatedListId: ValidatedGraphId;
+  try {
+    validatedListId = validateGraphId("todoListId", config.todoListId);
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `todo list configuration is corrupted (${reason}) - use the todo_select_list tool to re-select one`,
+    );
+  }
+  return { ...config, todoListId: validatedListId };
 }
 
 /**
@@ -208,11 +199,17 @@ export async function loadAndValidateTodoConfig(
  * Throws a user-friendly error if missing or invalid (e.g. empty, `/`, or
  * containing path separators — in which case the user is directed to re-run
  * the picker, which always writes a single-folder opaque ID).
+ *
+ * Re-types `markdown.rootFolderId` as {@link ValidatedGraphId} so callers
+ * can pass it straight into Graph helpers without re-validating. A
+ * persisted value that fails {@link validateGraphId} (a hand-edited
+ * config.json) raises the same "use the picker" error as the missing
+ * case, rather than splicing into a Graph URL downstream.
  */
 export async function loadAndValidateMarkdownConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { markdown: { rootFolderId: string } & MarkdownConfig }> {
+): Promise<Config & { markdown: { rootFolderId: ValidatedGraphId } & MarkdownConfig }> {
   const config = await loadConfig(dir, signal);
   const rootFolderId = config?.markdown?.rootFolderId;
   const err = markdownRootFolderIdError(rootFolderId);
@@ -225,7 +222,19 @@ export async function loadAndValidateMarkdownConfig(
       `markdown root folder ${detail} - use the markdown_select_root_folder tool to choose one`,
     );
   }
-  return config;
+  let validatedRootId: ValidatedGraphId;
+  try {
+    validatedRootId = validateGraphId("markdown.rootFolderId", config.markdown.rootFolderId);
+  } catch (cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `markdown root folder is corrupted (${reason}) - use the markdown_select_root_folder tool to re-select one`,
+    );
+  }
+  return {
+    ...config,
+    markdown: { ...config.markdown, rootFolderId: validatedRootId },
+  };
 }
 
 /**

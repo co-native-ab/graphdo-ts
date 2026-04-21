@@ -99,4 +99,51 @@ describe("logout template", () => {
       expect(html).toContain("graphdo");
     });
   });
+
+  describe("logoutPageHtml with csrfToken and nonce (hardened loopback parity)", () => {
+    it('embeds a <meta name="csrf-token"> tag when csrfToken is provided', () => {
+      const html = logoutPageHtml({ csrfToken: "abc123" });
+      expect(html).toContain('<meta name="csrf-token" content="abc123">');
+    });
+
+    it("HTML-escapes the csrfToken in the meta tag", () => {
+      const html = logoutPageHtml({ csrfToken: '"><script>alert(1)</script>' });
+      expect(html).not.toContain('"><script>alert(1)</script>');
+      expect(html).toContain("&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    });
+
+    it("does not embed a CSRF meta tag when csrfToken is omitted", () => {
+      const html = logoutPageHtml();
+      expect(html).not.toContain('<meta name="csrf-token"');
+    });
+
+    it("applies the nonce to inline <script> and <style>", () => {
+      const html = logoutPageHtml({ nonce: "nnn-abc" });
+      expect(html).toContain('<script nonce="nnn-abc">');
+      expect(html).toContain('<style nonce="nnn-abc">');
+    });
+
+    it("the inline script reads csrfToken from the meta tag", () => {
+      const html = logoutPageHtml({ csrfToken: "tok" });
+      expect(html).toContain('meta[name="csrf-token"]');
+      expect(html).toContain("getAttribute('content')");
+    });
+
+    it("the /confirm POST sends JSON with the csrfToken", () => {
+      const html = logoutPageHtml({ csrfToken: "tok" });
+      expect(html).toContain("fetch('/confirm'");
+      expect(html).toContain("'Content-Type': 'application/json'");
+      expect(html).toContain("JSON.stringify({ csrfToken: csrfToken })");
+    });
+
+    it("the /cancel POST sends JSON with the csrfToken", () => {
+      const html = logoutPageHtml({ csrfToken: "tok" });
+      expect(html).toContain("fetch('/cancel'");
+      // cancel uses the same JSON body shape
+      const cancelIndex = html.indexOf("fetch('/cancel'");
+      const cancelBlock = html.slice(cancelIndex, cancelIndex + 300);
+      expect(cancelBlock).toContain("'Content-Type': 'application/json'");
+      expect(cancelBlock).toContain("JSON.stringify({ csrfToken: csrfToken })");
+    });
+  });
 });

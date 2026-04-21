@@ -16,6 +16,7 @@ import {
   createMcpServer,
   InMemoryTransport,
   Client,
+  fetchCsrfToken,
   testSignal,
   type IntegrationEnv,
   type ToolResult,
@@ -80,11 +81,14 @@ describe("integration: todo", () => {
         const browserSpy = (url: string): Promise<void> => {
           capturedUrl = url;
           setTimeout(() => {
-            void fetch(`${url}/select`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: "list-2", label: "Work" }),
-            });
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              await fetch(`${url}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: "list-2", label: "Work", csrfToken }),
+              });
+            })();
           }, 150);
           return Promise.resolve();
         };
@@ -138,11 +142,14 @@ describe("integration: todo", () => {
         const failingBrowser = (url: string): Promise<void> => {
           capturedUrl = url;
           setTimeout(() => {
-            void fetch(`${url}/select`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: "list-1", label: "My Tasks" }),
-            });
+            void (async () => {
+              const csrfToken = await fetchCsrfToken(url);
+              await fetch(`${url}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: "list-1", label: "My Tasks", csrfToken }),
+              });
+            })();
           }, 150);
           return Promise.reject(new Error("xdg-open failed"));
         };

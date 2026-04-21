@@ -1,10 +1,21 @@
 import type { MockState } from "./mock-graph.js";
 import { createMockGraphServer, MockState as MockStateClass } from "./mock-graph.js";
+import { validateGraphId, type ValidatedGraphId } from "../src/graph/ids.js";
 
 export interface TestEnv {
   state: MockState;
   graphUrl: string;
   cleanup: () => Promise<void>;
+}
+
+/**
+ * Test-only shorthand that brands a string as a {@link ValidatedGraphId}
+ * by running it through {@link validateGraphId}. Lets fixture code keep
+ * passing string literals like `"list-1"` while still satisfying the
+ * helper signatures introduced by ADR-0007.
+ */
+export function gid(value: string): ValidatedGraphId {
+  return validateGraphId("test-id", value);
 }
 
 /**
@@ -14,6 +25,24 @@ export interface TestEnv {
  */
 export function testSignal(): AbortSignal {
   return AbortSignal.timeout(10_000);
+}
+
+/**
+ * Fetch the loopback page at `pageUrl` and extract the CSRF token from the
+ * `<meta name="csrf-token">` tag. Throws if the meta tag is missing.
+ *
+ * Used by tests that POST to `/select` or `/cancel` on the picker / login
+ * loopback servers — they require a valid CSRF token + JSON Content-Type
+ * after the §5.4 hardening.
+ */
+export async function fetchCsrfToken(pageUrl: string): Promise<string> {
+  const res = await fetch(pageUrl);
+  const html = await res.text();
+  const match = /<meta name="csrf-token" content="([^"]+)">/.exec(html);
+  if (!match?.[1]) {
+    throw new Error(`No csrf-token meta tag found at ${pageUrl}`);
+  }
+  return match[1];
 }
 
 export async function createTestEnv(): Promise<TestEnv> {

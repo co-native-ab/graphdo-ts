@@ -162,5 +162,103 @@ describe("picker template", () => {
       expect(xssHtml).not.toContain("<img src=x");
       expect(xssHtml).toContain("&lt;img");
     });
+
+    it("escapes HTML in filterPlaceholder (attribute breakout)", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        filterPlaceholder: '" autofocus onfocus="alert(1)',
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      // Must not allow the attacker to close the placeholder attribute and
+      // inject new attributes on the <input> element.
+      expect(xssHtml).not.toContain('placeholder="" autofocus');
+      expect(xssHtml).toContain("&quot; autofocus onfocus=&quot;alert(1)");
+    });
+
+    it("escapes HTML in createLink.url (attribute breakout)", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: 'https://example.com/"><script>alert(1)</script>',
+          label: "Create",
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain('"><script>');
+      expect(xssHtml).toContain("&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    });
+
+    it("escapes HTML in createLink.label", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: "https://example.com",
+          label: "<b>Create</b>",
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain("<b>Create</b>");
+      expect(xssHtml).toContain("&lt;b&gt;Create&lt;/b&gt;");
+    });
+
+    it("escapes HTML in createLink.description", () => {
+      const xssConfig = {
+        title: "Test",
+        subtitle: "Test",
+        options: [],
+        createLink: {
+          url: "https://example.com",
+          label: "Create",
+          description: '<img src=x onerror="alert(1)">',
+        },
+      };
+      const xssHtml = pickerPageHtml(xssConfig);
+      expect(xssHtml).not.toContain("<img src=x");
+      expect(xssHtml).toContain("&lt;img");
+    });
+  });
+
+  describe("loopback hardening", () => {
+    it("embeds the CSRF token in a <meta> tag when provided", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: "deadbeef".repeat(8) });
+      expect(out).toContain(`<meta name="csrf-token" content="${"deadbeef".repeat(8)}">`);
+    });
+
+    it("does not emit the CSRF meta tag when not provided", () => {
+      expect(html).not.toContain('<meta name="csrf-token"');
+    });
+
+    it("escapes the CSRF token (defense in depth)", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: '"><script>' });
+      expect(out).not.toContain('content=""><script>');
+      expect(out).toContain("&quot;&gt;&lt;script&gt;");
+    });
+
+    it("threads the CSP nonce through to inline <style> and <script>", () => {
+      const out = pickerPageHtml({ ...sampleConfig, nonce: "abc123" });
+      expect(out).toContain('<style nonce="abc123">');
+      expect(out).toContain('<script nonce="abc123">');
+    });
+
+    it("client-side handlers read the meta tag and send the token in JSON", () => {
+      const out = pickerPageHtml({ ...sampleConfig, csrfToken: "tok" });
+      expect(out).toContain("querySelector('meta[name=\"csrf-token\"]')");
+      expect(out).toContain("csrfToken: csrfToken");
+    });
+  });
+});
+
+describe("Done card visibility", () => {
+  it("hides Done card on initial render (display:none + hidden attribute)", () => {
+    const html = pickerPageHtml(sampleConfig);
+    // The #done element must carry both style="display:none" and the hidden attribute
+    // for accessibility and display correctness.
+    expect(html).toMatch(/id="done"[^>]*style="display:none"[^>]*hidden/);
   });
 });
