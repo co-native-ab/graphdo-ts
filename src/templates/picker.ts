@@ -40,6 +40,13 @@ interface PickerPageConfig {
   nonce?: string;
   /** When set, enables navigable folder picker mode. */
   navigation?: PickerPageNavigation;
+  /**
+   * Top-level share-URL paste form toggle. Used by non-navigable
+   * pickers (e.g. `session_open_project`) that want a URL-paste box
+   * but no breadcrumb / drill-in. The form is rendered when this is
+   * `true` OR when `navigation?.shareUrlEnabled` is `true`.
+   */
+  shareUrlEnabled?: boolean;
 }
 
 function renderOptionButton(opt: PickerPageOption): string {
@@ -73,16 +80,18 @@ export function pickerPageHtml(config: PickerPageConfig): string {
           .join(" / ")}</nav>`
       : "";
 
-  const shareUrlFormHtml =
-    config.navigation?.shareUrlEnabled === true
-      ? `<div class="share-url-form">
+  const shareUrlFormEnabled =
+    config.shareUrlEnabled === true || config.navigation?.shareUrlEnabled === true;
+
+  const shareUrlFormHtml = shareUrlFormEnabled
+    ? `<div class="share-url-form">
         <label for="share-url-input">Or paste a OneDrive folder share link:</label>
         <div class="share-url-row">
           <input id="share-url-input" type="url" placeholder="https://...sharepoint.com/..." autocomplete="off" />
           <button id="share-url-btn" class="share-url-btn" type="button">Open link</button>
         </div>
       </div>`
-      : "";
+    : "";
 
   const selectCurrentBtn =
     config.navigation !== undefined
@@ -137,7 +146,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
   </div>`,
     script: `    const refreshEnabled = ${String(config.refreshEnabled === true)};
     const navigationEnabled = ${String(config.navigation !== undefined)};
-    const shareUrlEnabled = ${String(config.navigation?.shareUrlEnabled === true)};
+    const shareUrlEnabled = ${String(shareUrlFormEnabled)};
     const PAGE_SIZE = 10;
     const csrfMeta = document.querySelector('meta[name="csrf-token"]');
     const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';

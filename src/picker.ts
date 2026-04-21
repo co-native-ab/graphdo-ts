@@ -42,6 +42,26 @@ export interface PickerCreateLink {
   description?: string;
 }
 
+/**
+ * User pasted a OneDrive share URL. Returns either `jump` (replace the
+ * picker's option list and breadcrumb without resolving the picker) or
+ * `select` (resolve `waitForSelection` immediately with the chosen
+ * id+label and shut the server down).
+ *
+ * Available either as a top-level {@link PickerConfig.onShareUrl} (for
+ * non-navigable pickers like `session_open_project`) or as
+ * {@link PickerNavigation.onShareUrl} (for navigable pickers like
+ * `session_init_project`). When both are supplied the top-level
+ * handler wins.
+ */
+export type ShareUrlHandler = (
+  url: string,
+  signal: AbortSignal,
+) => Promise<
+  | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+  | { kind: "select"; selected: { id: string; label: string } }
+>;
+
 export interface PickerNavigation {
   /** Drill into a folder option. Returns new options and breadcrumb path. */
   onNavigate: (
@@ -53,13 +73,7 @@ export interface PickerNavigation {
   onSelectCurrent: (signal: AbortSignal) => Promise<{ id: string; label: string }>;
 
   /** Optional: user pasted a OneDrive share URL. Returns jump-to or direct select. */
-  onShareUrl?: (
-    url: string,
-    signal: AbortSignal,
-  ) => Promise<
-    | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
-    | { kind: "select"; selected: { id: string; label: string } }
-  >;
+  onShareUrl?: ShareUrlHandler;
 
   /** Initial breadcrumb shown when the picker first loads (e.g. ["My OneDrive"]). */
   initialBreadcrumb: string[];
@@ -87,6 +101,15 @@ export interface PickerConfig {
   timeoutMs?: number;
   /** When set, enables navigable folder picker mode (subfolder drill-in + share URL paste). */
   navigation?: PickerNavigation;
+  /**
+   * Optional: enable the share-URL paste box on a non-navigable picker.
+   * The same callback shape as {@link PickerNavigation.onShareUrl}; when
+   * the user pastes a URL the handler decides whether to `jump` the
+   * option list or `select` directly. When `navigation` is also set,
+   * this top-level handler takes precedence over
+   * `navigation.onShareUrl`.
+   */
+  onShareUrl?: ShareUrlHandler;
 }
 
 export interface PickerResult {
@@ -247,6 +270,19 @@ function handleRequest(
     return;
   }
 
+  // /share-url is registered when either a top-level `onShareUrl` is
+  // set (non-navigable picker, e.g. session_open_project) or
+  // `navigation` is configured (in which case `handleShareUrl` falls
+  // back to 405 if `navigation.onShareUrl` itself is undefined).
+  if (
+    req.method === "POST" &&
+    url === "/share-url" &&
+    (config.onShareUrl !== undefined || config.navigation !== undefined)
+  ) {
+    handleShareUrl(req, res, config, state, server, onSelected, signal);
+    return;
+  }
+
   if (config.navigation !== undefined) {
     if (req.method === "GET" && url === "/breadcrumb") {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -259,10 +295,6 @@ function handleRequest(
     }
     if (req.method === "POST" && url === "/select-current") {
       handleSelectCurrent(req, res, config, state, server, onSelected, signal);
-      return;
-    }
-    if (req.method === "POST" && url === "/share-url") {
-      handleShareUrl(req, res, config, state, server, onSelected, signal);
       return;
     }
   }
@@ -297,6 +329,7 @@ function servePickerPage(
               shareUrlEnabled: config.navigation.onShareUrl !== undefined,
             }
           : undefined,
+      shareUrlEnabled: config.onShareUrl !== undefined,
     }),
   );
 }
@@ -627,23 +660,18 @@ function handleShareUrl(
   onSelected: (result: PickerResult) => void,
   signal: AbortSignal,
 ): void {
-  const navigation = config.navigation;
-  if (!navigation) {
-    res.writeHead(500, { "Content-Type": "text/plain" });
-    res.end("Internal error: navigation not configured");
+  // Top-level `onShareUrl` wins over navigation's, mirroring the
+  // routing condition above.
+  const onShareUrl = config.onShareUrl ?? config.navigation?.onShareUrl;
+  if (onShareUrl === undefined) {
+    res.writeHead(405, { "Content-Type": "text/plain" });
+    res.end("Share URL not supported");
     return;
   }
   const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
   if (!headerCheck.ok) {
     res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
     res.end(headerCheck.message);
-    return;
-  }
-
-  const { onShareUrl } = navigation;
-  if (onShareUrl === undefined) {
-    res.writeHead(405, { "Content-Type": "text/plain" });
-    res.end("Share URL not supported");
     return;
   }
 

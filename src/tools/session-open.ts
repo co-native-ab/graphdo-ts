@@ -13,6 +13,8 @@ import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
 import { validateGraphId } from "../graph/ids.js";
+import { validateShareUrl, encodeShareUrl } from "../collab/share-url.js";
+import { resolveShareUrl } from "../collab/graph-share.js";
 
 import {
   readSentinel,
@@ -55,9 +57,11 @@ export async function runOpenProject(
     throw new AuthenticationRequiredError();
   }
 
-  // For W4 Day 4, we use a simple stub mechanism. Integration tests will
-  // inject a (driveId, folderId) pair directly via a custom picker spy.
-  // The full browser form lands in a follow-up milestone.
+  // Two entry points are wired today: recents (the option list below) and
+  // share-URL paste (the `onShareUrl` callback on the picker). The
+  // "shared with me" tab is a planned follow-up — `listSharedWithMe`
+  // already exists in `src/collab/graph-share.ts` but its UX (separate
+  // list vs merged-with-recents) is unresolved.
   const recents = await loadRecents(config.configDir, signal);
   const recentsOptions = recents.entries
     .filter((e) => e.available)
@@ -71,11 +75,29 @@ export async function runOpenProject(
     {
       title: "Open Collab Project",
       subtitle:
-        "Select a project from your recents, or use the test stub to pass a folder ID directly.",
+        "Pick a recent project, or paste a OneDrive folder share link to join a project shared with you.",
       options: recentsOptions,
       filterPlaceholder: "Filter projects...",
       onSelect: async () => {
         // Work happens after picker resolves
+      },
+      onShareUrl: async (url, s) => {
+        const validated = validateShareUrl(url);
+        const encoded = encodeShareUrl(validated);
+        const item = await resolveShareUrl(client, encoded, s);
+        if (item.folder === undefined) {
+          throw new Error(
+            "The shared link points to a file, not a folder. Please share a folder link to the project root.",
+          );
+        }
+        const itemId = validateGraphId("shareUrl.item.id", item.id);
+        // The post-selection branch below treats any non-`recent:` id
+        // as a raw folder id, which matches the share-URL select path
+        // exactly. Label is informational only.
+        return {
+          kind: "select",
+          selected: { id: itemId, label: item.name },
+        };
       },
     },
     signal,

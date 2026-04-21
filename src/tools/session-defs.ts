@@ -39,12 +39,12 @@ export const SESSION_OPEN_DEF: ToolDef = {
   title: "Open Collaboration Project",
   description:
     "Join an existing collaboration project as a collaborator. Opens a browser form " +
-    "with three entry points: recents (previously opened projects), 'shared with me' " +
-    "(folders shared with your OneDrive account), and a URL paste box for OneDrive share links. " +
-    "All parameters come from the form. Reads the .collab/project.json sentinel, validates " +
-    "write access, activates a session, and writes a session_start audit entry. Returns the " +
-    "project details similar to session_init_project. Use session_init_project to create a " +
-    "new project as the originator.",
+    "with two entry points: recents (previously opened projects) and a URL paste box " +
+    "for OneDrive folder share links. All parameters come from the form. Reads the " +
+    ".collab/project.json sentinel, validates write access, activates a session, and " +
+    "writes a session_start audit entry. Returns the project details similar to " +
+    "session_init_project. Use session_init_project to create a new project as the " +
+    "originator.",
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 

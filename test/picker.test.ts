@@ -1056,3 +1056,137 @@ describe("browser picker — navigation mode", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Top-level `onShareUrl` (non-navigable picker) — for `session_open_project`.
+// Distinct from the navigation-mode `onShareUrl` above: the share-URL form
+// is rendered without a breadcrumb / Select-this-folder button, and
+// `kind: "select"` resolves the picker just like an option click.
+// ---------------------------------------------------------------------------
+
+describe("browser picker — share URL without navigation", () => {
+  function buildSharePicker(opts?: {
+    onShareUrlResult?:
+      | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+      | { kind: "select"; selected: { id: string; label: string } };
+    onShareUrlError?: Error;
+  }) {
+    const onShareUrl = vi
+      .fn<
+        (
+          url: string,
+          sig: AbortSignal,
+        ) => Promise<
+          | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+          | { kind: "select"; selected: { id: string; label: string } }
+        >
+      >()
+      .mockImplementation((_, __) => {
+        if (opts?.onShareUrlError) return Promise.reject(opts.onShareUrlError);
+        return Promise.resolve(
+          opts?.onShareUrlResult ?? {
+            kind: "select" as const,
+            selected: { id: "shared-folder", label: "Shared Folder" },
+          },
+        );
+      });
+    const onSelect = vi
+      .fn<(opt: PickerOption, sig: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    const config = {
+      title: "Open Project",
+      subtitle: "Pick a recent project, or paste a OneDrive folder share link.",
+      options: sampleOptions,
+      onSelect,
+      onShareUrl,
+      timeoutMs: 5000,
+    };
+    return { config, onShareUrl, onSelect };
+  }
+
+  it("renders the share-URL form even without navigation", async () => {
+    const { config } = buildSharePicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const html = await (await fetch(handle.url)).text();
+    expect(html).toContain("share-url-input");
+    expect(html).toContain("share-url-btn");
+    // No breadcrumb / select-current button on a non-navigable picker.
+    expect(html).not.toContain('id="breadcrumb"');
+    // The "Select this folder" button is the visible breadcrumb-mode CTA;
+    // a non-navigable picker must not render the actual button element
+    // (the picker JS references the id internally, but that string only
+    // executes when `navigationEnabled` is true).
+    expect(html).not.toContain('id="select-current-btn"');
+  });
+
+  it("POST /share-url with kind=select resolves waitForSelection", async () => {
+    const { config, onShareUrl } = buildSharePicker({
+      onShareUrlResult: {
+        kind: "select",
+        selected: { id: "folder-from-link", label: "Project Foo" },
+      },
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const [res, selectionResult] = await Promise.all([
+      postJson(`${handle.url}/share-url`, {
+        csrfToken,
+        body: { url: "https://contoso-my.sharepoint.com/personal/u/Documents/proj" },
+      }),
+      handle.waitForSelection,
+    ]);
+    expect(res.status).toBe(200);
+    expect(onShareUrl).toHaveBeenCalledOnce();
+    expect(selectionResult.selected.id).toBe("folder-from-link");
+    expect(selectionResult.selected.label).toBe("Project Foo");
+  });
+
+  it("POST /share-url returns 400 with user-facing error message on InvalidShareUrlError", async () => {
+    const { InvalidShareUrlError } = await import("../src/errors.js");
+    const { config } = buildSharePicker({
+      onShareUrlError: new InvalidShareUrlError("http://evil.com/x", "unsupported_host"),
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken,
+      body: { url: "http://evil.com/x" },
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain("Invalid share URL");
+  });
+
+  it("POST /share-url rejects without valid CSRF token (403)", async () => {
+    const { config } = buildSharePicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken: "wrong-token",
+      body: { url: "https://contoso.sharepoint.com/sites/foo" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /share-url returns 404 when neither top-level nor navigation onShareUrl is configured", async () => {
+    const config = {
+      title: "Open Project",
+      subtitle: "Pick a project.",
+      options: sampleOptions,
+      onSelect: vi
+        .fn<(opt: PickerOption, sig: AbortSignal) => Promise<void>>()
+        .mockResolvedValue(undefined),
+      timeoutMs: 5000,
+    };
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken,
+      body: { url: "https://contoso.sharepoint.com/sites/foo" },
+    });
+    // Without onShareUrl in either slot the route is not registered →
+    // generic 404, not the 405 that handleShareUrl returns when bound
+    // but disabled. This is the behaviour we want: the form is also
+    // not rendered, so a real browser session never reaches this path.
+    expect(res.status).toBe(404);
+  });
+});
