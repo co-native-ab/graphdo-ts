@@ -221,6 +221,55 @@ export async function createMcpServer(
 }
 
 // ---------------------------------------------------------------------------
+// Shutdown wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * Signal sources that trigger a graceful shutdown. Narrower than
+ * `NodeJS.Process` / `NodeJS.ReadStream` so tests can pass stand-ins.
+ */
+export interface ShutdownProcess {
+  once(event: "SIGINT" | "SIGTERM" | "SIGHUP", listener: () => void): unknown;
+}
+export interface ShutdownStdin {
+  once(event: "end" | "close", listener: () => void): unknown;
+  on(event: "error", listener: (err: Error) => void): unknown;
+}
+
+/**
+ * Subscribe `shutdown` to every signal source that should terminate the
+ * MCP server: SIGINT, SIGTERM, SIGHUP, and stdin end/close/error. The
+ * stdin hooks matter on Copilot CLI reload — the CLI closes our pipe
+ * but does not always deliver SIGTERM, and `StdioServerTransport.onclose`
+ * does not always fire. Without this, orphan graphdo-ts processes
+ * survive the reload and hold `<configDir>/instance.lock` hostage until
+ * a human deletes the file (see `docs/plans/two-instance-e2e.md`).
+ *
+ * Idempotent per controller: repeated triggers after abort are no-ops.
+ * Exported for unit testing; wire with the live process/stdin in main.
+ */
+export function wireShutdownSignals(
+  shutdown: AbortController,
+  proc: ShutdownProcess,
+  stdin: ShutdownStdin,
+): void {
+  const trigger = (name: string): void => {
+    if (shutdown.signal.aborted) return;
+    logger.info("shutdown signal received", { signal: name });
+    shutdown.abort(new Error(name));
+  };
+  proc.once("SIGINT", () => trigger("SIGINT"));
+  proc.once("SIGTERM", () => trigger("SIGTERM"));
+  proc.once("SIGHUP", () => trigger("SIGHUP"));
+  stdin.once("end", () => trigger("stdin-end"));
+  stdin.once("close", () => trigger("stdin-close"));
+  stdin.on("error", (err: Error) => {
+    logger.warn("stdin error", { error: err.message });
+    trigger("stdin-error");
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -229,14 +278,11 @@ async function main(): Promise<void> {
     setLogLevel("debug");
   }
 
-  // Create a top-level AbortController that's cancelled on SIGINT/SIGTERM.
+  // Create a top-level AbortController that's cancelled on SIGINT/SIGTERM/SIGHUP
+  // or when the MCP client disconnects our stdin pipe. See
+  // `wireShutdownSignals` above for the rationale behind the stdin hooks.
   const shutdown = new AbortController();
-  const onProcessSignal = (name: string): void => {
-    logger.info("shutdown signal received", { signal: name });
-    shutdown.abort(new Error(name));
-  };
-  process.once("SIGINT", () => onProcessSignal("SIGINT"));
-  process.once("SIGTERM", () => onProcessSignal("SIGTERM"));
+  wireShutdownSignals(shutdown, process, process.stdin);
 
   const cfgDir = configDir(process.env["GRAPHDO_CONFIG_DIR"]);
   logger.debug("config directory", { path: cfgDir });
