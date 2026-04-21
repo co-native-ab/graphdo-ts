@@ -256,10 +256,6 @@ describe("01-init-write-read-list", () => {
   // (lands in W2 Day 4 + W3 Day 2)
   // -------------------------------------------------------------------------
 
-  it.skip("deferred placeholder — replaced by audit assertions inside the W3 Day 2 + W3 Day 3 tests below", () => {
-    // intentionally empty; see the `audit emission` blocks below.
-  });
-
   describe("§3.6 audit emission (W3 Day 3)", () => {
     it("session_init_project appends a session_start entry", async () => {
       const { spy } = pickerSpy("folder-proj", "/Project Foo", "file-spec", "spec.md");
