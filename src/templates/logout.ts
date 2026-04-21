@@ -1,13 +1,31 @@
 // HTML template for the logout confirmation page.
 
 import { LOGOUT_CONFIRM_STYLE, SUCCESS_STYLE } from "./styles.js";
+import { escapeHtml } from "./escape.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
 import { layoutHtml } from "./layout.js";
 
-export function logoutPageHtml(): string {
+export interface LogoutPageOptions {
+  /**
+   * CSRF token. Embedded in a `<meta name="csrf-token">` tag — the page
+   * reads it from the meta tag and includes it in the JSON body of
+   * `POST /confirm` and `POST /cancel`. Required by the hardened logout
+   * loopback server (see `src/auth.ts#showLogoutPage`).
+   */
+  csrfToken?: string;
+  /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
+  nonce?: string;
+}
+
+export function logoutPageHtml(opts: LogoutPageOptions = {}): string {
   return layoutHtml({
     title: "graphdo - Sign Out",
     extraStyles: LOGOUT_CONFIRM_STYLE + SUCCESS_STYLE,
+    nonce: opts.nonce,
+    extraHead:
+      opts.csrfToken !== undefined
+        ? `<meta name="csrf-token" content="${escapeHtml(opts.csrfToken)}">`
+        : "",
     body: `<div class="container">
     <div class="card">
       <div id="confirm-view">
@@ -31,14 +49,20 @@ export function logoutPageHtml(): string {
       <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
     </picture>
   </div>`,
-    script: `    const signOutBtn = document.getElementById('sign-out-btn');
+    script: `    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
+    const signOutBtn = document.getElementById('sign-out-btn');
     const cancelBtn = document.getElementById('cancel-btn');
 
     signOutBtn.addEventListener('click', async () => {
       signOutBtn.disabled = true;
       cancelBtn.disabled = true;
       try {
-        const res = await fetch('/confirm', { method: 'POST' });
+        const res = await fetch('/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csrfToken: csrfToken }),
+        });
         if (!res.ok) throw new Error(await res.text());
         document.getElementById('confirm-view').style.display = 'none';
         document.getElementById('done-view').style.display = 'block';
@@ -65,7 +89,11 @@ export function logoutPageHtml(): string {
     cancelBtn.addEventListener('click', async () => {
       signOutBtn.disabled = true;
       cancelBtn.disabled = true;
-      await fetch('/cancel', { method: 'POST' }).catch(() => {});
+      await fetch('/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrfToken: csrfToken }),
+      }).catch(() => {});
       window.close();
     });`,
   });
