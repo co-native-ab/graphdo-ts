@@ -27,7 +27,10 @@
 ### 1.1 OneDrive setup
 
 1. In OneDrive, create a folder anywhere convenient called
-   `graphdo-collab-smoke/`.
+   `graphdo-collab-smoke/`. The `session_init_project` picker now
+   supports drilling into subfolders and accepts a pasted OneDrive
+   share URL, so the folder can live anywhere in your OneDrive
+   tree — but a top-level folder is the simplest path.
 2. Inside it, create a single markdown file `spec.md` with at least
    three `##` headings, e.g.:
 
@@ -182,7 +185,43 @@ to the correct sub-agent, collects the result, decides PASS / FAIL,
 emits the formatted block, appends to the results file, and decides
 whether to advance to the next scenario or stop.
 
-### 3.2 Block formats
+**Sub-agent dispatch is mandatory.** The orchestrator MUST spawn
+`alice-agent` and `bob-agent` via Copilot CLI's `task` tool (typically
+as `general-purpose` agents in `mode: "background"`) and route every
+MCP tool call through them. The orchestrator MUST NOT call a
+`graphdo-alice-*` or `graphdo-bob-*` tool itself, even when the call
+is "obvious" or "trivial" (e.g. `auth_status`). Each dispatch is a
+focused prompt to the sub-agent of the form:
+
+> "Call `graphdo-alice-<tool>` with arguments `<X>`. Return the
+> verbatim tool result. Do not retry."
+
+If the orchestrator cannot find a sub-agent for the target instance,
+spawn one before proceeding — never fall back to a direct call.
+
+### 3.2 Tool-roster gate after every login
+
+Some MCP servers register additional tools only after authentication
+completes. The orchestrator MUST re-enumerate the available tool list
+for each instance immediately after its `login` call returns, and MUST
+NOT advance to S2 until both rosters include every tool listed in
+playbook §4 S2-S10. Acceptable verification methods, in order of
+preference:
+
+1. Inspect `<tools_changed_notice>` system messages emitted by the
+   Copilot CLI runtime since the previous turn.
+2. Ask the relevant sub-agent (`alice-agent` / `bob-agent`) to list
+   the tools it can call on its bound MCP server and return the list
+   verbatim.
+3. As a last resort, call a known no-op tool (e.g. `auth_status`) via
+   the sub-agent to trigger any pending tool-list refresh.
+
+If the expected tools are still absent after a successful login, that
+is a 🔴 ISSUE. **Never** conclude tools "do not exist" based on a
+roster snapshot taken before login completed — that has caused at
+least one false abort.
+
+### 3.3 Block formats
 
 **Human-input checkpoint:**
 
@@ -208,14 +247,16 @@ evidence: |
 suggested-fix: <which file / module to look at>
 ```
 
-### 3.3 Stop conditions
+### 3.4 Stop conditions
 
 - First 🔴 ISSUE → stop, print summary, exit non-zero.
 - Any unexpected tool result → 🔴 ISSUE.
 - Any human declines a 🟡 prompt → mark the scenario `SKIPPED-HUMAN-DECLINED`, continue to next scenario.
 - Never auto-POST to a loopback `/select` endpoint to satisfy a 🟡 prompt — the human must click the browser button.
+- The orchestrator calling a `graphdo-*` tool directly (instead of via a sub-agent) → 🔴 ISSUE labelled `protocol-violation`; the run is invalid and must be re-started.
+- Concluding "tool not implemented" without first completing the §3.2 tool-roster gate → 🔴 ISSUE labelled `false-negative-tool-detection`.
 
-### 3.4 Output contract
+### 3.5 Output contract
 
 The orchestrator writes
 `~/.graphdo-personas/results-<UTC-ISO>.md` containing one section per

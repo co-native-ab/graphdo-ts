@@ -26,10 +26,25 @@ Read `docs/plans/two-instance-e2e.md` as your runbook.
 
 ## Hard rules
 
-1. **Tool-server isolation.** `alice-agent` may call tools on the
-   `graphdo-alice` MCP server only. `bob-agent` may call tools on the
-   `graphdo-bob` MCP server only. You (the orchestrator) may not call
-   MCP tools on either; you only relay instructions and results.
+1. **Tool-server isolation via `task` sub-agents.** You — the
+   orchestrator — MUST NOT call any `graphdo-alice-*` or `graphdo-bob-*`
+   MCP tool yourself. Every MCP call is dispatched through Copilot
+   CLI's `task` tool to a named sub-agent:
+   - `alice-agent` (a `general-purpose` sub-agent) is the only caller
+     allowed to invoke `graphdo-alice-*` tools.
+   - `bob-agent` (a `general-purpose` sub-agent) is the only caller
+     allowed to invoke `graphdo-bob-*` tools.
+
+   Spawn both sub-agents up-front (use `mode: "background"` so you can
+   send each scenario step in turn), and dispatch every tool call by
+   sending the sub-agent a focused prompt of the form _"Call
+   graphdo-alice-<tool> with arguments <X>; return the verbatim tool
+   result."_. The sub-agent returns the raw output; you parse, decide
+   PASS / FAIL, and emit blocks. If you find yourself about to call a
+   `graphdo-*` tool directly, STOP and route through the sub-agent
+   instead. Direct orchestrator calls are a protocol violation that
+   invalidates the run.
+
 2. **Yellow checkpoints are blocking.** When a scenario calls for a
    `🟡 HUMAN INPUT NEEDED` block, emit it in the exact format below
    and **stop** until the human confirms the action is complete. Never
@@ -47,7 +62,36 @@ Read `docs/plans/two-instance-e2e.md` as your runbook.
 5. **Pre-flight before S1.** Run the §1.5 checklist of the playbook
    before scenario S1 starts. Refuse the run on any failed pre-flight
    check.
-6. **One results file per run.** Append, never overwrite. Path:
+6. **Re-enumerate the MCP tool roster after every login.** Some MCP
+   servers expose additional tools only after authentication
+   completes — `graphdo-ts` may register the `session_*` and
+   `collab_*` surface only after `login` returns. Immediately after
+   each `login` call (i.e. after S1 step 1 for Alice and S1 step 2 for
+   Bob), the orchestrator MUST re-check the available tool list for
+   that instance (e.g. by inspecting the
+   `<tools_changed_notice>` system messages, or by requesting a fresh
+   tool listing). Only after both rosters confirm the expected
+   `session_init_project`, `session_open_project`, `session_status`,
+   `session_renew`, `collab_acquire_section`, `collab_release_section`,
+   `collab_write`, `collab_read`, `collab_create_proposal`,
+   `collab_apply_proposal`, `collab_list_versions`,
+   `collab_restore_version`, `collab_delete_file`, and
+   `collab_list_files` tools are present, may S2 begin. If they are
+   absent **after** a successful login, that is a 🔴 ISSUE — never
+   conclude on pre-login state alone.
+7. **No false-negative tool detection.** If you cannot find a tool
+   in your roster at any point, you MUST verify by:
+   1. Checking for any `<tools_changed_notice>` messages in the
+      transcript that may have added tools you did not record.
+   2. Asking the appropriate sub-agent to list the tools it can call
+      (the sub-agent has its own MCP view).
+   3. Only after both checks fail, emit a 🔴 ISSUE.
+
+   Never emit a 🔴 ISSUE that says "tool not implemented" without
+   completing this verification — that has caused at least one false
+   abort already.
+
+8. **One results file per run.** Append, never overwrite. Path:
    `~/.graphdo-personas/results-<UTC-ISO>.md`. Create the file in
    the pre-flight step with a header containing the start time and
    the exact persona ids reported by `auth_status` on each side.
