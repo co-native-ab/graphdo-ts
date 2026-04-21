@@ -550,3 +550,116 @@ This is the body content.
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Navigation mode integration tests
+// ---------------------------------------------------------------------------
+
+describe("session_init_project — navigation mode", () => {
+  let navEnv: IntegrationEnv;
+
+  beforeEach(async () => {
+    resetFormFactoryForTest();
+    navEnv = await setupIntegrationEnv();
+    navEnv.graphState.user = {
+      id: "user-nav",
+      displayName: "Nav User",
+      mail: "nav@example.com",
+      userPrincipalName: "nav@example.com",
+    };
+  });
+
+  afterEach(async () => {
+    await teardownIntegrationEnv(navEnv);
+  });
+
+  it("navigates into subfolder and initialises project there", async () => {
+    // Seed tree: root → Projects/ (root folder) → MyProject/ (subfolder with .md)
+    navEnv.graphState.driveRootChildren = [
+      {
+        id: "root-folder-1",
+        name: "Projects",
+        folder: {},
+        lastModifiedDateTime: "2026-01-01T00:00:00Z",
+      },
+    ];
+    navEnv.graphState.driveFolderChildren.set("root-folder-1", [
+      {
+        id: "sub-folder-1",
+        name: "MyProject",
+        folder: {},
+        lastModifiedDateTime: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    navEnv.graphState.driveFolderChildren.set("sub-folder-1", [
+      {
+        id: "doc-md",
+        name: "README.md",
+        size: 10,
+        lastModifiedDateTime: "2026-01-01T00:00:00Z",
+        file: { mimeType: "text/markdown" },
+        content: "# Readme\n",
+      },
+    ]);
+
+    // Navigate into Projects, then into MyProject, then select-current (MyProject has the .md).
+    const captured = { url: "" };
+    let call = 0;
+    const spy = (url: string): Promise<void> => {
+      captured.url = url;
+      const which = call++;
+      setTimeout(() => {
+        void (async () => {
+          const csrfToken = await fetchCsrfToken(url);
+          if (which === 0) {
+            // First navigate: into root-folder-1 (Projects) → response has sub-folder-1 as option
+            const navRes = await fetch(`${url}/navigate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "root-folder-1", csrfToken }),
+            });
+            const navData = (await navRes.json()) as { options: { id: string; label: string }[] };
+            const subFolderId = navData.options[0]?.id ?? "sub-folder-1";
+            // Second navigate: into sub-folder-1 (MyProject)
+            await fetch(`${url}/navigate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: subFolderId, csrfToken }),
+            });
+            // Now select the current (MyProject has the .md file)
+            await fetch(`${url}/select-current`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ csrfToken }),
+            });
+            return;
+          }
+          if (which === 1) {
+            await fetch(`${url}/select`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: "doc-md", label: "README.md", csrfToken }),
+            });
+          }
+        })();
+      }, 150);
+      return Promise.resolve();
+    };
+
+    const auth = new MockAuthenticator({ token: "nav-token" });
+    const c = await createTestClient(navEnv, auth, { openBrowser: spy });
+
+    await auth.login(new AbortController().signal);
+    const result = (await c.callTool({
+      name: "session_init_project",
+      arguments: {},
+    })) as ToolResult;
+    expect(result.isError).toBeFalsy();
+    const text = firstText(result);
+    expect(text).toContain("Project initialised");
+    // The sentinel should be under sub-folder-1, not root-folder-1
+    const subChildren = navEnv.graphState.driveFolderChildren.get("sub-folder-1") ?? [];
+    const collabFolder = subChildren.find((c) => c.name === ".collab");
+    expect(collabFolder).toBeDefined();
+  });
+});

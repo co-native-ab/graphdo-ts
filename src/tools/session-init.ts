@@ -8,8 +8,12 @@ import {
 import type { ServerConfig } from "../index.js";
 import { logger } from "../logger.js";
 import { startBrowserPicker } from "../picker.js";
+import type { PickerNavigation } from "../picker.js";
 import { validateGraphId } from "../graph/ids.js";
-import { getMyDrive, listRootFolders } from "../graph/markdown.js";
+import type { ValidatedGraphId } from "../graph/ids.js";
+import { getMyDrive, listRootFolders, listChildFolders } from "../graph/markdown.js";
+import { validateShareUrl, encodeShareUrl } from "../collab/share-url.js";
+import { resolveShareUrl } from "../collab/graph-share.js";
 
 import {
   SENTINEL_FOLDER_NAME,
@@ -89,23 +93,70 @@ export async function runInitProject(
     };
   }
 
+  // Track current folder as the user navigates; null = OneDrive root.
+  let currentFolderId: ValidatedGraphId | null = null;
+  let currentBreadcrumb: string[] = ["My OneDrive"];
+
+  const navigation: PickerNavigation = {
+    initialBreadcrumb: ["My OneDrive"],
+    onNavigate: async (option, s) => {
+      const nextFolderId = validateGraphId("nav.option.id", option.id);
+      const children = await listChildFolders(client, nextFolderId, s);
+      currentFolderId = nextFolderId;
+      currentBreadcrumb = [...currentBreadcrumb, option.label];
+      return {
+        options: children.map((f) => ({ id: f.id, label: f.name })),
+        breadcrumb: currentBreadcrumb,
+      };
+    },
+    onSelectCurrent: (_s) => {
+      if (currentFolderId === null) {
+        return Promise.reject(new Error("Please navigate into a subfolder before selecting."));
+      }
+      return Promise.resolve({ id: currentFolderId, label: currentBreadcrumb.join(" / ") });
+    },
+    onShareUrl: async (url, s) => {
+      const validated = validateShareUrl(url);
+      const encoded = encodeShareUrl(validated);
+      const item = await resolveShareUrl(client, encoded, s);
+      if (item.folder === undefined) {
+        throw new Error(
+          "The shared link points to a file, not a folder. Please share a folder link.",
+        );
+      }
+      const itemId = validateGraphId("shareUrl.item.id", item.id);
+      const children = await listChildFolders(client, itemId, s);
+      currentFolderId = itemId;
+      const rawPath = item.parentReference?.path ?? "";
+      const afterRoot = rawPath.split("root:")[1] ?? "";
+      const parentSegments = afterRoot.split("/").filter((seg) => seg.length > 0);
+      currentBreadcrumb = ["My OneDrive", ...parentSegments, item.name];
+      return {
+        kind: "jump",
+        options: children.map((f) => ({ id: f.id, label: f.name })),
+        breadcrumb: currentBreadcrumb,
+      };
+    },
+  };
+
   const handle = await startBrowserPicker(
     {
       title: "Select Collab Project Folder",
       subtitle:
-        "Choose the OneDrive folder that will hold this collaboration project. " +
+        "Navigate into the OneDrive folder that will hold this collaboration project. " +
         "graphdo will create a .collab/ subfolder there to record the project's sentinel.",
-      options: folders.map((f) => ({ id: f.id, label: `/${f.name}` })),
+      options: folders.map((f) => ({ id: f.id, label: f.name })),
       filterPlaceholder: "Filter folders...",
       refreshOptions: async (s) => {
         const refreshed = await listRootFolders(client, s);
-        return refreshed.map((f) => ({ id: f.id, label: `/${f.name}` }));
+        return refreshed.map((f) => ({ id: f.id, label: f.name }));
       },
       onSelect: async () => {
         // The init flow does its work after the picker resolves so the
         // slot's URL stays useful in FormBusyError messages until the
         // sentinel + metadata + recents writes complete.
       },
+      navigation,
     },
     signal,
   );
@@ -123,11 +174,8 @@ export async function runInitProject(
   }
 
   const result = await handle.waitForSelection;
-  // The picker option `id` started life as a Graph drive item id surfaced
-  // by `listRootFolders`. Re-validate at this boundary so the value is
-  // brand-typed before it threads through every collab Graph helper
-  // (defence in depth — if a future picker option source produced a
-  // non-Graph id we'd fail loudly here rather than splice into a URL).
+  // Re-validate at this boundary so the value is brand-typed before it
+  // threads through every collab Graph helper (defence in depth).
   const chosenFolderId = validateGraphId("chosenFolderId", result.selected.id);
 
   // ------- Validate folder contents -------

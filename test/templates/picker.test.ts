@@ -253,3 +253,53 @@ describe("picker template", () => {
     });
   });
 });
+
+describe("Done card visibility", () => {
+  it("hides Done card on initial render (must have display:none or hidden attribute)", () => {
+    const html = pickerPageHtml(sampleConfig);
+    // The #done element must carry either style="display:none" or the hidden attribute.
+    expect(html).toMatch(/id="done"[^>]*(style="display:none"|hidden)/);
+  });
+});
+
+describe("navigation mode rendering", () => {
+  const navConfig = {
+    ...sampleConfig,
+    navigation: {
+      initialBreadcrumb: ["My OneDrive", "Docs"],
+      shareUrlEnabled: false,
+    },
+  };
+
+  it("renders breadcrumb when navigation is configured", () => {
+    const html = pickerPageHtml(navConfig);
+    expect(html).toContain('class="breadcrumb"');
+    expect(html).toContain("My OneDrive");
+    expect(html).toContain("Docs");
+  });
+
+  it("renders Select this folder button when navigation is configured", () => {
+    const html = pickerPageHtml(navConfig);
+    expect(html).toContain("select-current-btn");
+    expect(html).toContain("Select this folder");
+  });
+
+  it("renders share-url form when shareUrlEnabled is true", () => {
+    const html = pickerPageHtml({
+      ...navConfig,
+      navigation: { ...navConfig.navigation, shareUrlEnabled: true },
+    });
+    expect(html).toContain('class="share-url-form"');
+    expect(html).toContain('id="share-url-input"');
+  });
+
+  it("does not render share-url form when shareUrlEnabled is false", () => {
+    const html = pickerPageHtml(navConfig);
+    expect(html).not.toContain('class="share-url-form"');
+  });
+
+  it("does not render breadcrumb when navigation is not configured", () => {
+    const html = pickerPageHtml(sampleConfig);
+    expect(html).not.toContain('id="breadcrumb"');
+  });
+});

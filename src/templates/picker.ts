@@ -16,6 +16,11 @@ interface PickerPageCreateLink {
   description?: string;
 }
 
+interface PickerPageNavigation {
+  initialBreadcrumb: string[];
+  shareUrlEnabled: boolean;
+}
+
 interface PickerPageConfig {
   title: string;
   subtitle: string;
@@ -33,6 +38,8 @@ interface PickerPageConfig {
   csrfToken?: string;
   /** Per-request CSP nonce; threaded through to inline `<style>` and `<script>`. */
   nonce?: string;
+  /** When set, enables navigable folder picker mode. */
+  navigation?: PickerPageNavigation;
 }
 
 function renderOptionButton(opt: PickerPageOption): string {
@@ -59,6 +66,29 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       </div>`
       : "";
 
+  const breadcrumbHtml =
+    config.navigation !== undefined
+      ? `<nav id="breadcrumb" class="breadcrumb">${config.navigation.initialBreadcrumb
+          .map((s) => `<span>${escapeHtml(s)}</span>`)
+          .join(" / ")}</nav>`
+      : "";
+
+  const shareUrlFormHtml =
+    config.navigation?.shareUrlEnabled === true
+      ? `<div class="share-url-form">
+        <label for="share-url-input">Or paste a OneDrive folder share link:</label>
+        <div class="share-url-row">
+          <input id="share-url-input" type="url" placeholder="https://...sharepoint.com/..." autocomplete="off" />
+          <button id="share-url-btn" class="share-url-btn" type="button">Open link</button>
+        </div>
+      </div>`
+      : "";
+
+  const selectCurrentBtn =
+    config.navigation !== undefined
+      ? `<button id="select-current-btn" class="select-current-btn" type="button" disabled>Select this folder</button>`
+      : "";
+
   return layoutHtml({
     title: `graphdo - ${escapeHtml(config.title)}`,
     extraStyles: PICKER_STYLE,
@@ -75,6 +105,7 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         <input id="filter-input" class="filter-input" type="text" placeholder="${filterPlaceholder}" autocomplete="off" spellcheck="false" />
         ${refreshButton}
       </div>
+      ${breadcrumbHtml}
       <div id="options-list">
         ${optionButtons}
       </div>
@@ -84,12 +115,14 @@ export function pickerPageHtml(config: PickerPageConfig): string {
         <span id="page-status" class="page-status" aria-live="polite"></span>
         <button id="next-btn" class="page-btn" type="button" aria-label="Next page">Next &raquo;</button>
       </div>
+      ${shareUrlFormHtml}
       ${createLinkHtml}
       <div class="btn-group" style="margin-top: 16px">
+        ${selectCurrentBtn}
         <button id="cancel-btn" class="cancel-btn">Cancel</button>
       </div>
     </div>
-    <div class="card done" id="done" style="display:none">
+    <div class="card done" id="done" style="display:none" hidden>
       <h1>&#10003; Done</h1>
       <p class="message">Selected: <strong id="selected-label"></strong></p>
       <p class="message" style="margin-top: 16px;">You can switch back to your AI assistant now.</p>
@@ -103,6 +136,8 @@ export function pickerPageHtml(config: PickerPageConfig): string {
     </picture>
   </div>`,
     script: `    const refreshEnabled = ${String(config.refreshEnabled === true)};
+    const navigationEnabled = ${String(config.navigation !== undefined)};
+    const shareUrlEnabled = ${String(config.navigation?.shareUrlEnabled === true)};
     const PAGE_SIZE = 10;
     const csrfMeta = document.querySelector('meta[name="csrf-token"]');
     const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
@@ -173,39 +208,77 @@ export function pickerPageHtml(config: PickerPageConfig): string {
           btn.classList.add('selected');
           list.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
           document.getElementById('cancel-btn').disabled = true;
+          if (navigationEnabled) {
+            const selectCurrentBtn = document.getElementById('select-current-btn');
+            if (selectCurrentBtn) selectCurrentBtn.disabled = true;
+          }
           try {
-            const res = await fetch('/select', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: id, label: label, csrfToken: csrfToken }),
-            });
-            if (!res.ok) throw new Error(await res.text());
-            document.getElementById('picker').style.display = 'none';
-            document.getElementById('selected-label').textContent = label;
-            document.getElementById('done').style.display = 'block';
-            let remaining = 5;
-            const el = document.getElementById('countdown');
-            const tick = setInterval(() => {
-              remaining--;
-              el.textContent = String(remaining);
-              if (remaining <= 0) {
-                clearInterval(tick);
-                window.close();
-                setTimeout(() => {
-                  document.getElementById('countdown').parentElement.style.display = 'none';
-                  document.getElementById('manual-close').style.display = 'block';
-                }, 500);
+            if (navigationEnabled) {
+              const res = await fetch('/navigate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id, csrfToken: csrfToken }),
+              });
+              if (!res.ok) throw new Error(await res.text());
+              const data = await res.json();
+              const opts = Array.isArray(data.options) ? data.options : [];
+              list.innerHTML = opts.map(o =>
+                '<button class="option-btn" data-id="' + escapeHtml(o.id) + '" data-label="' + escapeHtml(o.label) + '">' + escapeHtml(o.label) + '</button>'
+              ).join('\\n');
+              wireOptionButtons();
+              currentPage = 0;
+              applyFilterAndPaginate();
+              const bc = document.getElementById('breadcrumb');
+              if (bc && Array.isArray(data.breadcrumb)) {
+                bc.innerHTML = data.breadcrumb.map(s => '<span>' + escapeHtml(s) + '</span>').join(' / ');
               }
-            }, 1000);
+              const selectBtn = document.getElementById('select-current-btn');
+              if (selectBtn) selectBtn.disabled = false;
+              document.getElementById('cancel-btn').disabled = false;
+            } else {
+              const res = await fetch('/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id, label: label, csrfToken: csrfToken }),
+              });
+              if (!res.ok) throw new Error(await res.text());
+              showDoneCard(label);
+            }
           } catch (err) {
             document.getElementById('error').style.display = 'block';
             document.getElementById('error').textContent = 'Failed: ' + err.message;
             list.querySelectorAll('.option-btn').forEach(b => { b.disabled = false; });
             document.getElementById('cancel-btn').disabled = false;
             btn.classList.remove('selected');
+            if (navigationEnabled) {
+              const selectBtn = document.getElementById('select-current-btn');
+              if (selectBtn && !selectBtn.dataset.everNavigated) selectBtn.disabled = true;
+            }
           }
         });
       });
+    }
+
+    function showDoneCard(label) {
+      document.getElementById('picker').style.display = 'none';
+      document.getElementById('selected-label').textContent = label;
+      const doneEl = document.getElementById('done');
+      doneEl.removeAttribute('hidden');
+      doneEl.style.display = 'block';
+      let remaining = 5;
+      const el = document.getElementById('countdown');
+      const tick = setInterval(() => {
+        remaining--;
+        el.textContent = String(remaining);
+        if (remaining <= 0) {
+          clearInterval(tick);
+          window.close();
+          setTimeout(() => {
+            document.getElementById('countdown').parentElement.style.display = 'none';
+            document.getElementById('manual-close').style.display = 'block';
+          }, 500);
+        }
+      }, 1000);
     }
 
     wireOptionButtons();
@@ -226,6 +299,85 @@ export function pickerPageHtml(config: PickerPageConfig): string {
       currentPage++;
       applyFilterAndPaginate();
     });
+
+    if (navigationEnabled) {
+      const selectCurrentBtn = document.getElementById('select-current-btn');
+      if (selectCurrentBtn) {
+        selectCurrentBtn.addEventListener('click', async () => {
+          selectCurrentBtn.disabled = true;
+          list.querySelectorAll('.option-btn').forEach(b => { b.disabled = true; });
+          document.getElementById('cancel-btn').disabled = true;
+          document.getElementById('error').style.display = 'none';
+          try {
+            const res = await fetch('/select-current', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ csrfToken: csrfToken }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const bc = document.getElementById('breadcrumb');
+            const label = bc ? bc.textContent : 'Selected';
+            showDoneCard(label || 'Selected');
+          } catch (err) {
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = 'Failed: ' + err.message;
+            selectCurrentBtn.disabled = false;
+            list.querySelectorAll('.option-btn').forEach(b => { b.disabled = false; });
+            document.getElementById('cancel-btn').disabled = false;
+          }
+        });
+      }
+    }
+
+    if (shareUrlEnabled) {
+      const shareUrlBtn = document.getElementById('share-url-btn');
+      const shareUrlInput = document.getElementById('share-url-input');
+      if (shareUrlBtn && shareUrlInput) {
+        shareUrlBtn.addEventListener('click', async () => {
+          const url = shareUrlInput.value.trim();
+          if (!url) return;
+          shareUrlBtn.disabled = true;
+          shareUrlInput.disabled = true;
+          document.getElementById('error').style.display = 'none';
+          try {
+            const res = await fetch('/share-url', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: url, csrfToken: csrfToken }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              throw new Error(data.error || ('Request failed: ' + String(res.status)));
+            }
+            if (data.kind === 'select') {
+              showDoneCard(data.selected.label);
+            } else {
+              const opts = Array.isArray(data.options) ? data.options : [];
+              list.innerHTML = opts.map(o =>
+                '<button class="option-btn" data-id="' + escapeHtml(o.id) + '" data-label="' + escapeHtml(o.label) + '">' + escapeHtml(o.label) + '</button>'
+              ).join('\\n');
+              wireOptionButtons();
+              currentPage = 0;
+              applyFilterAndPaginate();
+              const bc = document.getElementById('breadcrumb');
+              if (bc && Array.isArray(data.breadcrumb)) {
+                bc.innerHTML = data.breadcrumb.map(s => '<span>' + escapeHtml(s) + '</span>').join(' / ');
+              }
+              const selectBtn = document.getElementById('select-current-btn');
+              if (selectBtn) selectBtn.disabled = false;
+              shareUrlInput.value = '';
+              shareUrlBtn.disabled = false;
+              shareUrlInput.disabled = false;
+            }
+          } catch (err) {
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = 'Failed: ' + err.message;
+            shareUrlBtn.disabled = false;
+            shareUrlInput.disabled = false;
+          }
+        });
+      }
+    }
 
     if (refreshEnabled) {
       const refreshBtn = document.getElementById('refresh-btn');

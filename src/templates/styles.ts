@@ -400,4 +400,78 @@ export const PICKER_STYLE = `
       .page-btn { background: ${dark.surface}; border-color: ${dark.border}; color: ${dark.text}; }
       .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
       .page-status { color: ${dark.text}; }
+    }
+    .breadcrumb {
+      font-size: ${fontSize.sm};
+      color: ${grey.grey4};
+      margin-bottom: ${spacing.sm};
+      padding: 6px 0;
+    }
+    .breadcrumb span { font-weight: 500; }
+    .select-current-btn {
+      padding: 10px 18px;
+      background: ${purple.brand};
+      border: none;
+      border-radius: ${borderRadius.md};
+      color: ${grey.white};
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .select-current-btn:hover:not(:disabled) { background: ${purple.plus1}; }
+    .select-current-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .share-url-form {
+      margin-top: ${spacing.md};
+      padding: ${spacing.sm} 0;
+    }
+    .share-url-form label {
+      display: block;
+      font-size: ${fontSize.sm};
+      color: ${grey.grey4};
+      margin-bottom: 6px;
+    }
+    .share-url-row {
+      display: flex;
+      gap: ${spacing.sm};
+    }
+    .share-url-row input {
+      flex: 1;
+      padding: 10px 12px;
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      border: 1.5px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      background: ${grey.white};
+      color: inherit;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .share-url-row input:focus { border-color: ${purple.brand}; }
+    .share-url-btn {
+      padding: 10px 14px;
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      background: ${grey.white};
+      border: 1.5px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .share-url-btn:hover { border-color: ${purple.brand}; background: ${purple.minus3}; }
+    .share-url-btn:disabled { opacity: 0.5; cursor: wait; }
+    @media (prefers-color-scheme: dark) {
+      .breadcrumb { color: ${dark.text}; }
+      .share-url-row input {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .share-url-row input:focus { border-color: ${purple.brand}; }
+      .share-url-btn {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .share-url-btn:hover { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
     }`;

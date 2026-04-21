@@ -780,3 +780,279 @@ describe("browser picker: §5.4 loopback hardening", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Navigation mode tests
+// ---------------------------------------------------------------------------
+
+describe("browser picker — navigation mode", () => {
+  const rootOptions: PickerOption[] = [
+    { id: "folder-1", label: "Projects" },
+    { id: "folder-2", label: "Archive" },
+  ];
+  const subOptions: PickerOption[] = [
+    { id: "sub-1", label: "MyProject" },
+    { id: "sub-2", label: "OtherProject" },
+  ];
+
+  function buildNavPicker(opts?: {
+    onNavigateResult?: { options: PickerOption[]; breadcrumb: string[] };
+    onSelectCurrentResult?: { id: string; label: string };
+    onShareUrlResult?:
+      | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+      | { kind: "select"; selected: { id: string; label: string } };
+    onShareUrlEnabled?: boolean;
+    onShareUrlError?: Error;
+  }) {
+    const onNavigate = vi
+      .fn<
+        (
+          opt: PickerOption,
+          sig: AbortSignal,
+        ) => Promise<{ options: PickerOption[]; breadcrumb: string[] }>
+      >()
+      .mockResolvedValue(
+        opts?.onNavigateResult ?? { options: subOptions, breadcrumb: ["My OneDrive", "Projects"] },
+      );
+    const onSelectCurrent = vi
+      .fn<(sig: AbortSignal) => Promise<{ id: string; label: string }>>()
+      .mockResolvedValue(
+        opts?.onSelectCurrentResult ?? { id: "folder-1", label: "My OneDrive / Projects" },
+      );
+    const onShareUrl =
+      opts?.onShareUrlEnabled !== false
+        ? vi
+            .fn<
+              (
+                url: string,
+                sig: AbortSignal,
+              ) => Promise<
+                | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+                | { kind: "select"; selected: { id: string; label: string } }
+              >
+            >()
+            .mockImplementation((_, __) => {
+              if (opts?.onShareUrlError) return Promise.reject(opts.onShareUrlError);
+              return Promise.resolve(
+                opts?.onShareUrlResult ?? {
+                  kind: "jump" as const,
+                  options: subOptions,
+                  breadcrumb: ["My OneDrive", "Shared"],
+                },
+              );
+            })
+        : undefined;
+
+    const config = {
+      title: "Pick Folder",
+      subtitle: "Navigate to pick a folder",
+      options: rootOptions,
+      onSelect: vi
+        .fn<(opt: PickerOption, sig: AbortSignal) => Promise<void>>()
+        .mockResolvedValue(undefined),
+      timeoutMs: 5000,
+      navigation: {
+        initialBreadcrumb: ["My OneDrive"],
+        onNavigate,
+        onSelectCurrent,
+        ...(onShareUrl !== undefined ? { onShareUrl } : {}),
+      },
+    };
+    return { config, onNavigate, onSelectCurrent, onShareUrl };
+  }
+
+  it("renders breadcrumb when navigation is configured", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    try {
+      const html = await (await fetch(handle.url)).text();
+      expect(html).toContain('id="breadcrumb"');
+      expect(html).toContain("My OneDrive");
+    } finally {
+      const ac = new AbortController();
+      ac.abort();
+    }
+    // cleanup: just let handle dangle (timeout is 5 s)
+  });
+
+  it("renders Select this folder button when navigation is configured", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const html = await (await fetch(handle.url)).text();
+    expect(html).toContain("select-current-btn");
+    expect(html).toContain("disabled");
+  });
+
+  it("POST /navigate with valid id calls onNavigate and returns new options/breadcrumb", async () => {
+    const { config, onNavigate } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/navigate`, {
+      csrfToken,
+      body: { id: "folder-1" },
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      ok: boolean;
+      options: PickerOption[];
+      breadcrumb: string[];
+    };
+    expect(data.ok).toBe(true);
+    expect(data.options).toEqual(subOptions);
+    expect(data.breadcrumb).toEqual(["My OneDrive", "Projects"]);
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(onNavigate.mock.calls[0]?.[0]).toMatchObject({ id: "folder-1" });
+  });
+
+  it("POST /navigate with invalid id returns 400 without calling onNavigate", async () => {
+    const { config, onNavigate } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/navigate`, {
+      csrfToken,
+      body: { id: "nonexistent-folder" },
+    });
+    expect(res.status).toBe(400);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("POST /navigate validates against updated option set after prior navigate", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    // First navigate: replaces options with subOptions
+    await postJson(`${handle.url}/navigate`, { csrfToken, body: { id: "folder-1" } });
+    // Old root option is now invalid
+    const res = await postJson(`${handle.url}/navigate`, { csrfToken, body: { id: "folder-2" } });
+    expect(res.status).toBe(400);
+    // Sub-option is valid
+    const res2 = await postJson(`${handle.url}/navigate`, { csrfToken, body: { id: "sub-1" } });
+    expect(res2.status).toBe(200);
+  });
+
+  it("POST /select-current calls onSelectCurrent and resolves waitForSelection", async () => {
+    const { config, onSelectCurrent } = buildNavPicker({
+      onSelectCurrentResult: { id: "folder-1", label: "My OneDrive / Projects" },
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const [res, selectionResult] = await Promise.all([
+      postJson(`${handle.url}/select-current`, { csrfToken, body: {} }),
+      handle.waitForSelection,
+    ]);
+    expect(res.status).toBe(200);
+    expect(onSelectCurrent).toHaveBeenCalledOnce();
+    expect(selectionResult.selected.id).toBe("folder-1");
+    expect(selectionResult.selected.label).toBe("My OneDrive / Projects");
+  });
+
+  it("POST /share-url with kind=jump replaces options and breadcrumb without resolving", async () => {
+    const { config, onShareUrl } = buildNavPicker({
+      onShareUrlResult: {
+        kind: "jump",
+        options: subOptions,
+        breadcrumb: ["My OneDrive", "Shared"],
+      },
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken,
+      body: { url: "https://contoso.sharepoint.com/sites/foo" },
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      ok: boolean;
+      kind: string;
+      options: PickerOption[];
+      breadcrumb: string[];
+    };
+    expect(data.ok).toBe(true);
+    expect(data.kind).toBe("jump");
+    expect(data.options).toEqual(subOptions);
+    expect(data.breadcrumb).toEqual(["My OneDrive", "Shared"]);
+    expect(onShareUrl).toHaveBeenCalledOnce();
+    // Server should still be open — post another navigate with new options
+    const res2 = await postJson(`${handle.url}/navigate`, { csrfToken, body: { id: "sub-1" } });
+    expect(res2.status).toBe(200);
+  });
+
+  it("POST /share-url with kind=select resolves waitForSelection", async () => {
+    const { config } = buildNavPicker({
+      onShareUrlResult: {
+        kind: "select",
+        selected: { id: "shared-folder", label: "Shared Folder" },
+      },
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const [, selectionResult] = await Promise.all([
+      postJson(`${handle.url}/share-url`, {
+        csrfToken,
+        body: { url: "https://contoso.sharepoint.com/sites/foo" },
+      }),
+      handle.waitForSelection,
+    ]);
+    expect(selectionResult.selected.id).toBe("shared-folder");
+    expect(selectionResult.selected.label).toBe("Shared Folder");
+  });
+
+  it("POST /share-url returns 405 when onShareUrl is undefined", async () => {
+    const { config } = buildNavPicker({ onShareUrlEnabled: false });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken,
+      body: { url: "https://contoso.sharepoint.com/sites/foo" },
+    });
+    expect(res.status).toBe(405);
+  });
+
+  it("POST /share-url returns 400 with user-facing error message on InvalidShareUrlError", async () => {
+    const { InvalidShareUrlError } = await import("../src/errors.js");
+    const { config } = buildNavPicker({
+      onShareUrlError: new InvalidShareUrlError("http://evil.com/x", "unsupported_host"),
+    });
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const res = await postJson(`${handle.url}/share-url`, {
+      csrfToken,
+      body: { url: "http://evil.com/x" },
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toContain("Invalid share URL");
+  });
+
+  it("POST /navigate rejects without valid CSRF token (403)", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const res = await postJson(`${handle.url}/navigate`, {
+      csrfToken: "wrong-token",
+      body: { id: "folder-1" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /navigate rejects with wrong Host header (403)", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const csrfToken = await fetchCsrfToken(handle.url);
+    const body = JSON.stringify({ id: "folder-1", csrfToken });
+    const result = await rawHttpPost(`${handle.url}/navigate`, {
+      hostHeader: "evil.example.com",
+      body,
+    });
+    expect(result.status).toBe(403);
+  });
+
+  it("POST /select-current rejects without valid CSRF token (403)", async () => {
+    const { config } = buildNavPicker();
+    const handle = await startBrowserPicker(config, testSignal());
+    const res = await postJson(`${handle.url}/select-current`, {
+      csrfToken: "bad-token",
+      body: {},
+    });
+    expect(res.status).toBe(403);
+  });
+});

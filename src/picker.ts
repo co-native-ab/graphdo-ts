@@ -9,7 +9,12 @@ import type { IncomingMessage, ServerResponse, Server } from "node:http";
 
 import { z } from "zod";
 import { logger } from "./logger.js";
-import { UserCancelledError } from "./errors.js";
+import {
+  UserCancelledError,
+  InvalidShareUrlError,
+  ShareNotFoundError,
+  ShareAccessDeniedError,
+} from "./errors.js";
 import { pickerPageHtml } from "./templates/picker.js";
 import {
   buildLoopbackCsp,
@@ -37,6 +42,29 @@ export interface PickerCreateLink {
   description?: string;
 }
 
+export interface PickerNavigation {
+  /** Drill into a folder option. Returns new options and breadcrumb path. */
+  onNavigate: (
+    option: PickerOption,
+    signal: AbortSignal,
+  ) => Promise<{ options: PickerOption[]; breadcrumb: string[] }>;
+
+  /** User clicked "Select this folder". Returns the selected folder identity. */
+  onSelectCurrent: (signal: AbortSignal) => Promise<{ id: string; label: string }>;
+
+  /** Optional: user pasted a OneDrive share URL. Returns jump-to or direct select. */
+  onShareUrl?: (
+    url: string,
+    signal: AbortSignal,
+  ) => Promise<
+    | { kind: "jump"; options: PickerOption[]; breadcrumb: string[] }
+    | { kind: "select"; selected: { id: string; label: string } }
+  >;
+
+  /** Initial breadcrumb shown when the picker first loads (e.g. ["My OneDrive"]). */
+  initialBreadcrumb: string[];
+}
+
 export interface PickerConfig {
   title: string;
   subtitle: string;
@@ -57,6 +85,8 @@ export interface PickerConfig {
   filterPlaceholder?: string;
   /** Timeout in milliseconds (default: 120 000 - 2 minutes). */
   timeoutMs?: number;
+  /** When set, enables navigable folder picker mode (subfolder drill-in + share URL paste). */
+  navigation?: PickerNavigation;
 }
 
 export interface PickerResult {
@@ -115,6 +145,7 @@ export function startBrowserPicker(
       onSelect: config.onSelect,
       csrfToken: generateRandomToken(),
       hostHeader: "",
+      breadcrumb: config.navigation?.initialBreadcrumb ?? [],
     };
 
     const server = createServer((req, res) => {
@@ -168,6 +199,8 @@ interface PickerState {
   csrfToken: string;
   /** `127.0.0.1:<port>` — the only Host header value the server will accept. */
   hostHeader: string;
+  /** Current breadcrumb path in navigation mode. */
+  breadcrumb: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +247,26 @@ function handleRequest(
     return;
   }
 
+  if (config.navigation !== undefined) {
+    if (req.method === "GET" && url === "/breadcrumb") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ breadcrumb: state.breadcrumb }));
+      return;
+    }
+    if (req.method === "POST" && url === "/navigate") {
+      handleNavigate(req, res, config, state, signal);
+      return;
+    }
+    if (req.method === "POST" && url === "/select-current") {
+      handleSelectCurrent(req, res, config, state, server, onSelected, signal);
+      return;
+    }
+    if (req.method === "POST" && url === "/share-url") {
+      handleShareUrl(req, res, config, state, server, onSelected, signal);
+      return;
+    }
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 }
@@ -237,6 +290,13 @@ function servePickerPage(
       refreshEnabled: config.refreshOptions !== undefined,
       csrfToken: state.csrfToken,
       nonce,
+      navigation:
+        config.navigation !== undefined
+          ? {
+              initialBreadcrumb: state.breadcrumb,
+              shareUrlEnabled: config.navigation.onShareUrl !== undefined,
+            }
+          : undefined,
     }),
   );
 }
@@ -280,6 +340,10 @@ const SelectionSchema = z.object({
 });
 
 const CancelSchema = z.object({ csrfToken: z.string() });
+
+const NavigateSchema = z.object({ id: z.string(), csrfToken: z.string() });
+const SelectCurrentSchema = z.object({ csrfToken: z.string() });
+const ShareUrlSchema = z.object({ url: z.string(), csrfToken: z.string() });
 
 function handleSelection(
   req: IncomingMessage,
@@ -407,5 +471,248 @@ function handleCancel(
       server.close();
     }, 100);
     onError(new UserCancelledError("Selection cancelled by user"));
+  });
+}
+
+/** Read body with MAX_BODY_SIZE cap. Rejects oversized requests inline. */
+function readBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  callback: (body: string) => void,
+): void {
+  let body = "";
+  let size = 0;
+  req.on("data", (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_BODY_SIZE) {
+      res.writeHead(413, { "Content-Type": "text/plain" });
+      res.end("Payload Too Large");
+      req.destroy();
+      return;
+    }
+    body += chunk.toString();
+  });
+  req.on("end", () => {
+    callback(body);
+  });
+}
+
+function handleNavigate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: PickerConfig,
+  state: PickerState,
+  signal: AbortSignal,
+): void {
+  const navigation = config.navigation;
+  if (!navigation) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Internal error: navigation not configured");
+    return;
+  }
+  const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
+  readBody(req, res, (body) => {
+    void (async () => {
+      try {
+        const parseResult = NavigateSchema.safeParse(JSON.parse(body));
+        if (!parseResult.success) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Invalid request body");
+          return;
+        }
+        const { id, csrfToken } = parseResult.data;
+
+        if (!verifyCsrfToken(state.csrfToken, csrfToken)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden: invalid CSRF token");
+          return;
+        }
+
+        const match = state.options.find((opt) => opt.id === id);
+        if (!match) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Invalid selection");
+          return;
+        }
+
+        const result = await navigation.onNavigate(match, signal);
+        state.options = result.options;
+        state.breadcrumb = result.breadcrumb;
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ ok: true, options: result.options, breadcrumb: result.breadcrumb }),
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("picker navigate failed", { error: message });
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end(`Error: ${message}`);
+      }
+    })();
+  });
+}
+
+function handleSelectCurrent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: PickerConfig,
+  state: PickerState,
+  server: Server,
+  onSelected: (result: PickerResult) => void,
+  signal: AbortSignal,
+): void {
+  const navigation = config.navigation;
+  if (!navigation) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Internal error: navigation not configured");
+    return;
+  }
+  const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
+  readBody(req, res, (body) => {
+    void (async () => {
+      try {
+        const parseResult = SelectCurrentSchema.safeParse(JSON.parse(body));
+        if (!parseResult.success) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Invalid request body");
+          return;
+        }
+        const { csrfToken } = parseResult.data;
+
+        if (!verifyCsrfToken(state.csrfToken, csrfToken)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden: invalid CSRF token");
+          return;
+        }
+
+        const result = await navigation.onSelectCurrent(signal);
+        logger.info("picker select-current made", { id: result.id, label: result.label });
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+
+        setTimeout(() => {
+          server.close();
+          onSelected({ selected: { id: result.id, label: result.label } });
+        }, 100);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("picker select-current failed", { error: message });
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end(`Error: ${message}`);
+      }
+    })();
+  });
+}
+
+function handleShareUrl(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: PickerConfig,
+  state: PickerState,
+  server: Server,
+  onSelected: (result: PickerResult) => void,
+  signal: AbortSignal,
+): void {
+  const navigation = config.navigation;
+  if (!navigation) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Internal error: navigation not configured");
+    return;
+  }
+  const headerCheck = validateLoopbackPostHeaders(req, { allowedHosts: [state.hostHeader] });
+  if (!headerCheck.ok) {
+    res.writeHead(headerCheck.status, { "Content-Type": "text/plain" });
+    res.end(headerCheck.message);
+    return;
+  }
+
+  const { onShareUrl } = navigation;
+  if (onShareUrl === undefined) {
+    res.writeHead(405, { "Content-Type": "text/plain" });
+    res.end("Share URL not supported");
+    return;
+  }
+
+  readBody(req, res, (body) => {
+    void (async () => {
+      try {
+        const parseResult = ShareUrlSchema.safeParse(JSON.parse(body));
+        if (!parseResult.success) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Invalid request body");
+          return;
+        }
+        const { url, csrfToken } = parseResult.data;
+
+        if (!verifyCsrfToken(state.csrfToken, csrfToken)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden: invalid CSRF token");
+          return;
+        }
+
+        try {
+          const result = await onShareUrl(url, signal);
+          if (result.kind === "jump") {
+            state.options = result.options;
+            state.breadcrumb = result.breadcrumb;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                ok: true,
+                kind: "jump",
+                options: result.options,
+                breadcrumb: result.breadcrumb,
+              }),
+            );
+          } else {
+            logger.info("picker share-url selected", {
+              id: result.selected.id,
+              label: result.selected.label,
+            });
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, kind: "select", selected: result.selected }));
+            setTimeout(() => {
+              server.close();
+              onSelected({ selected: result.selected });
+            }, 100);
+          }
+        } catch (err: unknown) {
+          // User-facing errors are passed through verbatim; internal errors
+          // are masked to avoid leaking stack traces / internals.
+          const isUserFacing =
+            err instanceof InvalidShareUrlError ||
+            err instanceof ShareNotFoundError ||
+            err instanceof ShareAccessDeniedError;
+          const message =
+            isUserFacing && err instanceof Error ? err.message : "Failed to resolve URL";
+          if (!isUserFacing) {
+            logger.error("picker share-url resolution failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: message }));
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("picker share-url handler failed", { error: message });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: message }));
+      }
+    })();
   });
 }

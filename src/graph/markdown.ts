@@ -260,6 +260,25 @@ export async function listRootFolders(
 }
 
 /**
+ * List folders directly underneath the specified OneDrive folder.
+ *
+ * Mirrors {@link listRootFolders} but targets a specific parent id rather
+ * than the root. Server-side `$filter` is omitted for the same reason as
+ * {@link listRootFolders}: Graph's filter support is inconsistent across
+ * personal vs. work accounts.
+ */
+export async function listChildFolders(
+  client: GraphClient,
+  parentFolderId: ValidatedGraphId,
+  signal: AbortSignal,
+): Promise<DriveItem[]> {
+  logger.debug("listing onedrive child folders", { parentFolderId });
+  const path = `/me/drive/items/${encodeURIComponent(parentFolderId)}/children?$top=200`;
+  const items = await listAllPages(client, path, signal);
+  return items.filter((item) => item.folder !== undefined);
+}
+
+/**
  * Fetch the user's default drive metadata (`GET /me/drive`).
  *
  * Exposes the drive's user-facing `webUrl` so the picker can deep-link the
