@@ -11,10 +11,9 @@ import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
 import type { GraphScope } from "./scopes.js";
-import { LOGIN_TOOLS } from "./tools/login/index.js";
+import { AUTH_TOOLS } from "./tools/auth/index.js";
 import { MAIL_TOOLS } from "./tools/mail/index.js";
 import { MARKDOWN_TOOLS } from "./tools/markdown/index.js";
-import { STATUS_TOOLS } from "./tools/status/index.js";
 import { TODO_TOOLS } from "./tools/todo/index.js";
 import type { AnyTool, ToolEntry } from "./tool-registry.js";
 import { buildInstructions, registerTool, syncToolState } from "./tool-registry.js";
@@ -62,8 +61,7 @@ export async function createMcpServer(
 ): Promise<McpServer> {
   // All tools the server exposes, in instruction-listing order.
   const allTools: readonly AnyTool[] = [
-    ...LOGIN_TOOLS,
-    ...STATUS_TOOLS,
+    ...AUTH_TOOLS,
     ...MAIL_TOOLS,
     ...TODO_TOOLS,
     ...MARKDOWN_TOOLS,
