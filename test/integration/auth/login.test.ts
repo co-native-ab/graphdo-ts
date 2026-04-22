@@ -1,7 +1,7 @@
 // Integration tests for tool discovery and login flow.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { UserCancelledError } from "../../src/errors.js";
+import { UserCancelledError } from "../../../src/errors.js";
 import {
   setupIntegrationEnv,
   teardownIntegrationEnv,
@@ -11,7 +11,7 @@ import {
   testSignal,
   type IntegrationEnv,
   type ToolResult,
-} from "./helpers.js";
+} from "../helpers.js";
 
 let env: IntegrationEnv;
 
