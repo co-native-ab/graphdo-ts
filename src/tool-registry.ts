@@ -52,6 +52,7 @@ export function defineTool<Args extends ZodRawShape>(
   def: ToolDef,
   toolConfig: {
     inputSchema: Args;
+    outputSchema?: ZodRawShape;
     annotations?: ToolAnnotations;
   },
   handler: ToolCallback<Args>,
@@ -62,6 +63,10 @@ export function defineTool<Args extends ZodRawShape>(
       title: def.title,
       description: def.description,
       inputSchema: toolConfig.inputSchema,
+      // Only include outputSchema when explicitly provided — passing
+      // `undefined` would still register an output-typed tool in some SDK
+      // versions and force every result to satisfy the schema.
+      ...(toolConfig.outputSchema !== undefined ? { outputSchema: toolConfig.outputSchema } : {}),
       annotations: toolConfig.annotations,
     },
     handler,

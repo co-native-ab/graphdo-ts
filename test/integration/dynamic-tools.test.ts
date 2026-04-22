@@ -69,12 +69,13 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("markdown_get_file");
     expect(names).toContain("markdown_create_file");
     expect(names).toContain("markdown_update_file");
+    expect(names).toContain("markdown_edit");
     expect(names).toContain("markdown_delete_file");
     expect(names).toContain("markdown_list_file_versions");
     expect(names).toContain("markdown_get_file_version");
     expect(names).toContain("markdown_diff_file_versions");
     expect(names).toContain("markdown_preview_file");
-    expect(names).toHaveLength(25);
+    expect(names).toHaveLength(26);
   });
 
   // -------------------------------------------------------------------------

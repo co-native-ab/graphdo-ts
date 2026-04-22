@@ -70,6 +70,36 @@ export const CREATE_FILE_DEF: ToolDef = {
   requiredScopes: [GraphScope.FilesReadWrite],
 };
 
+export const EDIT_FILE_DEF: ToolDef = {
+  name: "markdown_edit",
+  title: "Edit Markdown File",
+  description:
+    "Apply one or more targeted text substitutions to an existing markdown " +
+    "file in the configured root folder, in a single read-modify-write round " +
+    "trip under cTag-based optimistic concurrency. Each edit replaces an " +
+    "exact byte-for-byte substring (old_string) with another (new_string); " +
+    "no whitespace flexibility, no fuzzy matching. By default each old_string " +
+    "must match exactly one location in the current file content - if it " +
+    "matches zero locations the call fails and asks the agent to extend " +
+    "old_string with surrounding context, and if it matches multiple " +
+    "locations the call fails and asks the agent to either extend " +
+    "old_string until it matches exactly once or set replace_all: true. " +
+    "Edits are applied sequentially against the evolving in-memory content " +
+    "(edit N sees the result of edits 0..N-1) and are atomic - if any edit " +
+    "fails, the entire batch is rejected and nothing is written. Line " +
+    "endings are normalised to LF on read, on inputs, and on the persisted " +
+    "result. The tool reads the current cTag itself, so the agent does not " +
+    "supply one - cTag mismatch only happens when another writer modifies " +
+    "the file between this tool's own GET and PUT, in which case the same " +
+    "reconcile guidance as markdown_update_file is returned. Set " +
+    "dry_run: true to preview the resulting unified diff without writing. " +
+    "On success returns a unified diff (tight context) and the new cTag, " +
+    `plus a structuredContent mirror for chained edits. Payloads larger ` +
+    `than 4 MiB are rejected (${MARKDOWN_SIZE_CAP_NOTE}). ` +
+    MARKDOWN_FILE_NAME_RULES,
+  requiredScopes: [GraphScope.FilesReadWrite],
+};
+
 export const UPDATE_FILE_DEF: ToolDef = {
   name: "markdown_update_file",
   title: "Update Markdown File",
@@ -175,6 +205,7 @@ export const MARKDOWN_TOOL_DEFS: readonly ToolDef[] = [
   GET_FILE_DEF,
   CREATE_FILE_DEF,
   UPDATE_FILE_DEF,
+  EDIT_FILE_DEF,
   DELETE_FILE_DEF,
   LIST_VERSIONS_DEF,
   GET_VERSION_DEF,
