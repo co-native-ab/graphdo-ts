@@ -44,6 +44,7 @@ describe("integration: discovery & login", () => {
         "markdown_create_file",
         "markdown_delete_file",
         "markdown_diff_file_versions",
+        "markdown_edit",
         "markdown_get_file",
         "markdown_get_file_version",
         "markdown_list_file_versions",

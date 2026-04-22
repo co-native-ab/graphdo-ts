@@ -16,6 +16,7 @@ import {
   deleteDriveItem,
   downloadDriveItemVersionContent,
   downloadMarkdownContent,
+  downloadMarkdownContentWithItem,
   findMarkdownFileByName,
   getDriveItem,
   getMyDrive,
@@ -136,6 +137,34 @@ describe("markdown graph operations", () => {
   it("downloadMarkdownContent returns UTF-8 body", async () => {
     const body = await downloadMarkdownContent(client, gid("file-md-1"), testSignal());
     expect(body).toBe("hello world!");
+  });
+
+  it("downloadMarkdownContentWithItem returns content + the DriveItem with cTag in one round trip", async () => {
+    const result = await downloadMarkdownContentWithItem(client, gid("file-md-1"), testSignal());
+    expect(result.content).toBe("hello world!");
+    expect(result.item.id).toBe("file-md-1");
+    expect(result.item.name).toBe("ideas.md");
+    // The mock auto-assigns a cTag on first read for files that don't carry
+    // one — so this asserts the helper returns a usable cTag for callers
+    // that want to chain a conditional PUT (markdown_edit's main use case).
+    expect(typeof result.item.cTag).toBe("string");
+    expect(result.item.cTag?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("downloadMarkdownContentWithItem enforces the 4 MiB cap the same way downloadMarkdownContent does", async () => {
+    const existing = env.state.driveFolderChildren.get("folder-1") ?? [];
+    existing.push({
+      id: "huge-with-item",
+      name: "huge2.md",
+      size: MAX_DIRECT_CONTENT_BYTES + 1,
+      file: { mimeType: "text/markdown" },
+      content: "x",
+    });
+    env.state.driveFolderChildren.set("folder-1", existing);
+
+    await expect(
+      downloadMarkdownContentWithItem(client, gid("huge-with-item"), testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
   it("downloadMarkdownContent throws MarkdownFileTooLargeError when size exceeds limit", async () => {

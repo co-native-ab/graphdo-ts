@@ -559,7 +559,11 @@ export class MarkdownFileTooLargeError extends Error {
 }
 
 /**
- * Download a drive item's content as a UTF-8 string.
+ * Download a drive item's content as a UTF-8 string along with the
+ * {@link DriveItem} metadata that was fetched to enforce the size cap. Used
+ * by callers (e.g. `markdown_edit`) that need both the content and the
+ * file's current `cTag` in a single round trip — `getDriveItem` is already
+ * called here for the size check, so returning the item is free.
  *
  * Enforces the 4 MiB graphdo-ts markdown cap by checking the reported item
  * size first; if the size is unknown it falls back to measuring the response
@@ -567,11 +571,11 @@ export class MarkdownFileTooLargeError extends Error {
  * The cap is a tool-side policy, not a Graph API limit (see
  * {@link MAX_DIRECT_CONTENT_BYTES}).
  */
-export async function downloadMarkdownContent(
+export async function downloadMarkdownContentWithItem(
   client: GraphClient,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
-): Promise<string> {
+): Promise<{ item: DriveItem; content: string }> {
   const item = await getDriveItem(client, itemId, signal);
   if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
     throw new MarkdownFileTooLargeError(item.size, MAX_DIRECT_CONTENT_BYTES);
@@ -584,7 +588,21 @@ export async function downloadMarkdownContent(
   if (buf.byteLength > MAX_DIRECT_CONTENT_BYTES) {
     throw new MarkdownFileTooLargeError(buf.byteLength, MAX_DIRECT_CONTENT_BYTES);
   }
-  return buf.toString("utf-8");
+  return { item, content: buf.toString("utf-8") };
+}
+
+/**
+ * Download a drive item's content as a UTF-8 string. Thin wrapper over
+ * {@link downloadMarkdownContentWithItem} for read-only callers that do not
+ * need the {@link DriveItem} metadata.
+ */
+export async function downloadMarkdownContent(
+  client: GraphClient,
+  itemId: ValidatedGraphId,
+  signal: AbortSignal,
+): Promise<string> {
+  const { content } = await downloadMarkdownContentWithItem(client, itemId, signal);
+  return content;
 }
 
 // ---------------------------------------------------------------------------

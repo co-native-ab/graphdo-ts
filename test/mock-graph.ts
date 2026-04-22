@@ -51,6 +51,17 @@ export class MockState {
   /** Per-item cTag sequence so cTags monotonically bump on every content write. */
   private cTagSeq: Map<string, number>;
 
+  /**
+   * One-shot hook fired right before {@link handleUpdateById} validates
+   * the `If-Match` header. Tests use it to simulate a concurrent writer
+   * mutating the file's `cTag` between the tool's GET and PUT (e.g. for
+   * `markdown_edit`'s 412 reconcile-guidance path, which cannot be
+   * exercised by sequential tool calls because the tool re-reads the
+   * cTag each invocation). Cleared after firing once so subsequent
+   * PUTs run normally.
+   */
+  prePutHook: ((file: MockDriveFile) => void) | undefined;
+
   constructor() {
     this.user = { id: "", displayName: "", mail: "", userPrincipalName: "" };
     this.todoLists = [];
@@ -68,6 +79,7 @@ export class MockState {
     this.nextId = 1;
     this.nextVersionSeq = 1;
     this.cTagSeq = new Map();
+    this.prePutHook = undefined;
   }
 
   genId(): string {
@@ -1023,6 +1035,14 @@ async function handleUpdateById(
   if (!file) {
     errorResponse(res, 404, "itemNotFound", `item ${itemId} not found`);
     return;
+  }
+
+  // Fire and clear the one-shot pre-PUT hook (used by tests to simulate
+  // a concurrent writer touching the file between GET and PUT).
+  if (state.prePutHook) {
+    const hook = state.prePutHook;
+    state.prePutHook = undefined;
+    hook(file);
   }
 
   const ifMatch = headerValue(req, "if-match");
