@@ -150,9 +150,12 @@ export interface Tool<Args extends ZodRawShape = ZodRawShape> {
   readonly annotations?: ToolAnnotations;
   /**
    * Handler factory. Receives the injected ServerConfig at registration
-   * time and returns the actual MCP callback. This keeps `config` out of
-   * module-level closures so each tool file remains a pure descriptor and
-   * trivially testable.
+   * time and returns the actual MCP callback. By convention this is a
+   * named top-level function (`function handler(config) { … }`) defined
+   * above the descriptor in the same file — not an inline arrow — so
+   * stack traces are meaningful, the body lives at column 0 instead of
+   * drifting rightward inside the descriptor literal, and tests can
+   * import the handler directly.
    */
   readonly handler: (config: ServerConfig) => ToolCallback<Args>;
 }
@@ -163,13 +166,34 @@ export interface Tool<Args extends ZodRawShape = ZodRawShape> {
 new `Tool` type composes `ToolDef` with the MCP-SDK-shaped registration
 inputs.
 
-### 2. One file per tool
+### 2. One file per tool, named top-level pieces
 
-Each tool gets its own file under `src/tools/<domain>/<tool-name>.ts`,
-exporting one `Tool` object. The handler is a plain function defined at the
-top of the file; helpers live alongside or in a sibling `*-helpers.ts`
-module. Tool files do not import the `McpServer` and never call
-`registerTool` themselves.
+Each tool gets its own file under `src/tools/<domain>/<tool-name>.ts`. The
+file is laid out as a predictable sequence of named top-level declarations
+that every tool file follows in the same order:
+
+```
+imports
+   ↓
+const inputSchema = { … } as const
+   ↓
+const def: ToolDef = { … }
+   ↓
+function handler(config: ServerConfig): ToolCallback<typeof inputSchema>
+   ↓
+export const xxxTool: Tool<typeof inputSchema> = { def, inputSchema, handler }
+```
+
+The `Tool` descriptor itself is a one-line manifest that just composes the
+named pieces. Handler bodies live at column 0 as a top-level function, not
+nested inside an object literal — this keeps long handlers readable without
+the 4–6 columns of rightward drift that an inline arrow incurs, gives
+stack traces a meaningful function name (`mailSendHandler` vs.
+`<anonymous>`), and lets tests import the handler directly without going
+through the descriptor.
+
+Tool files do not import the `McpServer` and never call `registerTool`
+themselves.
 
 ### 3. Flat barrel + one registration loop
 
@@ -242,34 +266,36 @@ export function registerMailTools(server: McpServer, config: ServerConfig): Tool
 }
 ```
 
-### After — `tools/mail/mail-send.ts` (one tool, one file)
+### After — `tools/mail/mail-send.ts` (named top-level pieces, descriptor at the bottom)
 
 ```ts
 // src/tools/mail/mail-send.ts
 
+import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+
 import { getMe, sendMail } from "../../graph/mail.js";
+import type { ServerConfig } from "../../index.js";
 import { logger } from "../../logger.js";
 import { GraphScope } from "../../scopes.js";
-import type { Tool } from "../../tool-registry.js";
+import type { Tool, ToolDef } from "../../tool-registry.js";
 import { formatError } from "../shared.js";
 
 const inputSchema = {
   subject: z.string().describe("Email subject line"),
   body: z.string().describe("Email body content"),
   html: z.boolean().default(false).describe("Whether the body is HTML"),
+} as const;
+
+const def: ToolDef = {
+  name: "mail_send",
+  title: "Send Email",
+  description: "Send an email to yourself via Outlook…",
+  requiredScopes: [GraphScope.MailSend],
 };
 
-export const mailSendTool: Tool<typeof inputSchema> = {
-  def: {
-    name: "mail_send",
-    title: "Send Email",
-    description: "Send an email to yourself via Outlook…",
-    requiredScopes: [GraphScope.MailSend],
-  },
-  inputSchema,
-  annotations: { readOnlyHint: false, openWorldHint: true },
-  handler: (config) => async ({ subject, body, html }, { signal }) => {
+function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
+  return async ({ subject, body, html }, { signal }) => {
     try {
       const client = config.graphClient;
       const user = await getMe(client, signal);
@@ -279,9 +305,21 @@ export const mailSendTool: Tool<typeof inputSchema> = {
     } catch (error: unknown) {
       return formatError("mail_send", error);
     }
-  },
+  };
+}
+
+export const mailSendTool: Tool<typeof inputSchema> = {
+  def,
+  inputSchema,
+  annotations: { readOnlyHint: false, openWorldHint: true },
+  handler,
 };
 ```
+
+The four top-level names (`inputSchema`, `def`, `handler`, `mailSendTool`)
+are the same in every tool file. A reviewer opening a tool they have never
+seen knows exactly where to look for the schema, the metadata, the
+implementation, and the export.
 
 ```ts
 // src/tools/mail/index.ts
@@ -385,9 +423,15 @@ runtime scope gating end-to-end. No integration test needs to change.
   add a tool to both `*_TOOL_DEFS` and `register*Tools`.
 - **Trivial extension.** Adding a tool is "create file + add to barrel
   array". No registry plumbing.
+- **Predictable file shape.** Every tool file has the same four named
+  top-level pieces in the same order: `inputSchema`, `def`, `handler`,
+  and the exported `xxxTool` descriptor. A reviewer opening a tool they
+  have never seen knows exactly where to look. Handler bodies live at
+  column 0 rather than drifting rightward inside an object literal, and
+  show up by name in stack traces and the debugger.
 - **Better unit testing surface.** Tools can be unit-tested by importing
-  the descriptor and calling its handler directly. Integration tests still
-  cover the SDK glue.
+  either the descriptor (`mailSendTool`) or the handler factory directly
+  and calling it. Integration tests still cover the SDK glue.
 - **Idiomatic for the language.** Mirrors what TypeScript MCP-adjacent
   ecosystems do (route descriptors, command collections, typed config
   arrays). No class hierarchy required.
@@ -407,12 +451,14 @@ runtime scope gating end-to-end. No integration test needs to change.
 - **More files.** Going from 1 file per domain to N files per domain.
   Mitigated by per-domain folders and barrel exports — call sites still
   import a single name from `./tools/<domain>/index.js`.
-- **Handler closure shape changes.** The new `handler: (config) => async (args, ctx) => …`
-  curry is a small departure from the current "config is captured by the
-  outer `register*Tools` closure" pattern. The curry is what makes a tool
-  descriptor trivially testable (the inner function is the same shape the
-  SDK already calls). Reviewers should not find this surprising — it is
-  the same DI thread the codebase already uses, just made explicit.
+- **Handler closure shape changes.** The new
+  `function handler(config): ToolCallback<…>` factory pattern is a small
+  departure from the current "config is captured by the outer
+  `register*Tools` closure" pattern. The factory is what makes a tool
+  descriptor trivially testable — the inner function it returns is the
+  same shape the SDK already calls. Reviewers should not find this
+  surprising: it is the same DI thread the codebase already uses, just
+  made explicit and named at the top level of each tool file.
 - **Slightly larger module graph.** ESM tree-shaking is not relevant here
   (we ship a single esbuild bundle), so this is purely a developer-time
   observation.
