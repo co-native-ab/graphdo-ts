@@ -1,7 +1,7 @@
 ---
 title: "ADR-0006: markdown_edit Tool — Targeted In-Place Edits with cTag Concurrency"
-status: "Proposed"
-date: "2026-04-21"
+status: "Accepted"
+date: "2026-04-22"
 authors: "co-native-ab"
 tags: ["architecture", "graph", "markdown", "onedrive", "tools"]
 supersedes: ""
@@ -12,7 +12,7 @@ superseded_by: ""
 
 ## Status
 
-**Proposed**
+**Accepted**
 
 ## Context
 
@@ -113,9 +113,14 @@ fallback (which trims whitespace per line and re-indents the replacement).
 - **Reject `old_string === new_string`.** A no-op edit is almost certainly
   a model bug; failing loudly is cheaper than silently adding it to the
   history.
-- **Reject empty `old_string`.** Otherwise `String.prototype.includes("")`
-  returns `true` and `split("").join(new_string)` would interleave
-  `new_string` between every character — a catastrophic footgun.
+- **Reject empty `old_string`.** Two independent reasons, either of which
+  is sufficient: (a) `String.prototype.includes("")` returns `true` and
+  `split("").join(new_string)` would interleave `new_string` between
+  every character — a catastrophic substitution; (b) `"abc".indexOf("",
+0)` returns `0`, so the occurrence-counting `indexOf` loop in
+  decision 7 would not advance and would spin forever without a
+  `needle.length > 0` guard. Rejecting empty `old_string` upstream
+  removes the need for the guard at all.
 
 **Rationale for strict over lenient.** The reference server's lenient
 line-by-line path exists to paper over model quirks (extra trailing
@@ -200,6 +205,18 @@ the ambiguity the cTag was supposed to remove ("did the model see the
 file the _tool_ read?"). Concurrent writers between the tool's own GET
 and PUT are caught by the `If-Match` PUT exactly the same way as today.
 
+The explicit consequence of this choice: **the agent cannot use
+`markdown_edit` to assert "the file I saw earlier is still current."**
+If the file changed between the agent's last `markdown_get_file` and the
+`markdown_edit` call, the edits will either still apply cleanly against
+the new content (because the anchor strings still mean what the agent
+thought) or fail the uniqueness / not-found check (because they no
+longer do). Both outcomes are correct. Agents that genuinely need a
+freshness assertion can call `markdown_get_file` immediately before
+`markdown_edit` — but in practice the uniqueness check is a stronger
+guarantee than a stale cTag would have been, because it is content-aware
+rather than revision-aware.
+
 ### 6. Size limits
 
 - The post-edit content is checked against the existing 4 MiB markdown cap
@@ -223,15 +240,21 @@ and PUT are caught by the `If-Match` PUT exactly the same way as today.
 - **Use `split(oldText).join(newText)`** for both single and "all"
   replacement. This avoids `String.prototype.replace`'s interpretation of
   `$&`, `$1`, `` $` ``, `$'`, and `$$` inside `newText`, which would
-  otherwise let any model-emitted `$&` corrupt the replacement.
+  otherwise let any model-emitted `$&` corrupt the replacement. It also
+  gives us the occurrence count for free as
+  `split(oldText).length - 1`, which the decision 2 uniqueness check
+  consumes directly — uniqueness counting and substitution share the
+  same primitive, removing any chance of the two getting out of sync.
 - **Equivalently safe alternative** is `replace(oldText, () => newText)`
-  (function-form replacement bypasses pattern interpretation), but `split`
-  / `join` reads more obviously and makes the "exactly once" check
-  trivial.
+  (function-form replacement bypasses pattern interpretation), but
+  `split` / `join` reads more obviously and unifies the count and the
+  substitution.
 - **Never build a `RegExp` from `old_string`.** Even with escaping, this
   is an unnecessary attack surface and a future maintenance trap.
-- **Count occurrences via an `indexOf` loop**, not via
-  `String.prototype.match(new RegExp(...))`. Pseudocode:
+- **`indexOf`-loop spelling for the count** is documented for clarity
+  rather than as a second counting mechanism; in code we use
+  `split(oldText).length - 1` per the bullet above. The equivalent
+  long-form is:
 
   ```
   let count = 0, from = 0, idx;
@@ -241,9 +264,9 @@ and PUT are caught by the `If-Match` PUT exactly the same way as today.
   }
   ```
 
-  This handles overlap-free counting deterministically and is the same
-  semantics `split(needle).length - 1` would give us — we just spell it
-  out so the intent is obvious in code review.
+  Either spelling produces the same overlap-free count provided
+  `needle.length > 0` (decision 2 guarantees this by rejecting empty
+  `old_string`).
 
 ### 8. Error reporting
 
@@ -276,9 +299,13 @@ limit, not a Microsoft Graph API limit).`
 offending `old_string` (it escapes `\n`, `\t`, `\r`, control chars,
 quotes) and avoids adding any dependency.
 
-### 9. Response format — unified diff + new cTag
+### 9. Response format — unified diff + new cTag, plus structuredContent mirror
 
-On success:
+On success the tool returns both a text body (authoritative for human
+reviewers) and a `structuredContent` mirror (machine-readable for the
+agent's next call).
+
+**Text body:**
 
 ```
 Edited <fileName> (<itemId>)
@@ -287,12 +314,27 @@ Size: <bytes> bytes
 Edits applied: <n>
 ---
 <unified diff produced by createTwoFilesPatch(fileName, fileName,
-  before, after, "before", "after", { context: 3 })>
+  before, after, "before", "after", { context: 1 })>
 ```
 
-On `dry_run: true` the same body is returned with a leading
-`(dry run — no changes were written)` line and **no** new cTag (because
-no PUT happened). The cTag the agent already holds is still valid.
+**`structuredContent`:**
+
+```ts
+{
+  fileName: string,
+  itemId: string,
+  cTag?: string,        // omitted on dry_run
+  sizeBytes: number,
+  editsApplied: number,
+}
+```
+
+On `dry_run: true` the text body gains a leading `(dry run — no changes
+were written)` line, and `structuredContent.cTag` is **omitted** (no PUT
+happened, the cTag the agent already holds is still valid). Everything
+present in `structuredContent` is also present in the text body — the
+text body is authoritative for humans, and `structuredContent` exists
+only to spare the agent a regex pass over the header for chained calls.
 
 **Rationale.**
 
@@ -305,9 +347,21 @@ no PUT happened). The cTag the agent already holds is still valid.
   `markdown_diff_file_versions` returns (so the agent has one mental
   model for "what changed"), and makes review of the agent's actions
   trivial. The reference server made the same call.
+- We tighten the diff context from the conventional `3` down to `1`. The
+  agent has just authored the edits and does not need three lines of
+  surrounding markdown to orient itself; the response's job is "confirm
+  what landed," not "help a cold reviewer understand the file." Markdown
+  paragraphs can be long, so three lines of context can easily balloon a
+  one-line semantic change into many hundreds of bytes. We can revisit
+  empirically once we have real edits to measure.
 - The new `cTag` is essential so a follow-up edit can run without an
   intervening `markdown_get_file`. Without it the tool would force the
   agent into a useless re-read.
+- `markdown_edit` is the one tool in the markdown family where the
+  agent most often wants to chain immediately into another call (next
+  edit, diff, list versions). That's the specific reason to break the
+  text-only precedent of the other markdown tools and emit
+  `structuredContent` here, rather than retrofitting later.
 
 ## Consequences
 
@@ -330,26 +384,33 @@ no PUT happened). The cTag the agent already holds is still valid.
   predictability and reviewability gains.
 - **Test surface grows by one tool.** Graph-layer tests for the new
   helper, integration tests for: single-edit happy path; multi-edit
-  sequential composition; `replace_all`; ambiguous match → error; no
-  match → error; no-op → error; empty `old_string` → error; CRLF input
-  normalised; size-cap-breach → error; `dry_run` returns diff but does
-  not write; 412 cTag mismatch surfaces correctly.
+  sequential composition; `replace_all: true` with multiple matches;
+  `replace_all: true` with zero matches → error (the uniqueness rule's
+  zero-match branch fires regardless of `replace_all`, on the principle
+  that a "replace all" that touches nothing is almost certainly a model
+  bug); ambiguous match → error; no match → error; no-op → error; empty
+  `old_string` → error; CRLF input normalised; size-cap-breach → error;
+  `dry_run` returns diff but does not write and omits cTag from
+  `structuredContent`; 412 cTag mismatch surfaces correctly;
+  `structuredContent` shape on success.
 - **No new runtime dependency.** `diff@^9` is already pinned and used by
   `markdown_diff_file_versions`.
 
 ## Reuse vs. adaptation from the MCP filesystem reference server
 
-| Reference (`applyFileEdits` in `modelcontextprotocol/servers`)               | graphdo-ts `markdown_edit`                                                                                                           |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `{ oldText, newText }` edit shape                                            | **Adopted** as `{ old_string, new_string, replace_all? }` (snake_case + escape hatch)                                                |
-| Sequential application of multiple edits in one call                         | **Adopted verbatim**                                                                                                                 |
-| `dryRun` boolean parameter                                                   | **Adopted** as `dry_run`                                                                                                             |
-| Unified-diff response via `diff` package                                     | **Adopted**; we use the same `createTwoFilesPatch` already in use for `markdown_diff_file_versions`                                  |
-| `normalizeLineEndings` on read & inputs                                      | **Adopted**, and we additionally persist as LF                                                                                       |
-| Lenient line-by-line fallback that trims whitespace and re-indents `newText` | **Rejected** — strict byte-exact matching only; see decision 2                                                                       |
-| First-match `String.prototype.replace` (no uniqueness check)                 | **Rejected** — we require exactly one match unless `replace_all: true`, with explicit `indexOf`-loop counting; see decisions 2 and 7 |
-| Local filesystem `fs.writeFile` with no concurrency control                  | **N/A** — replaced by the existing `If-Match: <cTag>` PUT and `MarkdownCTagMismatchError` flow; see decision 5                       |
-| MCP tool registration via raw `server.registerTool`                          | **Adapted** to the project's `defineTool` + static `ToolDef` split (`markdown-defs.ts` + `markdown-register.ts`)                     |
+| Reference (`applyFileEdits` in `modelcontextprotocol/servers`)               | graphdo-ts `markdown_edit`                                                                                                                                                  |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ oldText, newText }` edit shape                                            | **Adopted** as `{ old_string, new_string, replace_all? }` (snake_case + escape hatch)                                                                                       |
+| Sequential application of multiple edits in one call                         | **Adopted verbatim**                                                                                                                                                        |
+| `dryRun` boolean parameter                                                   | **Adopted** as `dry_run`                                                                                                                                                    |
+| Unified-diff response via `diff` package                                     | **Adopted**; we use the same `createTwoFilesPatch` already in use for `markdown_diff_file_versions`                                                                         |
+| `normalizeLineEndings` on read & inputs                                      | **Adopted**, and we additionally persist as LF                                                                                                                              |
+| Lenient line-by-line fallback that trims whitespace and re-indents `newText` | **Rejected** — strict byte-exact matching only; see decision 2                                                                                                              |
+| First-match `String.prototype.replace` (no uniqueness check)                 | **Rejected** — we require exactly one match unless `replace_all: true`; uniqueness counting and substitution share the same `split`/`join` primitive; see decisions 2 and 7 |
+| Default unified-diff context width of `3`                                    | **Tightened to `1`** — the agent authored the edits and does not need three lines of surrounding markdown to orient itself; see decision 9                                  |
+| Text-only response                                                           | **Augmented** with a `structuredContent` mirror so chained edits do not have to parse the text header; text body remains authoritative; see decision 9                      |
+| Local filesystem `fs.writeFile` with no concurrency control                  | **N/A** — replaced by the existing `If-Match: <cTag>` PUT and `MarkdownCTagMismatchError` flow; see decision 5                                                              |
+| MCP tool registration via raw `server.registerTool`                          | **Adapted** to the project's `defineTool` + static `ToolDef` split (`markdown-defs.ts` + `markdown-register.ts`)                                                            |
 
 ## Alternatives considered
 
