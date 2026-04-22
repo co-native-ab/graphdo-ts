@@ -75,11 +75,11 @@ Every one of those steps appears, with slight wording differences, in
 each of `loopback.ts`, `picker.ts`, and `showLogoutPage`. The most visible
 divergence is structural, not behavioural:
 
-| Flow    | Public shape                                                                                                  |
-| ------- | ------------------------------------------------------------------------------------------------------------- |
-| Login   | `class LoginLoopbackClient implements ILoopbackClient` — must satisfy MSAL's `listenForAuthCode` / `getRedirectUri` / `closeServer` interface, exposes `setAuthUrl`, `getAuthUrl`, `getCsrfToken`, `getAllowedHosts`, `waitForReady`. |
-| Picker  | `function startBrowserPicker(config, signal): Promise<{ url, waitForSelection }>` — caller opens the browser themselves. |
-| Logout  | `async function showLogoutPage(openBrowser, onConfirm, signal): Promise<void>` — opens the browser internally. Module-private to `auth.ts`. |
+| Flow   | Public shape                                                                                                                                                                                                                          |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login  | `class LoginLoopbackClient implements ILoopbackClient` — must satisfy MSAL's `listenForAuthCode` / `getRedirectUri` / `closeServer` interface, exposes `setAuthUrl`, `getAuthUrl`, `getCsrfToken`, `getAllowedHosts`, `waitForReady`. |
+| Picker | `function startBrowserPicker(config, signal): Promise<{ url, waitForSelection }>` — caller opens the browser themselves.                                                                                                              |
+| Logout | `async function showLogoutPage(openBrowser, onConfirm, signal): Promise<void>` — opens the browser internally. Module-private to `auth.ts`.                                                                                           |
 
 `openBrowser` plumbing is also inconsistent: the loopback never opens
 itself (the auth module wraps it), the picker doesn't open the browser at
@@ -95,12 +95,12 @@ thing.
 - **Hardening drift.** The CSP / CSRF / Host-pin invariants are stated
   three times. A reviewer changing one has to remember to change the
   others. (The `loopback-security.ts` helpers cover the per-request
-  *checks* but not the *wiring* — body reading, response serialisation,
+  _checks_ but not the _wiring_ — body reading, response serialisation,
   delayed close, abort handling — which has to be re-implemented per
   flow.)
 - **Structural mismatch.** The three flows have the same lifecycle
   (`start → user interacts in browser → produce a result | timeout |
-  abort → server closes`) but speak three different languages: a class
+abort → server closes`) but speak three different languages: a class
   with manually-staged methods (login), a `{ handle, promise }` pair
   (picker), and a single fire-and-forget `Promise<void>` (logout).
   A caller learns each flow individually instead of one shape.
@@ -120,9 +120,9 @@ interface ILoopbackClient {
 }
 ```
 
-That contract has to be honoured. It does *not* require the loopback
+That contract has to be honoured. It does _not_ require the loopback
 implementation itself to own the server lifecycle, the CSRF token, or the
-landing-page logic — it only requires *some object* to expose those three
+landing-page logic — it only requires _some object_ to expose those three
 methods.
 
 ### What is idiomatic in TypeScript
@@ -135,7 +135,7 @@ per-instance descriptors**, not three sibling implementations:
 - `node:http` server creation, lifecycle, headers, body reading, and
   abort handling go into one place — typically a small function or
   builder that returns `{ url, waitForResult, close }`.
-- Each *flow* declares only what is unique to it: the route table, the
+- Each _flow_ declares only what is unique to it: the route table, the
   template rendering, the resolution rule for the result Promise.
 - External-interface shims (here: MSAL's `ILoopbackClient`) become
   **adapters** wrapping the primitive, not parallel implementations of
@@ -235,7 +235,11 @@ Two helpers live next to it for the patterns that show up in every flow:
 ```ts
 /** Read a JSON body (≤1 MB), validate CSRF + a zod schema, then invoke onValid. */
 export function readJsonWithCsrf<S extends z.ZodTypeAny>(
-  req, res, ctx, schema, onValid: (data: z.infer<S>) => void | Promise<void>,
+  req,
+  res,
+  ctx,
+  schema,
+  onValid: (data: z.infer<S>) => void | Promise<void>,
 ): void;
 
 /** Write a JSON 200 response, then close the server after a 100 ms flush delay. */
@@ -294,14 +298,15 @@ Exports `loginFlow(getAuthUrl): BrowserFlow<AuthorizeResponse>` and a
 adapter:
 
 ```ts
-export function createMsalLoopback(
-  openBrowser: (url: string) => Promise<void>,
-): ILoopbackClient {
+export function createMsalLoopback(openBrowser: (url: string) => Promise<void>): ILoopbackClient {
   let handle: FlowHandle<AuthorizeResponse> | undefined;
   let authUrl: string | undefined;
   return {
     async listenForAuthCode() {
-      handle = await runBrowserFlow(loginFlow(() => authUrl), signal);
+      handle = await runBrowserFlow(
+        loginFlow(() => authUrl),
+        signal,
+      );
       return handle.result;
     },
     getRedirectUri() {
@@ -438,7 +443,7 @@ keeps working as-is.
   hardening baseline is a one-file change.
 - **Consistent flow shape.** All three flows return the same
   `FlowHandle<Result>` and follow the same `start → result | abort |
-  timeout → close` lifecycle. A reviewer learns one shape.
+timeout → close` lifecycle. A reviewer learns one shape.
 - **MSAL boundary is honest.** The 326-line `LoginLoopbackClient` class
   becomes a ~30-line adapter that exists only because MSAL requires the
   `ILoopbackClient` interface. The actual login UX lives in
@@ -451,7 +456,7 @@ keeps working as-is.
   inline HTTP server".
 - **Trivial extension.** A new browser-driven flow ("approve sending
   this email", "pick a SharePoint site") is one descriptor file
-  + one wrapper function.
+  - one wrapper function.
 - **Idiomatic for the language.** Mirrors what TypeScript HTTP / OAuth
   ecosystems do: one composable server primitive, per-flow descriptors,
   external-interface shims as adapters. No class hierarchy.
@@ -462,7 +467,7 @@ keeps working as-is.
   shrinks. The total surface is bounded — the existing tests in
   `test/loopback.test.ts`, `test/picker.test.ts`, and any
   logout-specific tests need their imports updated, but their
-  *behaviour* doesn't change.
+  _behaviour_ doesn't change.
 - **One layer of indirection added.** A reader who today opens
   `picker.ts` and sees the whole flow inline will, after the refactor,
   see a route table that delegates lifecycle to `runBrowserFlow`. This
@@ -487,7 +492,7 @@ keeps working as-is.
 - `ServerConfig.openBrowser` keeps its current type and DI thread.
 - The existing `PickerConfig`, `PickerOption`, `PickerResult`,
   `PickerCreateLink` public types continue to exist; `runPicker(config,
-  signal)` is a thin wrapper over `runBrowserFlow(pickerFlow(config))`
+signal)` is a thin wrapper over `runBrowserFlow(pickerFlow(config))`
   for callers that already type against them.
 
 ## Alternatives Considered
@@ -507,7 +512,7 @@ ToolBase`: `new` / `this` / lifetime ceremony for zero benefit when the
 flow has no per-instance state that survives `start()`. Methods would
 immediately be bound back into plain callbacks for
 `createServer((req, res) => …)`. The MSAL `ILoopbackClient` shim is the
-*only* part of the system that genuinely wants a class shape; that one
+_only_ part of the system that genuinely wants a class shape; that one
 class becomes a ~30-line adapter.
 
 ### C. A web framework (Hono, Express)
@@ -520,7 +525,7 @@ re-implemented as middleware anyway. `node:http` is sufficient.
 
 ### D. Extract only a `LoopbackBaseServer` shared by login and logout, leave the picker alone
 
-Rejected as half-measure. The picker has the *same* lifecycle as the
+Rejected as half-measure. The picker has the _same_ lifecycle as the
 other two — leaving it on its own shape preserves the current
 "three conventions for one concept" problem and means a reviewer still
 has to learn the picker separately.
@@ -573,7 +578,7 @@ Host-pin tests previously duplicated across `loopback.test.ts` and
   preserves.
 - ADR-0002: HTML Template and Design System — the `templates/` layer
   this ADR builds on; unchanged by this proposal.
-- ADR-0003: Browser-Only Authentication — the rationale for *having* a
+- ADR-0003: Browser-Only Authentication — the rationale for _having_ a
   branded loopback in the first place; this ADR is about how that
   loopback is structured, not whether it exists.
 - ADR-0007: Tool Descriptor Pattern — the same "one primitive +

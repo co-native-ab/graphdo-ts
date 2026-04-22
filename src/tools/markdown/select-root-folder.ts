@@ -8,7 +8,7 @@ import { UserCancelledError } from "../../errors.js";
 import { listRootFolders } from "../../graph/markdown.js";
 import type { ServerConfig } from "../../index.js";
 import { logger } from "../../logger.js";
-import { startBrowserPicker } from "../../picker.js";
+import { runPicker } from "../../browser/flows/picker.js";
 import { GraphScope } from "../../scopes.js";
 import type { Tool, ToolDef } from "../../tool-registry.js";
 import { formatError, retryHintForPickerError } from "../shared.js";
@@ -56,7 +56,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const handle = await startBrowserPicker(
+      const handle = await runPicker(
         {
           title: "Select Markdown Root Folder",
           subtitle:

@@ -13,7 +13,7 @@ vi.mock("node:child_process", () => ({
   },
 }));
 
-import { openBrowser } from "../src/browser.js";
+import { openBrowser } from "../../src/browser/open.js";
 
 describe("openBrowser", () => {
   beforeEach(() => {
@@ -98,7 +98,7 @@ describe("openBrowser Windows branch", () => {
       },
     }));
 
-    const { openBrowser: openBrowserWin } = await import("../src/browser.js");
+    const { openBrowser: openBrowserWin } = await import("../../src/browser/open.js");
     await expect(openBrowserWin("http://localhost:5000/")).resolves.toBeUndefined();
   });
 
@@ -116,7 +116,7 @@ describe("openBrowser Windows branch", () => {
       },
     }));
 
-    const { openBrowser: openBrowserWinErr } = await import("../src/browser.js");
+    const { openBrowser: openBrowserWinErr } = await import("../../src/browser/open.js");
     await expect(openBrowserWinErr("http://localhost:5000/")).rejects.toThrow(
       "Failed to open browser: cmd.exe failed",
     );
@@ -154,7 +154,7 @@ describe("isWsl() catch branch", () => {
       },
     }));
 
-    const { openBrowser: openBrowserFallback } = await import("../src/browser.js");
+    const { openBrowser: openBrowserFallback } = await import("../../src/browser/open.js");
     // isWsl() catch branch should set _isWsl = false, so it will use xdg-open
     await expect(openBrowserFallback("http://localhost:5000/")).rejects.toThrow(
       "Failed to open browser:",
