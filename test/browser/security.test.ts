@@ -9,7 +9,7 @@ import {
   generateRandomToken,
   validateLoopbackPostHeaders,
   verifyCsrfToken,
-} from "../src/loopback-security.js";
+} from "../../src/browser/security.js";
 
 function fakeReq(headers: Record<string, string>): IncomingMessage {
   // Cast the minimum-viable shape — we only ever read `headers`.

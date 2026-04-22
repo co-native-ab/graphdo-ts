@@ -1,15 +1,13 @@
-// Tests for the generic browser picker.
+// Tests for the picker flow descriptor and runPicker wrapper.
 //
-// Verifies the full flow: start picker → fetch HTML → POST selection → callback fired.
-// Also exercises the §5.4 loopback hardening (CSRF token, Host pin, Origin
-// pin, Sec-Fetch-Site pin, Content-Type pin, hardened CSP header).
+// Picker-specific assertions: option rendering, selection flow, refresh,
+// create-link rendering, XSS escaping, onSelect error, timeout, cancel.
 
 import { describe, it, expect, vi } from "vitest";
-import { request as httpRequest } from "node:http";
 
-import { startBrowserPicker } from "../src/picker.js";
-import type { PickerOption } from "../src/picker.js";
-import { fetchCsrfToken, testSignal } from "./helpers.js";
+import { runPicker } from "../../../src/browser/flows/picker.js";
+import type { PickerOption } from "../../../src/browser/flows/picker.js";
+import { fetchCsrfToken, testSignal } from "../../helpers.js";
 
 const sampleOptions: PickerOption[] = [
   { id: "opt-1", label: "Option A" },
@@ -20,7 +18,6 @@ interface PostJsonInit {
   csrfToken: string;
   body: Record<string, unknown>;
   headers?: Record<string, string>;
-  hostUrl?: string;
 }
 
 /** POST a JSON body with a CSRF token included. */
@@ -32,49 +29,13 @@ async function postJson(url: string, init: PostJsonInit): Promise<Response> {
   });
 }
 
-/**
- * Issue a raw HTTP POST via `node:http` so the test can set the `Host`
- * header (forbidden via the fetch API). Used by the Host-pin tests.
- */
-function rawHttpPost(
-  url: string,
-  opts: { hostHeader: string; body: string; contentType?: string },
-): Promise<{ status: number; body: string }> {
-  const parsed = new URL(url);
-  return new Promise((resolve, reject) => {
-    const req = httpRequest(
-      {
-        hostname: parsed.hostname,
-        port: parsed.port,
-        path: parsed.pathname,
-        method: "POST",
-        headers: {
-          Host: opts.hostHeader,
-          "Content-Type": opts.contentType ?? "application/json",
-          "Content-Length": Buffer.byteLength(opts.body).toString(),
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
-        });
-      },
-    );
-    req.on("error", reject);
-    req.write(opts.body);
-    req.end();
-  });
-}
-
-describe("browser picker", () => {
+describe("picker flow (via runPicker)", () => {
   it("serves HTML page with options", async () => {
     const onSelect = vi
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick Something",
         subtitle: "Choose wisely:",
@@ -112,7 +73,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -143,7 +104,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -162,7 +123,7 @@ describe("browser picker", () => {
     expect(response.status).toBe(400);
     expect(onSelect).not.toHaveBeenCalled();
 
-    // Clean up - post a valid selection
+    // Clean up
     await postJson(`${handle.url}/select`, {
       csrfToken,
       body: { id: "opt-1", label: "Option A" },
@@ -175,7 +136,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -203,7 +164,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -224,7 +185,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -249,49 +210,12 @@ describe("browser picker", () => {
     await handle.waitForSelection;
   });
 
-  it("returns 413 when POST body exceeds size limit", async () => {
-    const onSelect = vi
-      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
-      .mockResolvedValue(undefined);
-
-    const handle = await startBrowserPicker(
-      {
-        title: "Test",
-        subtitle: "Test",
-        options: sampleOptions,
-        onSelect,
-        timeoutMs: 5000,
-      },
-      testSignal(),
-    );
-
-    // Send a body larger than MAX_BODY_SIZE (1 MB). The hardening header
-    // checks pass first (Content-Type is application/json), then the body
-    // limit is enforced.
-    const oversizedBody = "x".repeat(1_048_577);
-    const response = await fetch(`${handle.url}/select`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: oversizedBody,
-    });
-    expect(response.status).toBe(413);
-    expect(onSelect).not.toHaveBeenCalled();
-
-    // Clean up - post a valid selection
-    const csrfToken = await fetchCsrfToken(handle.url);
-    await postJson(`${handle.url}/select`, {
-      csrfToken,
-      body: { id: "opt-1", label: "Option A" },
-    });
-    await handle.waitForSelection;
-  });
-
   it("returns 500 when onSelect throws", async () => {
     const onSelect = vi
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockRejectedValue(new Error("save failed"));
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -325,7 +249,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Test",
         subtitle: "Test",
@@ -350,7 +274,7 @@ describe("browser picker", () => {
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Choose a list",
         subtitle: "Select one:",
@@ -361,10 +285,7 @@ describe("browser picker", () => {
       testSignal(),
     );
 
-    // Attach cleanup handler before any requests to avoid unhandled rejection
-    const cleanup = handle.waitForSelection.catch(() => {
-      /* expected rejection */
-    });
+    const cleanup = handle.waitForSelection.catch(() => undefined);
     try {
       const response = await fetch(handle.url);
       const html = await response.text();
@@ -372,21 +293,53 @@ describe("browser picker", () => {
       expect(html).toContain("Cancel");
     } finally {
       const csrfToken = await fetchCsrfToken(handle.url);
-      await postJson(`${handle.url}/cancel`, { csrfToken, body: {} }).catch(() => {
-        /* ignore */
-      });
+      await postJson(`${handle.url}/cancel`, { csrfToken, body: {} }).catch(() => undefined);
       await cleanup;
     }
+  });
+
+  it("returns 413 when POST body exceeds size limit", async () => {
+    const onSelect = vi
+      .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handle = await runPicker(
+      {
+        title: "Test",
+        subtitle: "Test",
+        options: sampleOptions,
+        onSelect,
+        timeoutMs: 5000,
+      },
+      testSignal(),
+    );
+
+    const oversizedBody = "x".repeat(1_048_577);
+    const response = await fetch(`${handle.url}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: oversizedBody,
+    });
+    expect(response.status).toBe(413);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // Clean up
+    const csrfToken = await fetchCsrfToken(handle.url);
+    await postJson(`${handle.url}/select`, {
+      csrfToken,
+      body: { id: "opt-1", label: "Option A" },
+    });
+    await handle.waitForSelection;
   });
 });
 
 // ---------------------------------------------------------------------------
-// Filter / Refresh / Create-link enhancements
+// Enhanced features
 // ---------------------------------------------------------------------------
 
-describe("browser picker: enhanced features", () => {
+describe("picker flow: enhanced features", () => {
   it("renders a filter input and create-link when configured", async () => {
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -411,7 +364,6 @@ describe("browser picker: enhanced features", () => {
       expect(html).toContain("https://example.com/new");
       expect(html).toContain("Create a new thing");
       expect(html).toContain("Opens the service in a new tab.");
-      // Refresh button is hidden unless refreshOptions is provided
       expect(html).not.toContain('id="refresh-btn"');
     } finally {
       const csrfToken = await fetchCsrfToken(handle.url);
@@ -421,7 +373,7 @@ describe("browser picker: enhanced features", () => {
   });
 
   it("escapes HTML special characters in filter placeholder, create link, and options", async () => {
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -453,7 +405,7 @@ describe("browser picker: enhanced features", () => {
   });
 
   it("renders a refresh button only when refreshOptions is provided", async () => {
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -480,7 +432,7 @@ describe("browser picker: enhanced features", () => {
       .fn<(signal: AbortSignal) => Promise<PickerOption[]>>()
       .mockResolvedValueOnce([{ id: "refreshed-1", label: "Refreshed A" }]);
 
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -506,11 +458,10 @@ describe("browser picker: enhanced features", () => {
   });
 
   it("after a refresh, only options from the refreshed set are selectable", async () => {
-    // Initial set offers opt-1 and opt-2. Refresh replaces them.
     const onSelect = vi
       .fn<(opt: PickerOption, signal: AbortSignal) => Promise<void>>()
       .mockResolvedValue(undefined);
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -545,7 +496,7 @@ describe("browser picker: enhanced features", () => {
   });
 
   it("GET /options returns 405 when no refresh provider is configured", async () => {
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -567,7 +518,7 @@ describe("browser picker: enhanced features", () => {
   });
 
   it("GET /options returns 500 with JSON error when the provider throws", async () => {
-    const handle = await startBrowserPicker(
+    const handle = await runPicker(
       {
         title: "Pick",
         subtitle: "Choose:",
@@ -583,7 +534,6 @@ describe("browser picker: enhanced features", () => {
       const res = await fetch(`${handle.url}/options`);
       expect(res.status).toBe(500);
       const body = (await res.json()) as { error: string };
-      // Generic message — internal error details must not leak to the browser.
       expect(body.error).toBe("refresh failed");
       expect(body.error).not.toContain("graph exploded");
     } finally {
@@ -591,192 +541,5 @@ describe("browser picker: enhanced features", () => {
       await postJson(`${handle.url}/cancel`, { csrfToken, body: {} }).catch(() => undefined);
       await cleanup;
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §5.4 Loopback hardening (CSRF, Host pin, Origin pin, Sec-Fetch-Site,
-// Content-Type pin, hardened CSP)
-// ---------------------------------------------------------------------------
-
-describe("browser picker: §5.4 loopback hardening", () => {
-  /**
-   * Boilerplate-free helper: starts a picker, runs the body with a handle
-   * + scraped CSRF token + the loopback host literal, then cancels cleanly.
-   */
-  async function withPicker(
-    body: (ctx: { handle: { url: string }; csrfToken: string; host: string }) => Promise<void>,
-  ): Promise<void> {
-    const handle = await startBrowserPicker(
-      {
-        title: "Test",
-        subtitle: "Test",
-        options: sampleOptions,
-        onSelect: vi.fn().mockResolvedValue(undefined),
-        timeoutMs: 5000,
-      },
-      testSignal(),
-    );
-    const cleanup = handle.waitForSelection.catch(() => undefined);
-    const host = new URL(handle.url).host;
-    try {
-      const csrfToken = await fetchCsrfToken(handle.url);
-      await body({ handle, csrfToken, host });
-    } finally {
-      const csrfToken = await fetchCsrfToken(handle.url);
-      await postJson(`${handle.url}/cancel`, { csrfToken, body: {} }).catch(() => undefined);
-      await cleanup;
-    }
-  }
-
-  it("rejects POST /select when Host header is not the loopback literal", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const res = await rawHttpPost(`${handle.url}/select`, {
-        hostHeader: "evil.example:80",
-        body: JSON.stringify({ id: "opt-1", label: "Option A", csrfToken }),
-      });
-      expect(res.status).toBe(403);
-      expect(res.body).toMatch(/Host/);
-    });
-  });
-
-  it("accepts POST /select when Host header is the loopback literal (sanity)", async () => {
-    await withPicker(async ({ handle, csrfToken, host }) => {
-      const res = await rawHttpPost(`${handle.url}/select`, {
-        hostHeader: host,
-        body: JSON.stringify({ id: "opt-1", label: "Option A", csrfToken }),
-      });
-      expect(res.status).toBe(200);
-    });
-  });
-
-  it("rejects POST /select when Origin is present and not loopback literal", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const res = await postJson(`${handle.url}/select`, {
-        csrfToken,
-        body: { id: "opt-1", label: "Option A" },
-        headers: { Origin: "https://evil.example" },
-      });
-      expect(res.status).toBe(403);
-      expect(await res.text()).toMatch(/Origin/);
-    });
-  });
-
-  it("accepts POST /select when Origin matches the loopback literal", async () => {
-    await withPicker(async ({ handle, csrfToken, host }) => {
-      const res = await postJson(`${handle.url}/select`, {
-        csrfToken,
-        body: { id: "opt-1", label: "Option A" },
-        headers: { Origin: `http://${host}` },
-      });
-      expect(res.status).toBe(200);
-    });
-  });
-
-  it("rejects POST /select when Sec-Fetch-Site is present and not 'same-origin'", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const res = await postJson(`${handle.url}/select`, {
-        csrfToken,
-        body: { id: "opt-1", label: "Option A" },
-        headers: { "Sec-Fetch-Site": "cross-site" },
-      });
-      expect(res.status).toBe(403);
-      expect(await res.text()).toMatch(/Sec-Fetch-Site/);
-    });
-  });
-
-  it("rejects POST /select when Content-Type is not application/json", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const res = await fetch(`${handle.url}/select`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({ id: "opt-1", label: "Option A", csrfToken }),
-      });
-      expect(res.status).toBe(415);
-    });
-  });
-
-  it("rejects POST /select when CSRF token is missing", async () => {
-    await withPicker(async ({ handle }) => {
-      const res = await fetch(`${handle.url}/select`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "opt-1", label: "Option A" }),
-      });
-      expect(res.status).toBe(400);
-    });
-  });
-
-  it("rejects POST /select when CSRF token is wrong (timing-safe)", async () => {
-    await withPicker(async ({ handle }) => {
-      const res = await postJson(`${handle.url}/select`, {
-        csrfToken: "0".repeat(64),
-        body: { id: "opt-1", label: "Option A" },
-      });
-      expect(res.status).toBe(403);
-      expect(await res.text()).toMatch(/CSRF/);
-    });
-  });
-
-  it("rejects POST /select when CSRF token is the wrong length (timing-safe)", async () => {
-    await withPicker(async ({ handle }) => {
-      const res = await postJson(`${handle.url}/select`, {
-        csrfToken: "short",
-        body: { id: "opt-1", label: "Option A" },
-      });
-      expect(res.status).toBe(403);
-    });
-  });
-
-  it("rejects POST /cancel when CSRF token is missing", async () => {
-    await withPicker(async ({ handle }) => {
-      const res = await fetch(`${handle.url}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      expect(res.status).toBe(403);
-    });
-  });
-
-  it("rejects POST /cancel when Content-Type is not application/json", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const res = await fetch(`${handle.url}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({ csrfToken }),
-      });
-      expect(res.status).toBe(415);
-    });
-  });
-
-  it("CSP header forbids framing and uses a per-request nonce", async () => {
-    await withPicker(async ({ handle }) => {
-      const res = await fetch(handle.url);
-      const csp = res.headers.get("content-security-policy") ?? "";
-      expect(csp).toContain("frame-ancestors 'none'");
-      expect(csp).toContain("base-uri 'none'");
-      expect(csp).toContain("form-action 'self'");
-      expect(csp).not.toContain("'unsafe-inline'");
-      expect(csp).toMatch(/script-src 'nonce-[0-9a-f]{64}'/);
-      expect(csp).toMatch(/style-src 'nonce-[0-9a-f]{64}'/);
-
-      // A second request must mint a fresh nonce.
-      const csp2 = (await fetch(handle.url)).headers.get("content-security-policy") ?? "";
-      const nonce1 = /'nonce-([0-9a-f]{64})'/.exec(csp)?.[1];
-      const nonce2 = /'nonce-([0-9a-f]{64})'/.exec(csp2)?.[1];
-      expect(nonce1).toBeDefined();
-      expect(nonce2).toBeDefined();
-      expect(nonce1).not.toBe(nonce2);
-    });
-  });
-
-  it("HTML embeds the CSRF token in a <meta> tag and a per-request nonce on inline <script> and <style>", async () => {
-    await withPicker(async ({ handle, csrfToken }) => {
-      const html = await (await fetch(handle.url)).text();
-      expect(html).toContain(`<meta name="csrf-token" content="${csrfToken}">`);
-      expect(html).toMatch(/<script nonce="[0-9a-f]{64}">/);
-      expect(html).toMatch(/<style nonce="[0-9a-f]{64}">/);
-    });
   });
 });
