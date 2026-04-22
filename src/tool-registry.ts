@@ -1,9 +1,22 @@
-// Tool registry — single source of truth for tool metadata and dynamic state.
+// Tool registry — shared types and helpers for MCP tool registration.
 //
-// Each domain module (mail, todo, …) exports its own ToolDef array and register
-// function. This file provides the shared types, the defineTool() helper that
-// registers a tool AND returns a registry entry, and the runtime functions for
-// syncing tool enabled/disabled state based on granted scopes.
+// Each tool lives in its own file under `src/tools/<domain>/` and exports a
+// `Tool<Args>` descriptor. The composition root (`src/index.ts`) collects all
+// descriptors into one array and registers them in a single loop via
+// `registerTool(server, config, tool)`. This file owns the descriptor types,
+// the registration helper, and the runtime functions for syncing tool
+// enabled/disabled state based on granted scopes (`syncToolState`) and
+// generating MCP instructions text from the full set of defs
+// (`buildInstructions`).
+//
+// Tool files conform to a fixed shape:
+//
+//   const inputSchema = { … };
+//   const def: ToolDef = { … };
+//   function handler(config: ServerConfig): ToolCallback<typeof inputSchema> { … }
+//   export const xxxTool: Tool<typeof inputSchema> = { def, inputSchema, handler };
+//
+// See ADR-0007.
 
 import type {
   McpServer,
@@ -13,6 +26,7 @@ import type {
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { ZodRawShape } from "zod";
 
+import type { ServerConfig } from "./index.js";
 import type { GraphScope } from "./scopes.js";
 import { logger } from "./logger.js";
 
@@ -37,46 +51,79 @@ export interface ToolEntry extends ToolDef {
   registeredTool: RegisteredTool;
 }
 
+/**
+ * Self-contained descriptor for a single MCP tool. Composes the static
+ * metadata (`def`), the zod input schema, optional output schema and
+ * annotations, and a handler factory that takes the injected
+ * {@link ServerConfig} and returns the SDK-shaped callback.
+ *
+ * By convention each tool file declares `inputSchema`, `def`, and `handler`
+ * as named top-level pieces and assembles them into the descriptor at the
+ * bottom of the file. See ADR-0007.
+ */
+export interface Tool<Args extends ZodRawShape = ZodRawShape> {
+  readonly def: ToolDef;
+  readonly inputSchema: Args;
+  readonly outputSchema?: ZodRawShape;
+  /**
+   * Optional MCP annotations. The `title` field is always set from
+   * `def.title` by {@link registerTool} and should not be supplied here.
+   */
+  readonly annotations?: Omit<ToolAnnotations, "title">;
+  readonly handler: (config: ServerConfig) => ToolCallback<Args>;
+}
+
+/**
+ * Erased-args alias for storing tools of differing input shapes in a single
+ * heterogeneous collection. Each individual `Tool<Args>` descriptor is still
+ * type-checked precisely at its definition site — `AnyTool` only relaxes the
+ * type used for arrays and iteration.
+ */
+// `Tool<any>` is the right erasure here: arrays of differently-shaped tool
+// descriptors cannot be expressed via a single concrete `Tool<…>` parameter
+// without re-introducing the variance error this alias exists to defeat.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyTool = Tool<any>;
+
 // ---------------------------------------------------------------------------
-// defineTool helper
+// registerTool helper
 // ---------------------------------------------------------------------------
 
 /**
- * Register a tool with the MCP server and produce a ToolEntry.
- *
- * Combines tool metadata (from a ToolDef) with MCP registration into a single
- * call so metadata and registration can never drift apart.
+ * Register a {@link Tool} descriptor with the MCP server and produce a
+ * {@link ToolEntry}. The annotation's `title` is always derived from
+ * `tool.def.title` so the two never drift apart.
  */
-export function defineTool<Args extends ZodRawShape>(
+export function registerTool<Args extends ZodRawShape>(
   server: McpServer,
-  def: ToolDef,
-  toolConfig: {
-    inputSchema: Args;
-    outputSchema?: ZodRawShape;
-    annotations?: ToolAnnotations;
-  },
-  handler: ToolCallback<Args>,
+  config: ServerConfig,
+  tool: Tool<Args>,
 ): ToolEntry {
+  const annotations: ToolAnnotations = {
+    title: tool.def.title,
+    ...(tool.annotations ?? {}),
+  };
+
   const registeredTool = server.registerTool(
-    def.name,
+    tool.def.name,
     {
-      title: def.title,
-      description: def.description,
-      inputSchema: toolConfig.inputSchema,
+      title: tool.def.title,
+      description: tool.def.description,
+      inputSchema: tool.inputSchema,
       // Only include outputSchema when explicitly provided — passing
       // `undefined` would still register an output-typed tool in some SDK
       // versions and force every result to satisfy the schema.
-      ...(toolConfig.outputSchema !== undefined ? { outputSchema: toolConfig.outputSchema } : {}),
-      annotations: toolConfig.annotations,
+      ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
+      annotations,
     },
-    handler,
+    tool.handler(config),
   );
 
   return {
-    name: def.name,
-    title: def.title,
-    description: def.description,
-    requiredScopes: def.requiredScopes,
+    name: tool.def.name,
+    title: tool.def.title,
+    description: tool.def.description,
+    requiredScopes: tool.def.requiredScopes,
     registeredTool,
   };
 }

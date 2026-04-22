@@ -1,6 +1,6 @@
 ---
 title: "ADR-0007: Tool Descriptor Pattern — One Tool, One File, One Object"
-status: "Proposed"
+status: "Accepted"
 date: "2026-04-22"
 authors: "co-native-ab"
 tags: ["architecture", "mcp", "tools", "code-organization", "typescript"]
@@ -12,7 +12,7 @@ superseded_by: ""
 
 ## Status
 
-**Proposed**
+**Accepted**
 
 ## Context
 
@@ -35,14 +35,14 @@ That second half is the problem this ADR addresses. As the surface area
 grew — particularly with the markdown family — the register functions grew
 into thousand-line bodies:
 
-| File                            | Lines |
-| ------------------------------- | ----: |
-| `tools/markdown-register.ts`    | 1378  |
-| `tools/todo.ts`                 |  505  |
-| `tools/todo-steps.ts`           |  253  |
-| `tools/markdown-defs.ts`        |  214  |
-| `tools/login.ts`                |  140  |
-| `tools/config.ts`               |  138  |
+| File                         | Lines |
+| ---------------------------- | ----: |
+| `tools/markdown-register.ts` |  1378 |
+| `tools/todo.ts`              |   505 |
+| `tools/todo-steps.ts`        |   253 |
+| `tools/markdown-defs.ts`     |   214 |
+| `tools/login.ts`             |   140 |
+| `tools/config.ts`            |   138 |
 
 The markdown family already hints at where this is going: it splits
 `markdown-defs.ts`, `markdown-helpers.ts`, and `markdown-register.ts` into
@@ -205,8 +205,12 @@ export { todoListTool } from "./todo-list.js";
 export { todoShowTool } from "./todo-show.js";
 // …
 export const TODO_TOOLS = [
-  todoListTool, todoShowTool, todoCreateTool,
-  todoUpdateTool, todoCompleteTool, todoDeleteTool,
+  todoListTool,
+  todoShowTool,
+  todoCreateTool,
+  todoUpdateTool,
+  todoCompleteTool,
+  todoDeleteTool,
 ] as const satisfies readonly Tool[];
 ```
 
@@ -340,8 +344,13 @@ import { CONFIG_TOOL_DEFS, registerConfigTools } from "./tools/config.js";
 import { STATUS_TOOL_DEFS, registerStatusTool } from "./tools/status.js";
 
 const allDefs = [
-  ...LOGIN_TOOL_DEFS, ...STATUS_TOOL_DEFS, ...MAIL_TOOL_DEFS,
-  ...TODO_TOOL_DEFS, ...STEP_TOOL_DEFS, ...CONFIG_TOOL_DEFS, ...MARKDOWN_TOOL_DEFS,
+  ...LOGIN_TOOL_DEFS,
+  ...STATUS_TOOL_DEFS,
+  ...MAIL_TOOL_DEFS,
+  ...TODO_TOOL_DEFS,
+  ...STEP_TOOL_DEFS,
+  ...CONFIG_TOOL_DEFS,
+  ...MARKDOWN_TOOL_DEFS,
 ];
 
 const registry: ToolEntry[] = [
@@ -365,13 +374,17 @@ import { CONFIG_TOOLS } from "./tools/config/index.js";
 import { STATUS_TOOLS } from "./tools/status/index.js";
 
 const ALL_TOOLS = [
-  ...LOGIN_TOOLS, ...STATUS_TOOLS, ...MAIL_TOOLS,
-  ...TODO_TOOLS, ...CONFIG_TOOLS, ...MARKDOWN_TOOLS,
+  ...LOGIN_TOOLS,
+  ...STATUS_TOOLS,
+  ...MAIL_TOOLS,
+  ...TODO_TOOLS,
+  ...CONFIG_TOOLS,
+  ...MARKDOWN_TOOLS,
 ];
 
 const mcpServer = new McpServer(
   { name: "graphdo", version: VERSION },
-  { capabilities: { logging: {} }, instructions: buildInstructions(ALL_TOOLS.map(t => t.def)) },
+  { capabilities: { logging: {} }, instructions: buildInstructions(ALL_TOOLS.map((t) => t.def)) },
 );
 
 const registry: ToolEntry[] = ALL_TOOLS.map((tool) => registerTool(mcpServer, config, tool));

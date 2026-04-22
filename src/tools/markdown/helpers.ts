@@ -1,21 +1,29 @@
-// Internal helpers for the markdown tool registrations:
+// Internal helpers shared by the markdown tool family:
 // schemas, drive-item resolver, formatters, and the best-effort drive
-// `webUrl` lookup. Split out from `./markdown.ts`.
+// `webUrl` lookup.
 
 import { z } from "zod";
 
-import type { GraphClient } from "../graph/client.js";
-import { validateGraphId, type ValidatedGraphId } from "../graph/ids.js";
+import type { GraphClient } from "../../graph/client.js";
+import { validateGraphId, type ValidatedGraphId } from "../../graph/ids.js";
 import {
   findMarkdownFileByName,
   getDriveItem,
   getMyDrive,
   MARKDOWN_FILE_NAME_RULES,
   validateMarkdownFileName,
-} from "../graph/markdown.js";
-import type { DriveItem } from "../graph/types.js";
-import type { ServerConfig } from "../index.js";
-import { logger } from "../logger.js";
+} from "../../graph/markdown.js";
+import type { DriveItem } from "../../graph/types.js";
+import type { ServerConfig } from "../../index.js";
+import { logger } from "../../logger.js";
+
+/**
+ * Boilerplate appended to descriptions and error messages whenever we cite
+ * the 4 MiB markdown content cap. Centralised so the wording — including
+ * the "tool-side cap" disclaimer — stays consistent across every markdown
+ * tool description and error path.
+ */
+export const MARKDOWN_SIZE_CAP_NOTE = "graphdo-ts tool-side cap, not a Microsoft Graph API limit";
 
 /**
  * Zod schema for strict markdown file names. Applies the full

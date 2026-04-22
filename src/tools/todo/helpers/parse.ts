@@ -1,6 +1,10 @@
 // Parsing helpers for To Do tool input (recurrence, dates).
 
-import type { DateTimeTimeZone, PatternedRecurrence, RecurrenceRange } from "../graph/types.js";
+import type {
+  DateTimeTimeZone,
+  PatternedRecurrence,
+  RecurrenceRange,
+} from "../../../graph/types.js";
 
 /**
  * Parse a simplified repeat string into a full PatternedRecurrence.
