@@ -508,8 +508,9 @@ as a sub-bullet of this one.
 
 ```
 markdown_append(
-  file_id?: string,        // exactly one of file_id or file_name (idOrNameShape)
-  file_name?: string,
+  itemId?: string,         // at least one of itemId or fileName (idOrNameShape);
+                           // if both are provided, itemId takes precedence
+  fileName?: string,
   content: string,         // non-empty after LF normalisation
   dry_run?: boolean        // default false
 )
