@@ -1,4 +1,4 @@
-// Unit tests for src/tools/markdown-helpers.ts — the smaller branches that
+// Unit tests for src/tools/markdown/helpers.ts — the smaller branches that
 // are not reached by the integration suite.
 
 import { describe, it, expect } from "vitest";
@@ -10,7 +10,7 @@ import {
   formatSize,
   resolveDriveItem,
   tryGetDriveWebUrl,
-} from "../../src/tools/markdown-helpers.js";
+} from "../../src/tools/markdown/helpers.js";
 import { gid, testSignal } from "../helpers.js";
 
 // Minimal stub for GraphClient that returns a canned /me/drive response via

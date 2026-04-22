@@ -1,4 +1,4 @@
-// Unit tests for tool registry: syncToolState, buildInstructions, defineTool.
+// Unit tests for tool registry: syncToolState, buildInstructions, registerTool.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GraphScope } from "../src/scopes.js";

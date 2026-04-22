@@ -11,14 +11,12 @@ import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
 import type { GraphScope } from "./scopes.js";
-import { LOGIN_TOOL_DEFS, registerLoginTools } from "./tools/login.js";
-import { MAIL_TOOL_DEFS, registerMailTools } from "./tools/mail.js";
-import { MARKDOWN_TOOL_DEFS, registerMarkdownTools } from "./tools/markdown.js";
-import { TODO_TOOL_DEFS, STEP_TOOL_DEFS, registerTodoTools } from "./tools/todo.js";
-import { CONFIG_TOOL_DEFS, registerConfigTools } from "./tools/config.js";
-import { STATUS_TOOL_DEFS, registerStatusTool } from "./tools/status.js";
-import type { ToolEntry } from "./tool-registry.js";
-import { buildInstructions, syncToolState } from "./tool-registry.js";
+import { AUTH_TOOLS } from "./tools/auth/index.js";
+import { MAIL_TOOLS } from "./tools/mail/index.js";
+import { MARKDOWN_TOOLS } from "./tools/markdown/index.js";
+import { TODO_TOOLS } from "./tools/todo/index.js";
+import type { AnyTool, ToolEntry } from "./tool-registry.js";
+import { buildInstructions, registerTool, syncToolState } from "./tool-registry.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -61,22 +59,19 @@ export async function createMcpServer(
   opts: Omit<ServerConfig, "graphClient">,
   signal: AbortSignal,
 ): Promise<McpServer> {
-  // Collect all static tool definitions for instruction generation
-  const allDefs = [
-    ...LOGIN_TOOL_DEFS,
-    ...STATUS_TOOL_DEFS,
-    ...MAIL_TOOL_DEFS,
-    ...TODO_TOOL_DEFS,
-    ...STEP_TOOL_DEFS,
-    ...CONFIG_TOOL_DEFS,
-    ...MARKDOWN_TOOL_DEFS,
+  // All tools the server exposes, in instruction-listing order.
+  const allTools: readonly AnyTool[] = [
+    ...AUTH_TOOLS,
+    ...MAIL_TOOLS,
+    ...TODO_TOOLS,
+    ...MARKDOWN_TOOLS,
   ];
 
   const mcpServer = new McpServer(
     { name: "graphdo", version: VERSION },
     {
       capabilities: { logging: {} },
-      instructions: buildInstructions(allDefs),
+      instructions: buildInstructions(allTools.map((t) => t.def)),
     },
   );
 
@@ -87,15 +82,9 @@ export async function createMcpServer(
 
   const config: ServerConfig = { ...opts, graphClient };
 
-  // Register all tools and collect entries for dynamic state management
-  const registry: ToolEntry[] = [
-    ...registerLoginTools(mcpServer, config),
-    ...registerMailTools(mcpServer, config),
-    ...registerTodoTools(mcpServer, config),
-    ...registerConfigTools(mcpServer, config),
-    ...registerMarkdownTools(mcpServer, config),
-    ...registerStatusTool(mcpServer, config),
-  ];
+  // Register every tool descriptor in a single loop. The descriptor is the
+  // single source of truth for metadata, schemas, annotations, and handler.
+  const registry: ToolEntry[] = allTools.map((tool) => registerTool(mcpServer, config, tool));
 
   // Disable all scope-gated tools initially
   for (const entry of registry) {

@@ -18,7 +18,7 @@ import {
   testSignal,
   type IntegrationEnv,
   type ToolResult,
-} from "./helpers.js";
+} from "../helpers.js";
 
 let env: IntegrationEnv;
 

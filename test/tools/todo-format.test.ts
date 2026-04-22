@@ -8,7 +8,7 @@ import {
   importanceLabel,
   formatDate,
   formatRecurrence,
-} from "../../src/tools/todo-format.js";
+} from "../../src/tools/todo/helpers/format.js";
 import type { PatternedRecurrence } from "../../src/graph/types.js";
 
 describe("statusEmoji", () => {

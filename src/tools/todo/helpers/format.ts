@@ -5,7 +5,7 @@ import type {
   PatternedRecurrence,
   TodoStatus,
   Importance,
-} from "../graph/types.js";
+} from "../../../graph/types.js";
 
 export function statusEmoji(status: TodoStatus): string {
   switch (status) {
