@@ -11,7 +11,6 @@ import { configDir } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
 import type { GraphScope } from "./scopes.js";
-import { CONFIG_TOOLS } from "./tools/config/index.js";
 import { LOGIN_TOOLS } from "./tools/login/index.js";
 import { MAIL_TOOLS } from "./tools/mail/index.js";
 import { MARKDOWN_TOOLS } from "./tools/markdown/index.js";
@@ -67,7 +66,6 @@ export async function createMcpServer(
     ...STATUS_TOOLS,
     ...MAIL_TOOLS,
     ...TODO_TOOLS,
-    ...CONFIG_TOOLS,
     ...MARKDOWN_TOOLS,
   ];
 

@@ -5,6 +5,7 @@ import { todoCompleteTool } from "./todo-complete.js";
 import { todoCreateTool } from "./todo-create.js";
 import { todoDeleteTool } from "./todo-delete.js";
 import { todoListTool } from "./todo-list.js";
+import { todoSelectListTool } from "./todo-select-list.js";
 import { todoShowTool } from "./todo-show.js";
 import { todoUpdateTool } from "./todo-update.js";
 import { todoAddStepTool } from "./steps/todo-add-step.js";
@@ -19,6 +20,7 @@ export {
   todoUpdateTool,
   todoCompleteTool,
   todoDeleteTool,
+  todoSelectListTool,
   todoStepsTool,
   todoAddStepTool,
   todoUpdateStepTool,
@@ -32,6 +34,7 @@ export const TODO_TOOLS: readonly AnyTool[] = [
   todoUpdateTool,
   todoCompleteTool,
   todoDeleteTool,
+  todoSelectListTool,
   todoStepsTool,
   todoAddStepTool,
   todoUpdateStepTool,

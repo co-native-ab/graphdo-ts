@@ -261,7 +261,7 @@ describe("integration: todo", () => {
     });
 
     it("refreshes option list when refresh is triggered", async () => {
-      // Exercises the refreshOptions callback in src/tools/config.ts.
+      // Exercises the refreshOptions callback in src/tools/todo/todo-select-list.ts.
       const originalLists = env.graphState.todoLists;
       env.graphState.todoLists = [{ id: "list-1", displayName: "My Tasks" }];
 
