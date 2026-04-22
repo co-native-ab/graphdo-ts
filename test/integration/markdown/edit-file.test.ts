@@ -94,6 +94,7 @@ describe("integration: markdown — markdown_edit", () => {
         cTag?: string;
         sizeBytes?: number;
         editsApplied?: number;
+        diff?: string;
       } {
         return (
           (r as ToolResult & { structuredContent?: Record<string, unknown> }).structuredContent ??
@@ -134,6 +135,12 @@ describe("integration: markdown — markdown_edit", () => {
         expect(sc.cTag!.length).toBeGreaterThan(0);
         expect(sc.editsApplied).toBe(1);
         expect(sc.sizeBytes).toBe(Buffer.byteLength(file!.content!, "utf-8"));
+        // Unified diff is mirrored into structuredContent so MCP clients
+        // that prioritise structuredContent over text content still
+        // surface the diff to the agent.
+        expect(typeof sc.diff).toBe("string");
+        expect(sc.diff).toContain("-first paragraph");
+        expect(sc.diff).toContain("+FIRST paragraph");
       });
 
       it("applies multiple edits sequentially against the evolving content", async () => {
@@ -360,6 +367,11 @@ describe("integration: markdown — markdown_edit", () => {
         expect(sc.itemId).toBe("file-md-1");
         expect(sc.cTag).toBeUndefined();
         expect(sc.editsApplied).toBe(1);
+        // Diff is mirrored into structuredContent on dry_run too — the
+        // whole point of dry_run is to preview the change.
+        expect(typeof sc.diff).toBe("string");
+        expect(sc.diff).toContain("-hello world");
+        expect(sc.diff).toContain("+HELLO WORLD");
 
         // Nothing was persisted.
         const files = env.graphState.driveFolderChildren.get("folder-1") ?? [];

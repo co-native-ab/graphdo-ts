@@ -326,6 +326,7 @@ Edits applied: <n>
   cTag?: string,        // omitted on dry_run
   sizeBytes: number,
   editsApplied: number,
+  diff: string,         // unified diff, same content as the text body
 }
 ```
 
@@ -335,6 +336,13 @@ happened, the cTag the agent already holds is still valid). Everything
 present in `structuredContent` is also present in the text body — the
 text body is authoritative for humans, and `structuredContent` exists
 only to spare the agent a regex pass over the header for chained calls.
+The unified diff is **mirrored into `structuredContent.diff`** so MCP
+clients that prioritise `structuredContent` over the text content body
+(common when an `outputSchema` is declared) still surface the diff to
+the agent and the user without forcing a follow-up
+`markdown_diff_file_versions` round trip. The text body remains the
+authoritative human-readable surface; `structuredContent.diff` is a
+verbatim mirror, not a second source of truth.
 
 **Rationale.**
 

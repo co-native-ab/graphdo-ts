@@ -95,6 +95,11 @@ const outputSchema = {
   cTag: z.string().optional(),
   sizeBytes: z.number().int().nonnegative(),
   editsApplied: z.number().int().nonnegative(),
+  // Unified diff (tight context) of the applied edits. Mirrored into
+  // structuredContent so MCP clients that prioritise structuredContent
+  // over the text content body still surface the diff to the agent and
+  // user without an extra round trip. ADR-0006 decision 9.
+  diff: z.string(),
 };
 
 const def: ToolDef = {
@@ -301,6 +306,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
             itemId: liveItem.id,
             sizeBytes,
             editsApplied,
+            diff: patch,
           },
         };
       }
@@ -337,6 +343,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
           cTag: updated.cTag,
           sizeBytes,
           editsApplied,
+          diff: patch,
         },
       };
     } catch (err: unknown) {
