@@ -2,7 +2,8 @@
 
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   downloadMarkdownContent,
@@ -28,15 +29,14 @@ const def: ToolDef = {
   name: "markdown_get_file",
   title: "Get Markdown File",
   description:
-    "Read a markdown file from the signed-in user's OneDrive (the configured " +
-    "root folder). Accepts either a file ID (from markdown_list_files) or a " +
-    "file name. File names must follow the strict naming rules and are " +
-    "rejected otherwise - paths, subdirectories, and characters that are " +
-    "not portable across Linux, macOS, and Windows are not allowed. Returns " +
-    "the current UTF-8 content of the file along with its cTag (OneDrive's " +
-    "content-only entity tag), which markdown_update_file requires for safe " +
-    "optimistic concurrency. Files larger than 4 MiB cannot be downloaded " +
-    "and will return an error " +
+    "Read a markdown file from the configured workspace. Accepts either a " +
+    "file ID (from markdown_list_files) or a file name. File names must " +
+    "follow the strict naming rules and are rejected otherwise - paths, " +
+    "subdirectories, and characters that are not portable across Linux, " +
+    "macOS, and Windows are not allowed. Returns the current UTF-8 content " +
+    "of the file along with its cTag (OneDrive's content-only entity tag), " +
+    "which markdown_update_file requires for safe optimistic concurrency. " +
+    "Files larger than 4 MiB cannot be downloaded and will return an error " +
     `(${MARKDOWN_SIZE_CAP_NOTE}). ` +
     "To read a previous version, use markdown_get_file_version. " +
     MARKDOWN_FILE_NAME_RULES,
@@ -53,9 +53,15 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       // Enforce naming rules against the resolved item too. This catches
       // cases where a caller supplied an itemId whose remote name is
@@ -67,7 +73,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory, which is not supported. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -87,8 +93,8 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       }
 
       const itemId = validateGraphId("item.id", item.id);
-      const content = await downloadMarkdownContent(client, itemId, signal);
-      const revision = await resolveCurrentRevision(client, item, signal);
+      const content = await downloadMarkdownContent(client, scope, itemId, signal);
+      const revision = await resolveCurrentRevision(client, scope, item, signal);
 
       const header =
         `${item.name} (${item.id})\n` +

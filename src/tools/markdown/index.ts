@@ -11,11 +11,11 @@ import { markdownGetFileVersionTool } from "./get-version.js";
 import { markdownListFilesTool } from "./list-files.js";
 import { markdownListFileVersionsTool } from "./list-versions.js";
 import { markdownPreviewFileTool } from "./preview-file.js";
-import { markdownSelectRootFolderTool } from "./select-root-folder.js";
+import { markdownSelectWorkspaceTool } from "./select-workspace.js";
 import { markdownUpdateFileTool } from "./update-file.js";
 
 export {
-  markdownSelectRootFolderTool,
+  markdownSelectWorkspaceTool,
   markdownListFilesTool,
   markdownGetFileTool,
   markdownCreateFileTool,
@@ -30,7 +30,7 @@ export {
 };
 
 export const MARKDOWN_TOOLS: readonly AnyTool[] = [
-  markdownSelectRootFolderTool,
+  markdownSelectWorkspaceTool,
   markdownListFilesTool,
   markdownGetFileTool,
   markdownCreateFileTool,

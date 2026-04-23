@@ -44,10 +44,12 @@ describe("integration: markdown — markdown_get_file", () => {
       configDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-"));
       await saveConfig(
         {
-          markdown: {
-            rootFolderId: "folder-1",
-            rootFolderName: "Notes",
-            rootFolderPath: "/Notes",
+          workspace: {
+            driveId: "me",
+            itemId: "folder-1",
+            driveName: "OneDrive",
+            itemName: "Notes",
+            itemPath: "/Notes",
           },
         },
         configDir,

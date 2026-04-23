@@ -77,11 +77,12 @@ export type Config = Omit<SnakeToCamelDeep<CurrentConfigFile>, "configVersion"> 
 export type TodoConfig = NonNullable<Config["todo"]>;
 
 /**
- * Derived alias for the `markdown` subsystem object. Kept as a named
- * export so existing imports keep working; its shape now follows whatever
- * the current on-disk schema declares for `markdown`.
+ * Derived alias for the `workspace` subsystem object. Kept as a named
+ * export so callers can reference it without spelling out the full
+ * derived shape; tracks whatever the current on-disk schema declares
+ * for `workspace`.
  */
-export type MarkdownConfig = NonNullable<Config["markdown"]>;
+export type WorkspaceConfig = NonNullable<Config["workspace"]>;
 
 // ---------------------------------------------------------------------------
 // On-disk versioning
@@ -114,7 +115,7 @@ export type MarkdownConfig = NonNullable<Config["markdown"]>;
 // ---------------------------------------------------------------------------
 
 /** Current on-disk config schema version. */
-export const CURRENT_CONFIG_VERSION = 2;
+export const CURRENT_CONFIG_VERSION = 3;
 
 /**
  * Public, version-pinned URL of the JSON Schema describing the current
@@ -264,6 +265,97 @@ interface Migration {
 }
 
 /**
+ * v3 — same shape as v2 except `markdown` is replaced by `workspace`, which
+ * generalises the persisted folder selection to "any drive item on any drive
+ * the user can reach". The current build only ever writes `drive_id: "me"`
+ * (the user's own OneDrive) — the field exists today as a forward-compatible
+ * sentinel so a future build can address shared drives or SharePoint
+ * document libraries without another schema bump.
+ *
+ * The on-disk shape mirrors v2 by keeping per-subsystem nesting and
+ * snake_case keys, so the in-memory `Config` derived from it is
+ * `{ workspace: { driveId, itemId, driveName, itemName, itemPath? } }`.
+ *
+ * Generated to `schemas/config-v3.json` by `scripts/generate-schemas.ts`.
+ */
+export const ConfigFileSchemaV3 = z
+  .object({
+    config_version: z
+      .literal(3)
+      .describe(
+        "On-disk schema version discriminator. Files with a higher value than the running build supports are rejected (never silently downgraded).",
+      ),
+    todo: z
+      .object({
+        list_id: z
+          .string()
+          .min(1)
+          .describe(
+            "Microsoft Graph todoTaskList id. Opaque token: must not contain `/`, `\\`, or whitespace.",
+          )
+          .optional(),
+        list_name: z
+          .string()
+          .min(1)
+          .describe(
+            "Display name of the selected list. Cached so `auth_status` can show it without an extra Graph round-trip.",
+          )
+          .optional(),
+      })
+      .strip()
+      .describe("Selection persisted by the `todo_select_list` tool.")
+      .optional(),
+    workspace: z
+      .object({
+        drive_id: z
+          .string()
+          .min(1)
+          .describe(
+            "Microsoft Graph drive id of the workspace's drive. The literal `me` is reserved for the signed-in user's own OneDrive (`/me/drive`); any other value is treated as an opaque drive id (`/drives/{drive_id}`). Opaque tokens must not contain `/`, `\\`, or whitespace, and must not equal `/`.",
+          )
+          .optional(),
+        item_id: z
+          .string()
+          .min(1)
+          .describe(
+            "Microsoft Graph driveItem id of the workspace folder. Opaque token: must not equal `/`, contain `/`, `\\`, or whitespace.",
+          )
+          .optional(),
+        drive_name: z
+          .string()
+          .min(1)
+          .describe(
+            "Display name of the drive containing the workspace (e.g. `OneDrive`). Cached so `auth_status` can show it without an extra Graph round-trip.",
+          )
+          .optional(),
+        item_name: z
+          .string()
+          .min(1)
+          .describe(
+            "Display name of the workspace folder. Cached for the same reason as drive_name.",
+          )
+          .optional(),
+        item_path: z
+          .string()
+          .min(1)
+          .describe(
+            "Display-only path of the workspace folder within its drive (e.g. `/Notes`). Never used to address the folder; the `item_id` is the source of truth.",
+          )
+          .optional(),
+      })
+      .strip()
+      .describe("Selection persisted by the `markdown_select_workspace` tool.")
+      .optional(),
+  })
+  .strip()
+  .meta({
+    $id: configSchemaUrl(3),
+    title: "graphdo-ts config (v3)",
+    description:
+      "Versioned snake_case on-disk shape of `config.json`. Replaces v2's `markdown` subsystem with the generalised `workspace` subsystem (drive id + item id) so the persisted folder can address any drive the user can reach. The current build only writes `drive_id: \"me\"` (the user's own OneDrive); the field exists as a forward-compatible sentinel. Generated from the Zod source of truth in `src/config.ts` by `scripts/generate-schemas.ts`; do not edit by hand.",
+  });
+
+/**
  * Ordered list of migrations. Each entry takes the validated output of
  * version `from` and produces input that must validate against version
  * `to`'s schema. Migrations are pure: no I/O, no clocks, no Graph calls.
@@ -293,6 +385,35 @@ const MIGRATIONS: readonly Migration[] = [
       return out;
     },
   },
+  {
+    from: 2,
+    to: 3,
+    migrate: (input) => {
+      // Input is validated against ConfigFileSchemaV2.
+      const v2 = input as z.infer<typeof ConfigFileSchemaV2>;
+      const out: Record<string, unknown> = { config_version: 3 };
+      if (v2.todo !== undefined) out["todo"] = v2.todo;
+      if (v2.markdown?.root_folder_id !== undefined) {
+        // Map the legacy single-folder selection on the user's own OneDrive to
+        // the new workspace shape. We use the `"me"` drive_id sentinel rather
+        // than calling Graph (`/me/drive`) because migrations are pure (no
+        // I/O); the drive's real id is resolved at first use. The display-only
+        // `root_folder_path` is intentionally dropped — it was never used to
+        // address the folder, and the next picker run will repopulate the
+        // equivalent `item_path`.
+        const ws: Record<string, unknown> = {
+          drive_id: "me",
+          item_id: v2.markdown.root_folder_id,
+          drive_name: "OneDrive",
+        };
+        if (v2.markdown.root_folder_name !== undefined) {
+          ws["item_name"] = v2.markdown.root_folder_name;
+        }
+        out["workspace"] = ws;
+      }
+      return out;
+    },
+  },
 ];
 
 /**
@@ -304,6 +425,7 @@ const MIGRATIONS: readonly Migration[] = [
 export const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
   1: ConfigFileSchemaV1,
   2: ConfigFileSchemaV2,
+  3: ConfigFileSchemaV3,
 };
 
 /**
@@ -324,7 +446,7 @@ export const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
  * **When bumping to vN+1, this is the only line that needs retargeting**
  * (in addition to defining the new schema and adding it to `SCHEMAS`).
  */
-export const CurrentConfigSchema = SCHEMAS[CURRENT_CONFIG_VERSION] as typeof ConfigFileSchemaV2;
+export const CurrentConfigSchema = SCHEMAS[CURRENT_CONFIG_VERSION] as typeof ConfigFileSchemaV3;
 
 /**
  * Inferred TypeScript type for the current on-disk schema. Used as the
@@ -392,14 +514,14 @@ function toInMemory(file: CurrentConfigFile): Config {
     if (file.todo.list_name !== undefined) todo.listName = file.todo.list_name;
     out.todo = todo;
   }
-  if (file.markdown !== undefined) {
-    const md: MarkdownConfig = {};
-    if (file.markdown.root_folder_id !== undefined) md.rootFolderId = file.markdown.root_folder_id;
-    if (file.markdown.root_folder_name !== undefined)
-      md.rootFolderName = file.markdown.root_folder_name;
-    if (file.markdown.root_folder_path !== undefined)
-      md.rootFolderPath = file.markdown.root_folder_path;
-    out.markdown = md;
+  if (file.workspace !== undefined) {
+    const ws: WorkspaceConfig = {};
+    if (file.workspace.drive_id !== undefined) ws.driveId = file.workspace.drive_id;
+    if (file.workspace.item_id !== undefined) ws.itemId = file.workspace.item_id;
+    if (file.workspace.drive_name !== undefined) ws.driveName = file.workspace.drive_name;
+    if (file.workspace.item_name !== undefined) ws.itemName = file.workspace.item_name;
+    if (file.workspace.item_path !== undefined) ws.itemPath = file.workspace.item_path;
+    out.workspace = ws;
   }
   return out;
 }
@@ -416,13 +538,12 @@ function serialiseConfigFile(config: Config): Record<string, unknown> {
   if (config.todo?.listId !== undefined) todo["list_id"] = config.todo.listId;
   if (config.todo?.listName !== undefined) todo["list_name"] = config.todo.listName;
 
-  const md: Record<string, string> = {};
-  if (config.markdown?.rootFolderId !== undefined)
-    md["root_folder_id"] = config.markdown.rootFolderId;
-  if (config.markdown?.rootFolderName !== undefined)
-    md["root_folder_name"] = config.markdown.rootFolderName;
-  if (config.markdown?.rootFolderPath !== undefined)
-    md["root_folder_path"] = config.markdown.rootFolderPath;
+  const ws: Record<string, string> = {};
+  if (config.workspace?.driveId !== undefined) ws["drive_id"] = config.workspace.driveId;
+  if (config.workspace?.itemId !== undefined) ws["item_id"] = config.workspace.itemId;
+  if (config.workspace?.driveName !== undefined) ws["drive_name"] = config.workspace.driveName;
+  if (config.workspace?.itemName !== undefined) ws["item_name"] = config.workspace.itemName;
+  if (config.workspace?.itemPath !== undefined) ws["item_path"] = config.workspace.itemPath;
 
   // Re-validate the snake_case payload so we can never silently write
   // malformed data. `$schema` is not part of the Zod schema (it's
@@ -430,7 +551,7 @@ function serialiseConfigFile(config: Config): Record<string, unknown> {
   // string constant under our control, so that's fine.
   const validated = CurrentConfigSchema.parse({
     config_version: CURRENT_CONFIG_VERSION,
-    ...(Object.keys(md).length > 0 ? { markdown: md } : {}),
+    ...(Object.keys(ws).length > 0 ? { workspace: ws } : {}),
     ...(Object.keys(todo).length > 0 ? { todo: todo } : {}),
   });
 
@@ -443,8 +564,8 @@ function serialiseConfigFile(config: Config): Record<string, unknown> {
   const ordered: Record<string, unknown> = {};
   ordered["$schema"] = CONFIG_SCHEMA_URL;
   ordered["config_version"] = validated.config_version;
-  if (validated.markdown !== undefined) ordered["markdown"] = sortKeys(validated.markdown);
   if (validated.todo !== undefined) ordered["todo"] = sortKeys(validated.todo);
+  if (validated.workspace !== undefined) ordered["workspace"] = sortKeys(validated.workspace);
   return ordered;
 }
 
@@ -639,41 +760,67 @@ export function hasTodoConfig(
 }
 
 /**
- * Validate that a value is a well-formed markdown root folder ID.
+ * Validate that a value is a well-formed workspace item ID.
  *
- * The root folder must always be a single existing top-level folder in the
- * user's OneDrive. A valid drive item ID is an opaque token — it never
+ * The workspace item must always be a single existing folder on the
+ * configured drive. A valid drive item ID is an opaque token — it never
  * contains path separators, whitespace, or the literal `/`. Rejecting
  * anything else here is a last line of defence against a hand-edited or
- * corrupted `config.json` silently turning "the configured root" into
+ * corrupted `config.json` silently turning "the configured workspace" into
  * "the drive root" or a subdirectory.
  *
  * Returns `null` when valid, or a short reason string when invalid.
  */
-export function markdownRootFolderIdError(rootFolderId: unknown): string | null {
-  if (typeof rootFolderId !== "string") return "missing";
-  if (rootFolderId.length === 0) return "empty";
-  if (rootFolderId === "/" || rootFolderId === "\\") return "set to the drive root";
-  if (rootFolderId.includes("/") || rootFolderId.includes("\\")) {
+export function workspaceItemIdError(itemId: unknown): string | null {
+  if (typeof itemId !== "string") return "missing";
+  if (itemId.length === 0) return "empty";
+  if (itemId === "/" || itemId === "\\") return "set to the drive root";
+  if (itemId.includes("/") || itemId.includes("\\")) {
     return "contains a path separator (subdirectories are not supported)";
   }
-  if (/\s/.test(rootFolderId)) return "contains whitespace";
+  if (/\s/.test(itemId)) return "contains whitespace";
   return null;
 }
 
 /**
- * Type guard that checks whether a loaded config has a markdown root folder set.
+ * Validate that a value is a well-formed workspace drive ID.
  *
- * A root folder ID that is missing, empty, equal to `/`, or contains path
- * separators is treated as _not configured_ — tools that rely on it will
- * fail with a user-friendly error directing the user to re-run the picker.
+ * The literal `"me"` is reserved for the signed-in user's own OneDrive
+ * (resolved against `/me/drive` at runtime); any other value must be an
+ * opaque Graph drive id (no path separators, no whitespace, not `/`).
+ * Rejecting anything else here is a defence against a hand-edited
+ * `config.json` smuggling a subpath into a drive URL.
+ *
+ * Returns `null` when valid, or a short reason string when invalid.
  */
-export function hasMarkdownConfig(
-  config: Config | null,
-): config is Config & { markdown: { rootFolderId: string } & MarkdownConfig } {
+export function workspaceDriveIdError(driveId: unknown): string | null {
+  if (typeof driveId !== "string") return "missing";
+  if (driveId.length === 0) return "empty";
+  if (driveId === "me") return null;
+  if (driveId === "/" || driveId === "\\") return "set to the drive root";
+  if (driveId.includes("/") || driveId.includes("\\")) {
+    return "contains a path separator";
+  }
+  if (/\s/.test(driveId)) return "contains whitespace";
+  return null;
+}
+
+/**
+ * Type guard that checks whether a loaded config has a workspace configured.
+ *
+ * Both the drive id and the item id must be set and pass their respective
+ * validators. A workspace whose values are missing, empty, equal to `/`, or
+ * contain path separators is treated as _not configured_ — tools that rely on
+ * it will fail with a user-friendly error directing the user to re-run the
+ * picker.
+ */
+export function hasWorkspaceConfig(config: Config | null): config is Config & {
+  workspace: { driveId: string; itemId: string } & WorkspaceConfig;
+} {
   if (config === null) return false;
-  const rootFolderId = config.markdown?.rootFolderId;
-  return markdownRootFolderIdError(rootFolderId) === null;
+  const driveId = config.workspace?.driveId;
+  const itemId = config.workspace?.itemId;
+  return workspaceDriveIdError(driveId) === null && workspaceItemIdError(itemId) === null;
 }
 
 /**
@@ -711,51 +858,67 @@ export async function loadAndValidateTodoConfig(
 }
 
 /**
- * Loads config from disk and validates that a markdown root folder is configured.
+ * Loads config from disk and validates that a workspace is configured.
  * Throws a user-friendly error if missing or invalid (e.g. empty, `/`, or
  * containing path separators — in which case the user is directed to re-run
- * the picker, which always writes a single-folder opaque ID).
+ * the picker, which always writes a single-folder opaque ID and a valid
+ * drive id).
  *
- * Re-types `markdown.rootFolderId` as {@link ValidatedGraphId} so callers
- * can pass it straight into Graph helpers without re-validating. A
- * persisted value that fails {@link validateGraphId} (a hand-edited
- * config.json) raises the same "use the picker" error as the missing
- * case, rather than splicing into a Graph URL downstream.
+ * Re-types `workspace.itemId` as {@link ValidatedGraphId} so callers can
+ * pass it straight into Graph helpers without re-validating. The
+ * `workspace.driveId` is returned as either the literal `"me"` (sentinel
+ * for the signed-in user's own OneDrive — call sites map it to a
+ * `DriveScope { kind: "me" }`) or a `ValidatedGraphId`. A persisted value
+ * that fails validation (a hand-edited `config.json`) raises the same
+ * "use the picker" error as the missing case, rather than splicing into a
+ * Graph URL downstream.
  */
-export async function loadAndValidateMarkdownConfig(
+export async function loadAndValidateWorkspaceConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { markdown: { rootFolderId: ValidatedGraphId } & MarkdownConfig }> {
+): Promise<
+  Config & {
+    workspace: { driveId: "me" | ValidatedGraphId; itemId: ValidatedGraphId } & WorkspaceConfig;
+  }
+> {
   const config = await loadConfig(dir, signal);
-  const rootFolderId = config?.markdown?.rootFolderId;
-  const err = markdownRootFolderIdError(rootFolderId);
-  if (err !== null || !hasMarkdownConfig(config)) {
+  const driveId = config?.workspace?.driveId;
+  const itemId = config?.workspace?.itemId;
+  const driveErr = workspaceDriveIdError(driveId);
+  const itemErr = workspaceItemIdError(itemId);
+  if (driveErr !== null || itemErr !== null || !hasWorkspaceConfig(config)) {
+    const err = driveErr ?? itemErr;
     const detail =
       err === "missing"
         ? "not configured"
-        : `invalid (${err ?? "not configured"}) — only a single OneDrive folder is allowed, never the drive root or a subdirectory`;
+        : `invalid (${err ?? "not configured"}) — only a single drive folder is allowed, never the drive root or a subdirectory`;
     throw new Error(
-      `markdown root folder ${detail} - use the markdown_select_root_folder tool to choose one`,
+      `markdown workspace ${detail} - use the markdown_select_workspace tool to choose one`,
     );
   }
-  let validatedRootId: ValidatedGraphId;
+  let validatedDriveId: "me" | ValidatedGraphId;
+  let validatedItemId: ValidatedGraphId;
   try {
-    validatedRootId = validateGraphId("markdown.rootFolderId", config.markdown.rootFolderId);
+    validatedDriveId =
+      config.workspace.driveId === "me"
+        ? "me"
+        : validateGraphId("workspace.driveId", config.workspace.driveId);
+    validatedItemId = validateGraphId("workspace.itemId", config.workspace.itemId);
   } catch (cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `markdown root folder is corrupted (${reason}) - use the markdown_select_root_folder tool to re-select one`,
+      `markdown workspace is corrupted (${reason}) - use the markdown_select_workspace tool to re-select one`,
     );
   }
   return {
     ...config,
-    markdown: { ...config.markdown, rootFolderId: validatedRootId },
+    workspace: { ...config.workspace, driveId: validatedDriveId, itemId: validatedItemId },
   };
 }
 
 /**
  * Load the current config, apply a partial update, and save. Preserves fields
- * for other subsystems (e.g. saving markdown config does not wipe todo config).
+ * for other subsystems (e.g. saving workspace config does not wipe todo config).
  */
 export async function updateConfig(
   partial: Partial<Config>,
@@ -768,10 +931,10 @@ export async function updateConfig(
     ...partial,
     todo:
       partial.todo !== undefined ? { ...(existing.todo ?? {}), ...partial.todo } : existing.todo,
-    markdown:
-      partial.markdown !== undefined
-        ? { ...(existing.markdown ?? {}), ...partial.markdown }
-        : existing.markdown,
+    workspace:
+      partial.workspace !== undefined
+        ? { ...(existing.workspace ?? {}), ...partial.workspace }
+        : existing.workspace,
   };
   await saveConfig(merged, dir, signal);
   return merged;

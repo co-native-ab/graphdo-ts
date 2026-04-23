@@ -14,6 +14,13 @@ import {
 import type { GraphClient } from "./client.js";
 import { GraphRequestError, HttpMethod, parseResponse } from "./client.js";
 import { validateGraphId, type ValidatedGraphId } from "./ids.js";
+import {
+  driveItemPath,
+  driveMetadataPath,
+  driveRootChildrenPath,
+  meDriveScope,
+  type DriveScope,
+} from "./drives.js";
 import { logger } from "../logger.js";
 
 /**
@@ -252,27 +259,42 @@ export type MarkdownFolderEntry =
  */
 export async function listRootFolders(
   client: GraphClient,
+  scope: DriveScope,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  logger.debug("listing onedrive root folders");
-  const items = await listAllPages(client, "/me/drive/root/children?$top=200", signal);
+  logger.debug("listing drive root folders", { scope: scope.kind });
+  const items = await listAllPages(client, driveRootChildrenPath(scope, "?$top=200"), signal);
   return items.filter((item) => item.folder !== undefined);
 }
 
 /**
- * Fetch the user's default drive metadata (`GET /me/drive`).
+ * Fetch a drive's metadata (`GET /me/drive` or `GET /drives/{driveId}`).
  *
  * Exposes the drive's user-facing `webUrl` so the picker can deep-link the
- * user to _their own_ OneDrive UI (which may be a personal account, a
+ * user to their _own_ drive UI (which may be a personal account, a
  * business / GCC / sovereign-cloud tenant, etc.) rather than a hardcoded
  * `onedrive.live.com` URL that is wrong for work accounts. See
  * https://learn.microsoft.com/en-us/graph/api/drive-get.
  */
-export async function getMyDrive(client: GraphClient, signal: AbortSignal): Promise<Drive> {
-  logger.debug("getting /me/drive");
-  const path = "/me/drive";
+export async function getDrive(
+  client: GraphClient,
+  scope: DriveScope,
+  signal: AbortSignal,
+): Promise<Drive> {
+  logger.debug("getting drive metadata", { scope: scope.kind });
+  const path = driveMetadataPath(scope);
   const response = await client.request(HttpMethod.GET, path, signal);
   return parseResponse(response, DriveSchema, HttpMethod.GET, path);
+}
+
+/**
+ * Convenience alias for `getDrive(client, meDriveScope, signal)`. Kept as a
+ * named export so call sites that only ever look at the user's own drive
+ * (e.g. the workspace picker's "Create new folder" link) don't have to
+ * construct a `DriveScope`.
+ */
+export async function getMyDrive(client: GraphClient, signal: AbortSignal): Promise<Drive> {
+  return getDrive(client, meDriveScope, signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,14 +390,11 @@ export function buildMarkdownPreviewUrl(drive: Drive, item: DriveItem): string {
 /** Fetch all immediate children of the configured folder, unfiltered. */
 async function listFolderChildren(
   client: GraphClient,
+  scope: DriveScope,
   folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  return listAllPages(
-    client,
-    `/me/drive/items/${encodeURIComponent(folderId)}/children?$top=200`,
-    signal,
-  );
+  return listAllPages(client, driveItemPath(scope, folderId, "/children?$top=200"), signal);
 }
 
 /**
@@ -453,11 +472,12 @@ function extractNextPath(nextLink: unknown): string | null {
  */
 export async function listMarkdownFolderEntries(
   client: GraphClient,
+  scope: DriveScope,
   folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<MarkdownFolderEntry[]> {
-  logger.debug("listing markdown folder entries", { folderId });
-  const children = await listFolderChildren(client, folderId, signal);
+  logger.debug("listing markdown folder entries", { scope: scope.kind, folderId });
+  const children = await listFolderChildren(client, scope, folderId, signal);
   const entries: MarkdownFolderEntry[] = [];
 
   for (const item of children) {
@@ -500,10 +520,11 @@ export async function listMarkdownFolderEntries(
  */
 export async function listMarkdownFiles(
   client: GraphClient,
+  scope: DriveScope,
   folderId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem[]> {
-  const entries = await listMarkdownFolderEntries(client, folderId, signal);
+  const entries = await listMarkdownFolderEntries(client, scope, folderId, signal);
   return entries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported).map((e) => e.item);
 }
 
@@ -516,13 +537,14 @@ export async function listMarkdownFiles(
  */
 export async function findMarkdownFileByName(
   client: GraphClient,
+  scope: DriveScope,
   folderId: ValidatedGraphId,
   name: string,
   signal: AbortSignal,
 ): Promise<DriveItem | null> {
   assertValidMarkdownFileName(name);
 
-  const files = await listMarkdownFiles(client, folderId, signal);
+  const files = await listMarkdownFiles(client, scope, folderId, signal);
   const lower = name.toLowerCase();
   return files.find((f) => f.name.toLowerCase() === lower) ?? null;
 }
@@ -530,12 +552,13 @@ export async function findMarkdownFileByName(
 /** Fetch a drive item's metadata (without downloading content). */
 export async function getDriveItem(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItem> {
-  logger.debug("getting drive item", { itemId });
+  logger.debug("getting drive item", { scope: scope.kind, itemId });
 
-  const path = `/me/drive/items/${encodeURIComponent(itemId)}`;
+  const path = driveItemPath(scope, itemId);
   const response = await client.request(HttpMethod.GET, path, signal);
   return parseResponse(response, DriveItemSchema, HttpMethod.GET, path);
 }
@@ -573,16 +596,17 @@ export class MarkdownFileTooLargeError extends Error {
  */
 export async function downloadMarkdownContentWithItem(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<{ item: DriveItem; content: string }> {
-  const item = await getDriveItem(client, itemId, signal);
+  const item = await getDriveItem(client, scope, itemId, signal);
   if (item.size !== undefined && item.size > MAX_DIRECT_CONTENT_BYTES) {
     throw new MarkdownFileTooLargeError(item.size, MAX_DIRECT_CONTENT_BYTES);
   }
 
-  const path = `/me/drive/items/${encodeURIComponent(itemId)}/content`;
-  logger.debug("downloading markdown content", { itemId });
+  const path = driveItemPath(scope, itemId, "/content");
+  logger.debug("downloading markdown content", { scope: scope.kind, itemId });
   const response = await client.request(HttpMethod.GET, path, signal);
   const buf = Buffer.from(await response.arrayBuffer());
   if (buf.byteLength > MAX_DIRECT_CONTENT_BYTES) {
@@ -598,10 +622,11 @@ export async function downloadMarkdownContentWithItem(
  */
 export async function downloadMarkdownContent(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<string> {
-  const { content } = await downloadMarkdownContentWithItem(client, itemId, signal);
+  const { content } = await downloadMarkdownContentWithItem(client, scope, itemId, signal);
   return content;
 }
 
@@ -657,6 +682,7 @@ export class MarkdownCTagMismatchError extends Error {
  */
 export async function createMarkdownFile(
   client: GraphClient,
+  scope: DriveScope,
   folderId: ValidatedGraphId,
   fileName: string,
   content: string,
@@ -669,11 +695,12 @@ export async function createMarkdownFile(
     throw new MarkdownFileTooLargeError(bytes, MAX_DIRECT_CONTENT_BYTES);
   }
 
-  const path =
-    `/me/drive/items/${encodeURIComponent(folderId)}:/` +
-    `${encodeURIComponent(fileName)}:/content` +
-    `?@microsoft.graph.conflictBehavior=fail`;
-  logger.debug("creating markdown file", { folderId, fileName, bytes });
+  const path = driveItemPath(
+    scope,
+    folderId,
+    `:/${encodeURIComponent(fileName)}:/content?@microsoft.graph.conflictBehavior=fail`,
+  );
+  logger.debug("creating markdown file", { scope: scope.kind, folderId, fileName, bytes });
 
   let response: Response;
   try {
@@ -704,6 +731,7 @@ export async function createMarkdownFile(
  */
 export async function updateMarkdownFile(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   cTag: string,
   content: string,
@@ -716,8 +744,8 @@ export async function updateMarkdownFile(
     throw new MarkdownFileTooLargeError(bytes, MAX_DIRECT_CONTENT_BYTES);
   }
 
-  const path = `/me/drive/items/${encodeURIComponent(itemId)}/content`;
-  logger.debug("updating markdown file", { itemId, bytes });
+  const path = driveItemPath(scope, itemId, "/content");
+  logger.debug("updating markdown file", { scope: scope.kind, itemId, bytes });
 
   let response: Response;
   try {
@@ -728,7 +756,7 @@ export async function updateMarkdownFile(
     if (err instanceof GraphRequestError && err.statusCode === 412) {
       // Fetch the latest item so callers can show the agent the current cTag /
       // size / timestamp and explain how to reconcile.
-      const current = await getDriveItem(client, itemId, signal);
+      const current = await getDriveItem(client, scope, itemId, signal);
       throw new MarkdownCTagMismatchError(itemId, cTag, current);
     }
     throw err;
@@ -739,11 +767,12 @@ export async function updateMarkdownFile(
 /** Permanently delete a drive item. */
 export async function deleteDriveItem(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<void> {
-  logger.debug("deleting drive item", { itemId });
-  await client.request(HttpMethod.DELETE, `/me/drive/items/${encodeURIComponent(itemId)}`, signal);
+  logger.debug("deleting drive item", { scope: scope.kind, itemId });
+  await client.request(HttpMethod.DELETE, driveItemPath(scope, itemId), signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -762,12 +791,13 @@ export async function deleteDriveItem(
  */
 export async function listDriveItemVersions(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<DriveItemVersion[]> {
-  logger.debug("listing drive item versions", { itemId });
+  logger.debug("listing drive item versions", { scope: scope.kind, itemId });
 
-  const path = `/me/drive/items/${encodeURIComponent(itemId)}/versions`;
+  const path = driveItemPath(scope, itemId, "/versions");
   const response = await client.request(HttpMethod.GET, path, signal);
   const data = await parseResponse(
     response,
@@ -797,6 +827,7 @@ export async function listDriveItemVersions(
  */
 export async function resolveCurrentRevision(
   client: GraphClient,
+  scope: DriveScope,
   item: DriveItem,
   signal: AbortSignal,
 ): Promise<string | undefined> {
@@ -807,7 +838,7 @@ export async function resolveCurrentRevision(
   // malformed value through encodeURIComponent).
   const itemId = validateGraphId("item.id", item.id);
   try {
-    const history = await listDriveItemVersions(client, itemId, signal);
+    const history = await listDriveItemVersions(client, scope, itemId, signal);
     return history[0]?.id;
   } catch (err: unknown) {
     if (signal.aborted) throw err;
@@ -830,14 +861,13 @@ export async function resolveCurrentRevision(
  */
 export async function downloadDriveItemVersionContent(
   client: GraphClient,
+  scope: DriveScope,
   itemId: ValidatedGraphId,
   versionId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<string> {
-  const path =
-    `/me/drive/items/${encodeURIComponent(itemId)}` +
-    `/versions/${encodeURIComponent(versionId)}/content`;
-  logger.debug("downloading drive item version content", { itemId, versionId });
+  const path = driveItemPath(scope, itemId, `/versions/${encodeURIComponent(versionId)}/content`);
+  logger.debug("downloading drive item version content", { scope: scope.kind, itemId, versionId });
 
   const response = await client.request(HttpMethod.GET, path, signal);
   const buf = Buffer.from(await response.arrayBuffer());
@@ -887,6 +917,7 @@ export interface RevisionContent {
  */
 export async function getRevisionContent(
   client: GraphClient,
+  scope: DriveScope,
   item: DriveItem,
   versionId: ValidatedGraphId,
   signal: AbortSignal,
@@ -897,11 +928,11 @@ export async function getRevisionContent(
   // our mock and many real OneDrive responses the field is omitted, in
   // which case we fall through to the /versions-driven lookup below).
   if (item.version === versionId) {
-    const content = await downloadMarkdownContent(client, itemIdValidated, signal);
+    const content = await downloadMarkdownContent(client, scope, itemIdValidated, signal);
     return { content, isCurrent: true };
   }
 
-  const history = await listDriveItemVersions(client, itemIdValidated, signal);
+  const history = await listDriveItemVersions(client, scope, itemIdValidated, signal);
 
   // The versions list is returned newest-first. OneDrive includes the current
   // version as the first entry but rejects GET /versions/{id}/content for it
@@ -909,7 +940,7 @@ export async function getRevisionContent(
   // version"). When item.version is unavailable (real OneDrive does not always
   // surface it), detect the current version by its position at history[0].
   if (history[0]?.id === versionId) {
-    const content = await downloadMarkdownContent(client, itemIdValidated, signal);
+    const content = await downloadMarkdownContent(client, scope, itemIdValidated, signal);
     return { content, isCurrent: true };
   }
 
@@ -923,6 +954,12 @@ export async function getRevisionContent(
     throw new MarkdownUnknownVersionError(item.id, versionId, known);
   }
 
-  const content = await downloadDriveItemVersionContent(client, itemIdValidated, versionId, signal);
+  const content = await downloadDriveItemVersionContent(
+    client,
+    scope,
+    itemIdValidated,
+    versionId,
+    signal,
+  );
   return { content, isCurrent: false };
 }

@@ -4,7 +4,8 @@ import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createTwoFilesPatch } from "diff";
 import { z } from "zod";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
@@ -134,6 +135,9 @@ const def: ToolDef = {
 
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (args, { signal }) => {
+    // Hoist scope outside try block so error handlers can access it
+    let scope: import("../../graph/drives.js").DriveScope | undefined;
+
     try {
       if (!args.itemId && !args.fileName) {
         return {
@@ -142,9 +146,15 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+      scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       if (item.folder !== undefined) {
         return {
@@ -153,7 +163,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory and cannot be edited by the markdown tools. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -179,6 +189,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       // conditional PUT per call, no interleaved fetches.
       const { item: liveItem, content: rawBefore } = await downloadMarkdownContentWithItem(
         client,
+        scope,
         itemId,
         signal,
       );
@@ -327,7 +338,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const updated = await updateMarkdownFile(client, itemId, cTag, after, signal);
+      const updated = await updateMarkdownFile(client, scope, itemId, cTag, after, signal);
       const newCTag = updated.cTag ?? "(none)";
       const header =
         `Edited ${fileName} (${updated.id})\n` +
@@ -347,9 +358,14 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         },
       };
     } catch (err: unknown) {
-      if (err instanceof MarkdownCTagMismatchError) {
+      if (err instanceof MarkdownCTagMismatchError && scope) {
         const cur = err.currentItem;
-        const currentRevision = await resolveCurrentRevision(config.graphClient, cur, signal);
+        const currentRevision = await resolveCurrentRevision(
+          config.graphClient,
+          scope,
+          cur,
+          signal,
+        );
         return {
           content: [
             {

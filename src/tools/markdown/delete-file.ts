@@ -2,7 +2,8 @@
 
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
@@ -21,10 +22,9 @@ const def: ToolDef = {
   name: "markdown_delete_file",
   title: "Delete Markdown File",
   description:
-    "Permanently delete a markdown file from the configured root folder of " +
-    "the signed-in user's OneDrive. Accepts either a file ID or a file " +
-    "name. File names must follow the strict naming rules and are rejected " +
-    "otherwise. " +
+    "Permanently delete a markdown file from the configured workspace. " +
+    "Accepts either a file ID or a file name. File names must follow the " +
+    "strict naming rules and are rejected otherwise. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -39,9 +39,15 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       if (item.folder !== undefined) {
         return {
@@ -50,7 +56,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory and cannot be deleted by the markdown tools. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -69,7 +75,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      await deleteDriveItem(client, validateGraphId("item.id", item.id), signal);
+      await deleteDriveItem(client, scope, validateGraphId("item.id", item.id), signal);
 
       return {
         content: [{ type: "text", text: `Deleted "${item.name}" (${item.id}).` }],

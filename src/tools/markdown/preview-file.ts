@@ -2,11 +2,12 @@
 
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
   buildMarkdownPreviewUrl,
-  getMyDrive,
+  getDrive,
 } from "../../graph/markdown.js";
 import type { ServerConfig } from "../../index.js";
 import { logger } from "../../logger.js";
@@ -25,14 +26,14 @@ const def: ToolDef = {
   name: "markdown_preview_file",
   title: "Preview Markdown File in Browser",
   description:
-    "Open a markdown file from the configured root folder in the user's " +
-    "browser using the SharePoint OneDrive web preview, which renders the " +
-    "markdown nicely instead of triggering a download. Accepts the file " +
-    "name only (the preview URL is human-facing, so the agent should look " +
-    "the file up by name the same way a user would refer to it). The tool " +
-    "opens the URL in the default browser via the configured browser " +
-    "launcher and also returns the URL as text so it can be shared. " +
-    "Consumer OneDrive (onedrive.live.com) is not supported. " +
+    "Open a markdown file from the configured workspace in the user's browser " +
+    "using the SharePoint OneDrive web preview, which renders the markdown " +
+    "nicely instead of triggering a download. Accepts the file name only (the " +
+    "preview URL is human-facing, so the agent should look the file up by name " +
+    "the same way a user would refer to it). The tool opens the URL in the " +
+    "default browser via the configured browser launcher and also returns the " +
+    "URL as text so it can be shared. Consumer OneDrive (onedrive.live.com) is " +
+    "not supported. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -40,12 +41,18 @@ const def: ToolDef = {
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (args, { signal }) => {
     try {
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
 
       const item = await resolveDriveItem(
         client,
-        cfg.markdown.rootFolderId,
+        scope,
+        cfg.workspace.itemId,
         { fileName: args.fileName },
         signal,
       );
@@ -57,7 +64,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory and cannot be previewed by the markdown tools. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -65,10 +72,10 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       }
 
       // Fetch the drive metadata so we can build the human-friendly
-      // SharePoint preview URL. Unlike the picker, this is _not_
-      // best-effort — without `webUrl` we cannot build a correct
+      // SharePoint preview URL. Unlike the workspace navigator, this is
+      // _not_ best-effort — without `webUrl` we cannot build a correct
       // preview URL, so failures here surface as a tool error.
-      const drive = await getMyDrive(client, signal);
+      const drive = await getDrive(client, scope, signal);
       const previewUrl = buildMarkdownPreviewUrl(drive, item);
 
       let browserOpened = false;

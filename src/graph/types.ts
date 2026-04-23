@@ -231,11 +231,10 @@ export interface DriveItem {
    */
   webUrl?: string;
   /**
-   * Reference to the item's parent folder. Only `path` is consumed by
-   * graphdo-ts (used to build the human-friendly SharePoint preview URL).
-   * The path is the drive-relative path of the parent, prefixed with
-   * `/drive/root:` (e.g. `/drive/root:/markdown` for an item in the
-   * top-level "markdown" folder).
+   * Reference to the item's parent. Optional because graphdo does not need
+   * it for most operations. When present, `path` is the drive-relative path
+   * of the parent, prefixed with `/drive/root:` (e.g. `/drive/root:/markdown`
+   * for an item in the top-level "markdown" folder).
    */
   parentReference?: { path?: string };
 }

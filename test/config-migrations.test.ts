@@ -41,7 +41,7 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
-async function seedFixture(version: 1 | 2, name: string): Promise<string> {
+async function seedFixture(version: 1 | 2 | 3, name: string): Promise<string> {
   const dir = getTempDir();
   await fs.mkdir(dir, { recursive: true });
   const src = path.join(FIXTURES_DIR, `v${String(version)}`, `${name}.json`);
@@ -57,7 +57,7 @@ describe("CURRENT_CONFIG_VERSION", () => {
     // Sanity: bumping the constant without registering a schema would break
     // every load. Asserting on the constant value pins the test matrix to
     // the build's notion of "current".
-    expect(CURRENT_CONFIG_VERSION).toBe(2);
+    expect(CURRENT_CONFIG_VERSION).toBe(3);
   });
 });
 
@@ -66,36 +66,49 @@ describe("round-trip per version", () => {
     const dir = await seedFixture(1, "full");
     const loaded = await loadConfig(dir, testSignal());
     expect(loaded?.configVersion).toBe(CURRENT_CONFIG_VERSION);
-    // v1 fields preserved through the rename + nesting.
+    // v1 fields preserved through the rename + nesting + workspace migration.
     expect(loaded?.todo?.listId).toBe("list-abc");
     expect(loaded?.todo?.listName).toBe("Inbox");
-    expect(loaded?.markdown?.rootFolderId).toBe("folder-xyz");
-    expect(loaded?.markdown?.rootFolderName).toBe("Notes");
-    expect(loaded?.markdown?.rootFolderPath).toBe("/Notes");
+    expect(loaded?.workspace?.driveId).toBe("me");
+    expect(loaded?.workspace?.itemId).toBe("folder-xyz");
+    expect(loaded?.workspace?.itemName).toBe("Notes");
   });
 
-  it("loads v2/full.json without rewriting (no-op load)", async () => {
+  it("loads v2/full.json and migrates to v3 (workspace replaces markdown)", async () => {
     const dir = await seedFixture(2, "full");
+    const loaded = await loadConfig(dir, testSignal());
+    expect(loaded?.configVersion).toBe(CURRENT_CONFIG_VERSION);
+    expect(loaded?.workspace?.driveId).toBe("me");
+    expect(loaded?.workspace?.itemId).toBe("folder-xyz");
+    expect(loaded?.workspace?.itemName).toBe("Notes");
+    expect(loaded?.workspace?.driveName).toBe("OneDrive");
+    // Display-only path is intentionally dropped by the v2→v3 migration.
+    expect(loaded?.workspace?.itemPath).toBeUndefined();
+  });
+
+  it("loads v3/full.json without rewriting (no-op load)", async () => {
+    const dir = await seedFixture(3, "full");
     const before = await fs.stat(path.join(dir, "config.json"));
     const loaded = await loadConfig(dir, testSignal());
     const after = await fs.stat(path.join(dir, "config.json"));
-    expect(loaded?.configVersion).toBe(2);
+    expect(loaded?.configVersion).toBe(3);
     // No migration → no rewrite. mtimeMs identical.
     expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 });
 
-describe("v1 → v2 migration semantics", () => {
-  it("preserves todo fields and markdown fields", async () => {
+describe("v1 → v2 → v3 migration semantics", () => {
+  it("preserves todo fields and maps markdown to workspace", async () => {
     const dir = await seedFixture(1, "full");
     const loaded = await loadConfig(dir, testSignal());
     expect(loaded).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       todo: { listId: "list-abc", listName: "Inbox" },
-      markdown: {
-        rootFolderId: "folder-xyz",
-        rootFolderName: "Notes",
-        rootFolderPath: "/Notes",
+      workspace: {
+        driveId: "me",
+        driveName: "OneDrive",
+        itemId: "folder-xyz",
+        itemName: "Notes",
       },
     });
   });
@@ -103,19 +116,19 @@ describe("v1 → v2 migration semantics", () => {
   it("migrates a partial v1 file (todo only)", async () => {
     const dir = await seedFixture(1, "todo-only");
     const loaded = await loadConfig(dir, testSignal());
-    expect(loaded).toEqual({ configVersion: 2, todo: { listId: "list-only" } });
+    expect(loaded).toEqual({ configVersion: 3, todo: { listId: "list-only" } });
   });
 
-  it("migrates a partial v1 file (markdown only)", async () => {
+  it("migrates a partial v1 file (markdown only) into workspace", async () => {
     const dir = await seedFixture(1, "markdown-only");
     const loaded = await loadConfig(dir, testSignal());
     expect(loaded).toEqual({
-      configVersion: 2,
-      markdown: { rootFolderId: "folder-only" },
+      configVersion: 3,
+      workspace: { driveId: "me", driveName: "OneDrive", itemId: "folder-only" },
     });
   });
 
-  it("rewrites the file in snake_case with config_version stamped and todo nested", async () => {
+  it("rewrites the file in snake_case with config_version=3 and workspace nested", async () => {
     const dir = await seedFixture(1, "full");
     await loadConfig(dir, testSignal());
 
@@ -125,22 +138,24 @@ describe("v1 → v2 migration semantics", () => {
       string,
       unknown
     >;
-    expect(raw["config_version"]).toBe(2);
+    expect(raw["config_version"]).toBe(3);
     expect(raw["todo"]).toEqual({ list_id: "list-abc", list_name: "Inbox" });
-    expect(raw["markdown"]).toEqual({
-      root_folder_id: "folder-xyz",
-      root_folder_name: "Notes",
-      root_folder_path: "/Notes",
+    expect(raw["workspace"]).toEqual({
+      drive_id: "me",
+      drive_name: "OneDrive",
+      item_id: "folder-xyz",
+      item_name: "Notes",
     });
-    // Top-level legacy keys are gone (no flat todo_list_id at the top).
+    // Top-level legacy keys are gone.
     expect(raw["todo_list_id"]).toBeUndefined();
     expect(raw["todo_list_name"]).toBeUndefined();
+    expect(raw["markdown"]).toBeUndefined();
     // No camelCase leakage at any level.
     for (const key of Object.keys(raw)) {
       expect(key).not.toMatch(/[A-Z]/);
     }
-    const md = raw["markdown"] as Record<string, unknown>;
-    for (const key of Object.keys(md)) {
+    const ws = raw["workspace"] as Record<string, unknown>;
+    for (const key of Object.keys(ws)) {
       expect(key).not.toMatch(/[A-Z]/);
     }
     const todo = raw["todo"] as Record<string, unknown>;
@@ -151,7 +166,7 @@ describe("v1 → v2 migration semantics", () => {
 });
 
 describe("$schema editor hint", () => {
-  it("v1 → v2 migration writes a $schema URL pointing at the version-pinned schema on main", async () => {
+  it("v1 → current migration writes a $schema URL pointing at the version-pinned schema on main", async () => {
     const dir = await seedFixture(1, "full");
     await loadConfig(dir, testSignal());
     const raw = JSON.parse(await fs.readFile(path.join(dir, "config.json"), "utf-8")) as Record<
@@ -159,7 +174,7 @@ describe("$schema editor hint", () => {
       unknown
     >;
     expect(raw["$schema"]).toBe(
-      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v3.json",
     );
     // Ordering: editors look at the very first key; assert it is $schema.
     expect(Object.keys(raw)[0]).toBe("$schema");
@@ -168,11 +183,11 @@ describe("$schema editor hint", () => {
   it("strips $schema on load (it never leaks into the in-memory Config)", () => {
     const { config } = parseConfigFile({
       $schema: "https://example.invalid/anything.json",
-      config_version: 2,
+      config_version: 3,
       todo: { list_id: "x", list_name: "y" },
     });
     expect(config).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       todo: { listId: "x", listName: "y" },
     });
   });
@@ -221,10 +236,12 @@ describe("byte-stable round-trip", () => {
     const dir = getTempDir();
     const config: Config = {
       todo: { listId: "abc", listName: "Tasks" },
-      markdown: {
-        rootFolderId: "f1",
-        rootFolderName: "Notes",
-        rootFolderPath: "/Notes",
+      workspace: {
+        driveId: "me",
+        driveName: "OneDrive",
+        itemId: "f1",
+        itemName: "Notes",
+        itemPath: "/Notes",
       },
     };
 
@@ -243,43 +260,43 @@ describe("byte-stable round-trip", () => {
 describe("unknown keys are stripped", () => {
   it("strips unknown top-level keys", () => {
     const { config } = parseConfigFile({
-      config_version: 2,
+      config_version: 3,
       todo: { list_id: "x", list_name: "y" },
       whatever: "ignored",
     });
     expect(config).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       todo: { listId: "x", listName: "y" },
     });
   });
 
   it("strips unknown nested keys", () => {
     const { config } = parseConfigFile({
-      config_version: 2,
+      config_version: 3,
       todo: { list_id: "x", noise: "drop me" },
-      markdown: { root_folder_id: "f1", noise: "drop me" },
+      workspace: { drive_id: "me", item_id: "f1", noise: "drop me" },
     });
     expect(config).toEqual({
-      configVersion: 2,
+      configVersion: 3,
       todo: { listId: "x" },
-      markdown: { rootFolderId: "f1" },
+      workspace: { driveId: "me", itemId: "f1" },
     });
   });
 });
 
 describe("parseConfigFile is pure (no I/O)", () => {
-  it("returns migrated=true for a v1 input and migrated=false for a v2 input", () => {
+  it("returns migrated=true for a v1 input and migrated=false for a current-version input", () => {
     const v1 = parseConfigFile({ todoListId: "x", todoListName: "y" });
     expect(v1.migrated).toBe(true);
-    expect(v1.config?.configVersion).toBe(2);
+    expect(v1.config?.configVersion).toBe(3);
     expect(v1.config?.todo).toEqual({ listId: "x", listName: "y" });
 
-    const v2 = parseConfigFile({
-      config_version: 2,
+    const current = parseConfigFile({
+      config_version: 3,
       todo: { list_id: "x", list_name: "y" },
     });
-    expect(v2.migrated).toBe(false);
-    expect(v2.config?.configVersion).toBe(2);
-    expect(v2.config?.todo).toEqual({ listId: "x", listName: "y" });
+    expect(current.migrated).toBe(false);
+    expect(current.config?.configVersion).toBe(3);
+    expect(current.config?.todo).toEqual({ listId: "x", listName: "y" });
   });
 });

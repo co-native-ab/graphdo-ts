@@ -1,9 +1,10 @@
-// MCP tool: markdown_list_files — list markdown files in the configured root folder.
+// MCP tool: markdown_list_files — list markdown files in the configured workspace.
 
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import {
   listMarkdownFolderEntries,
   MARKDOWN_FILE_NAME_RULES,
@@ -21,12 +22,11 @@ const def: ToolDef = {
   name: "markdown_list_files",
   title: "List Markdown Files",
   description:
-    "List markdown files directly inside the configured root folder in the " +
-    "signed-in user's OneDrive. Each entry reports the file name, opaque " +
-    "file ID, last modified timestamp, and size in bytes. Subdirectories " +
-    "and files whose names do not follow the strict naming rules are also " +
-    "reported, but marked as UNSUPPORTED - these entries exist but cannot " +
-    "be read, written, or deleted by the markdown tools. " +
+    "List markdown files directly inside the configured workspace folder. " +
+    "Each entry reports the file name, opaque file ID, last modified timestamp, " +
+    "and size in bytes. Subdirectories and files whose names do not follow the " +
+    "strict naming rules are also reported, but marked as UNSUPPORTED - these " +
+    "entries exist but cannot be read, written, or deleted by the markdown tools. " +
     MARKDOWN_FILE_NAME_RULES,
   requiredScopes: [GraphScope.FilesReadWrite],
 };
@@ -34,15 +34,26 @@ const def: ToolDef = {
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (_args, { signal }) => {
     try {
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const allEntries = await listMarkdownFolderEntries(client, cfg.markdown.rootFolderId, signal);
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const allEntries = await listMarkdownFolderEntries(
+        client,
+        scope,
+        cfg.workspace.itemId,
+        signal,
+      );
 
       const supported = allEntries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported);
       const unsupported = allEntries.filter((e) => e.kind === MarkdownFolderEntryKind.Unsupported);
 
       const folderLabel =
-        cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "the configured folder";
+        cfg.workspace.itemPath ?? cfg.workspace.itemName ?? "the configured workspace";
       const header = `Markdown files in ${folderLabel}:`;
 
       const sections: string[] = [header];

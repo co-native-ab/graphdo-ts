@@ -3,7 +3,8 @@
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
@@ -48,7 +49,7 @@ const def: ToolDef = {
   title: "Update Markdown File",
   description:
     "Overwrite the content of an existing markdown file in the configured " +
-    "root folder. Requires the cTag previously returned by markdown_get_file " +
+    "workspace. Requires the cTag previously returned by markdown_get_file " +
     "(or markdown_create_file / markdown_update_file). The cTag is OneDrive's " +
     "content-only entity tag, so unrelated metadata changes (rename, share, " +
     "indexing, preview generation) do not invalidate it. The update succeeds " +
@@ -67,6 +68,9 @@ const def: ToolDef = {
 
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (args, { signal }) => {
+    // Hoist scope outside try block so error handlers can access it
+    let scope: import("../../graph/drives.js").DriveScope | undefined;
+
     try {
       if (!args.itemId && !args.fileName) {
         return {
@@ -75,9 +79,15 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+
+      scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       // Defence in depth: re-validate the resolved item before writing.
       if (item.folder !== undefined) {
@@ -87,7 +97,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory and cannot be updated by the markdown tools. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -108,12 +118,13 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const updated = await updateMarkdownFile(
         client,
+        scope,
         validateGraphId("item.id", item.id),
         args.cTag,
         args.content,
         signal,
       );
-      const revision = await resolveCurrentRevision(client, updated, signal);
+      const revision = await resolveCurrentRevision(client, scope, updated, signal);
       const bytes = Buffer.byteLength(args.content, "utf-8");
       return {
         content: [
@@ -129,9 +140,14 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         ],
       };
     } catch (err: unknown) {
-      if (err instanceof MarkdownCTagMismatchError) {
+      if (err instanceof MarkdownCTagMismatchError && scope) {
         const cur = err.currentItem;
-        const currentRevision = await resolveCurrentRevision(config.graphClient, cur, signal);
+        const currentRevision = await resolveCurrentRevision(
+          config.graphClient,
+          scope,
+          cur,
+          signal,
+        );
         return {
           content: [
             {
