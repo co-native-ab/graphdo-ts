@@ -61,13 +61,14 @@ export const idOrNameShape = {
 
 export async function resolveDriveItem(
   client: ServerConfig["graphClient"],
+  scope: import("../../graph/drives.js").DriveScope,
   folderId: ValidatedGraphId,
   args: { itemId?: string; fileName?: string },
   signal: AbortSignal,
 ): Promise<DriveItem> {
   if (args.itemId) {
     const itemId = validateGraphId("itemId", args.itemId);
-    return getDriveItem(client, itemId, signal);
+    return getDriveItem(client, scope, itemId, signal);
   }
   if (!args.fileName) {
     throw new Error("Either itemId or fileName must be provided.");
@@ -78,9 +79,9 @@ export async function resolveDriveItem(
       `Invalid markdown file name "${args.fileName}": ${validation.reason}. ${MARKDOWN_FILE_NAME_RULES}`,
     );
   }
-  const match = await findMarkdownFileByName(client, folderId, args.fileName, signal);
+  const match = await findMarkdownFileByName(client, scope, folderId, args.fileName, signal);
   if (!match) {
-    throw new Error(`Markdown file "${args.fileName}" not found in the configured root folder.`);
+    throw new Error(`Markdown file "${args.fileName}" not found in the configured workspace.`);
   }
   // Defensive: the stored name on the remote could still be unsafe even if the
   // caller-supplied name was fine (e.g. a rename happened after creation).

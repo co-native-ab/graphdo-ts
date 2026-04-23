@@ -2,7 +2,8 @@
 
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
@@ -43,9 +44,14 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+      
+      const scope = cfg.workspace.driveId === "me"
+        ? meDriveScope
+        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+      
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       if (item.folder !== undefined) {
         return {
@@ -54,7 +60,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory, which is not supported. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -77,6 +83,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const versions = await listDriveItemVersions(
         client,
+        scope,
         validateGraphId("item.id", item.id),
         signal,
       );

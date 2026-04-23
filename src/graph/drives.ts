@@ -68,3 +68,68 @@ export function driveItemPath(
 ): string {
   return `${driveMetadataPath(scope)}/items/${encodeURIComponent(itemId)}${suffix}`;
 }
+
+/**
+ * Resolve a OneDrive or SharePoint sharing link to a drive item.
+ *
+ * Takes a public or tenant-scoped share URL (from the "Share" button in
+ * OneDrive / SharePoint) and returns the drive item metadata. Uses the
+ * `/shares/{encoded-sharing-url}/driveItem` endpoint.
+ *
+ * The `sharingUrl` is encoded using Graph's share id format: `u!` + base64url
+ * (without padding) of the UTF-8 bytes of the URL. See
+ * https://learn.microsoft.com/en-us/graph/api/shares-get
+ *
+ * @returns The resolved drive item with `driveId`, `itemId`, `name`, and
+ *   optional `webUrl`. Both IDs are validated before returning (defence in
+ *   depth — Graph occasionally returns weird shapes in edge cases).
+ * @throws GraphRequestError on 404 (link expired, not accessible, or invalid),
+ *   403 (permission denied), or any other Graph API error.
+ */
+export async function resolveShareLink(
+  client: { request: (method: import("./client.js").HttpMethod, path: string, signal: AbortSignal) => Promise<Response> },
+  sharingUrl: string,
+  signal: AbortSignal,
+): Promise<{
+  driveId: ValidatedGraphId;
+  itemId: ValidatedGraphId;
+  name: string;
+  webUrl?: string;
+}> {
+  // Encode the sharing URL using the Graph share id format: u! + base64url without padding.
+  // RFC 4648 §5: base64url uses - and _ instead of + and /, and strips = padding.
+  const utf8Bytes = new TextEncoder().encode(sharingUrl);
+  const base64 = btoa(String.fromCharCode(...utf8Bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  const shareId = `u!${base64}`;
+
+  const path = `/shares/${encodeURIComponent(shareId)}/driveItem`;
+  
+  const { HttpMethod, parseResponse, GraphRequestError } = await import("./client.js");
+  const { DriveItemSchema } = await import("./types.js");
+  const { validateGraphId } = await import("./ids.js");
+
+  const res = await client.request(HttpMethod.GET, path, signal);
+  if (!res.ok) {
+    const err = await GraphRequestError.fromResponse(res, HttpMethod.GET, path);
+    throw err;
+  }
+
+  const item = await parseResponse(res, DriveItemSchema, signal);
+
+  // Defence in depth: validate both IDs even though they came from Graph.
+  const driveId = validateGraphId(
+    "driveId",
+    item.parentReference?.driveId ?? item.id, // fallback to itemId if driveId missing (shouldn't happen)
+  );
+  const itemId = validateGraphId("itemId", item.id);
+
+  return {
+    driveId,
+    itemId,
+    name: item.name,
+    webUrl: item.webUrl,
+  };
+}

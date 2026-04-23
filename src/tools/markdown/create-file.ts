@@ -3,7 +3,8 @@
 import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import {
   createMarkdownFile,
   MARKDOWN_FILE_NAME_RULES,
@@ -19,7 +20,7 @@ import { formatRevision, markdownNameSchema, MARKDOWN_SIZE_CAP_NOTE } from "./he
 
 const inputSchema = {
   fileName: markdownNameSchema.describe(
-    "File name, must end in .md. Must not already exist in the configured root folder.",
+    "File name, must end in .md. Must not already exist in the configured workspace.",
   ),
   content: z
     .string()
@@ -30,7 +31,7 @@ const def: ToolDef = {
   name: "markdown_create_file",
   title: "Create Markdown File",
   description:
-    "Create a new markdown file in the configured root folder. Fails with a " +
+    "Create a new markdown file in the configured workspace. Fails with a " +
     "clear error when a file with the same name already exists - in that " +
     "case, call markdown_get_file to fetch the existing content and cTag, " +
     "then call markdown_update_file. The file name must follow the strict " +
@@ -44,16 +45,22 @@ const def: ToolDef = {
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (args, { signal }) => {
     try {
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
+      
+      const scope = cfg.workspace.driveId === "me"
+        ? meDriveScope
+        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+      
       const item = await createMarkdownFile(
         client,
-        cfg.markdown.rootFolderId,
+        scope,
+        cfg.workspace.itemId,
         args.fileName,
         args.content,
         signal,
       );
-      const revision = await resolveCurrentRevision(client, item, signal);
+      const revision = await resolveCurrentRevision(client, scope, item, signal);
       const bytes = Buffer.byteLength(args.content, "utf-8");
       return {
         content: [

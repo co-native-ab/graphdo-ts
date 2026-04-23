@@ -55,14 +55,15 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         lines.push('Use the "todo_select_list" tool to select a todo list.');
       }
 
-      if (cfg?.markdown?.rootFolderId) {
-        const folderLabel = cfg.markdown.rootFolderPath ?? cfg.markdown.rootFolderName ?? "";
+      if (cfg?.workspace?.itemId) {
+        const driveName = cfg.workspace.driveName ?? cfg.workspace.driveId;
+        const itemLabel = cfg.workspace.itemPath ?? cfg.workspace.itemName ?? "";
         lines.push(
-          `Markdown root folder: ${folderLabel ? `${folderLabel} ` : ""}(${cfg.markdown.rootFolderId})`,
+          `Markdown workspace: ${itemLabel ? `${itemLabel} ` : ""}(${cfg.workspace.itemId}) on ${driveName}`,
         );
       } else {
-        lines.push("Markdown root folder: Not configured");
-        lines.push('Use the "markdown_select_root_folder" tool to choose one.');
+        lines.push("Markdown workspace: Not configured");
+        lines.push('Use the "markdown_select_workspace" tool to choose one.');
       }
 
       return { content: [{ type: "text", text: lines.join("\n") }] };

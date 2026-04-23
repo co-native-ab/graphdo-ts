@@ -4,7 +4,8 @@ import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createTwoFilesPatch } from "diff";
 import { z } from "zod";
 
-import { loadAndValidateMarkdownConfig } from "../../config.js";
+import { loadAndValidateWorkspaceConfig } from "../../config.js";
+import { meDriveScope } from "../../graph/drives.js";
 import { validateGraphId } from "../../graph/ids.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
@@ -47,7 +48,7 @@ const def: ToolDef = {
   title: "Diff Markdown File Versions",
   description:
     "Return a unified diff between two revisions of a markdown file in the " +
-    "configured root folder, computed server-side so you do not have to " +
+    "configured workspace, computed server-side so you do not have to " +
     "diff the content yourself. Accepts the file by id (preferred) or name, " +
     "plus a fromVersionId and a toVersionId. Each ID may be either a " +
     "historical version ID returned by markdown_list_file_versions, or the " +
@@ -70,9 +71,14 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         };
       }
 
-      const cfg = await loadAndValidateMarkdownConfig(config.configDir, signal);
+      const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      const item = await resolveDriveItem(client, cfg.markdown.rootFolderId, args, signal);
+      
+      const scope = cfg.workspace.driveId === "me"
+        ? meDriveScope
+        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+      
+      const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       if (item.folder !== undefined) {
         return {
@@ -81,7 +87,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
               type: "text",
               text:
                 `"${item.name}" is a subdirectory, which is not supported. ` +
-                "The markdown tools only operate on files directly in the configured root folder.",
+                "The markdown tools only operate on files directly in the configured workspace.",
             },
           ],
           isError: true,
@@ -117,8 +123,8 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const fromVersionId = validateGraphId("fromVersionId", args.fromVersionId);
       const toVersionId = validateGraphId("toVersionId", args.toVersionId);
       const [from, to] = await Promise.all([
-        getRevisionContent(client, item, fromVersionId, signal),
-        getRevisionContent(client, item, toVersionId, signal),
+        getRevisionContent(client, scope, item, fromVersionId, signal),
+        getRevisionContent(client, scope, item, toVersionId, signal),
       ]);
       const fromContent = from.content;
       const toContent = to.content;
