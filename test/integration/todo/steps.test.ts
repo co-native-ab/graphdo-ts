@@ -27,7 +27,7 @@ describe("integration: todo", () => {
   describe("checklist items", () => {
     beforeEach(async () => {
       await saveConfig(
-        { todoListId: "list-1", todoListName: "My Tasks" },
+        { todo: { listId: "list-1", listName: "My Tasks" } },
         env.configDir,
         testSignal(),
       );

@@ -30,7 +30,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const taskId = validateGraphId("taskId", args.taskId);
       const client = config.graphClient;
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-      const items = await listChecklistItems(client, todoConfig.todoListId, taskId, signal);
+      const items = await listChecklistItems(client, todoConfig.todo.listId, taskId, signal);
 
       if (items.length === 0) {
         return { content: [{ type: "text", text: "No steps found for this todo." }] };

@@ -28,7 +28,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const taskId = validateGraphId("taskId", args.taskId);
       const client = config.graphClient;
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-      await completeTodo(client, todoConfig.todoListId, taskId, signal);
+      await completeTodo(client, todoConfig.todo.listId, taskId, signal);
 
       return {
         content: [{ type: "text", text: `Todo "${args.taskId}" marked as completed.` }],

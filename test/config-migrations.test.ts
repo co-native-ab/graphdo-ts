@@ -66,9 +66,9 @@ describe("round-trip per version", () => {
     const dir = await seedFixture(1, "full");
     const loaded = await loadConfig(dir, testSignal());
     expect(loaded?.configVersion).toBe(CURRENT_CONFIG_VERSION);
-    // v1 fields preserved through the rename.
-    expect(loaded?.todoListId).toBe("list-abc");
-    expect(loaded?.todoListName).toBe("Inbox");
+    // v1 fields preserved through the rename + nesting.
+    expect(loaded?.todo?.listId).toBe("list-abc");
+    expect(loaded?.todo?.listName).toBe("Inbox");
     expect(loaded?.markdown?.rootFolderId).toBe("folder-xyz");
     expect(loaded?.markdown?.rootFolderName).toBe("Notes");
     expect(loaded?.markdown?.rootFolderPath).toBe("/Notes");
@@ -91,8 +91,7 @@ describe("v1 → v2 migration semantics", () => {
     const loaded = await loadConfig(dir, testSignal());
     expect(loaded).toEqual({
       configVersion: 2,
-      todoListId: "list-abc",
-      todoListName: "Inbox",
+      todo: { listId: "list-abc", listName: "Inbox" },
       markdown: {
         rootFolderId: "folder-xyz",
         rootFolderName: "Notes",
@@ -104,7 +103,7 @@ describe("v1 → v2 migration semantics", () => {
   it("migrates a partial v1 file (todo only)", async () => {
     const dir = await seedFixture(1, "todo-only");
     const loaded = await loadConfig(dir, testSignal());
-    expect(loaded).toEqual({ configVersion: 2, todoListId: "list-only" });
+    expect(loaded).toEqual({ configVersion: 2, todo: { listId: "list-only" } });
   });
 
   it("migrates a partial v1 file (markdown only)", async () => {
@@ -116,7 +115,7 @@ describe("v1 → v2 migration semantics", () => {
     });
   });
 
-  it("rewrites the file in snake_case with config_version stamped", async () => {
+  it("rewrites the file in snake_case with config_version stamped and todo nested", async () => {
     const dir = await seedFixture(1, "full");
     await loadConfig(dir, testSignal());
 
@@ -127,19 +126,25 @@ describe("v1 → v2 migration semantics", () => {
       unknown
     >;
     expect(raw["config_version"]).toBe(2);
-    expect(raw["todo_list_id"]).toBe("list-abc");
-    expect(raw["todo_list_name"]).toBe("Inbox");
+    expect(raw["todo"]).toEqual({ list_id: "list-abc", list_name: "Inbox" });
     expect(raw["markdown"]).toEqual({
       root_folder_id: "folder-xyz",
       root_folder_name: "Notes",
       root_folder_path: "/Notes",
     });
-    // No camelCase leakage.
+    // Top-level legacy keys are gone (no flat todo_list_id at the top).
+    expect(raw["todo_list_id"]).toBeUndefined();
+    expect(raw["todo_list_name"]).toBeUndefined();
+    // No camelCase leakage at any level.
     for (const key of Object.keys(raw)) {
       expect(key).not.toMatch(/[A-Z]/);
     }
     const md = raw["markdown"] as Record<string, unknown>;
     for (const key of Object.keys(md)) {
+      expect(key).not.toMatch(/[A-Z]/);
+    }
+    const todo = raw["todo"] as Record<string, unknown>;
+    for (const key of Object.keys(todo)) {
       expect(key).not.toMatch(/[A-Z]/);
     }
   });
@@ -151,7 +156,7 @@ describe("forward-compat refusal", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, "config.json"),
-      JSON.stringify({ config_version: 99, todo_list_id: "x", todo_list_name: "y" }),
+      JSON.stringify({ config_version: 99, todo: { list_id: "x", list_name: "y" } }),
     );
     const before = await fs.readFile(path.join(dir, "config.json"), "utf-8");
     await expect(loadConfig(dir, testSignal())).rejects.toThrow(
@@ -187,8 +192,7 @@ describe("byte-stable round-trip", () => {
   it("load → save → load yields a byte-identical config.json", async () => {
     const dir = getTempDir();
     const config: Config = {
-      todoListId: "abc",
-      todoListName: "Tasks",
+      todo: { listId: "abc", listName: "Tasks" },
       markdown: {
         rootFolderId: "f1",
         rootFolderName: "Notes",
@@ -212,20 +216,24 @@ describe("unknown keys are stripped", () => {
   it("strips unknown top-level keys", () => {
     const { config } = parseConfigFile({
       config_version: 2,
-      todo_list_id: "x",
-      todo_list_name: "y",
+      todo: { list_id: "x", list_name: "y" },
       whatever: "ignored",
     });
-    expect(config).toEqual({ configVersion: 2, todoListId: "x", todoListName: "y" });
+    expect(config).toEqual({
+      configVersion: 2,
+      todo: { listId: "x", listName: "y" },
+    });
   });
 
   it("strips unknown nested keys", () => {
     const { config } = parseConfigFile({
       config_version: 2,
+      todo: { list_id: "x", noise: "drop me" },
       markdown: { root_folder_id: "f1", noise: "drop me" },
     });
     expect(config).toEqual({
       configVersion: 2,
+      todo: { listId: "x" },
       markdown: { rootFolderId: "f1" },
     });
   });
@@ -236,13 +244,14 @@ describe("parseConfigFile is pure (no I/O)", () => {
     const v1 = parseConfigFile({ todoListId: "x", todoListName: "y" });
     expect(v1.migrated).toBe(true);
     expect(v1.config?.configVersion).toBe(2);
+    expect(v1.config?.todo).toEqual({ listId: "x", listName: "y" });
 
     const v2 = parseConfigFile({
       config_version: 2,
-      todo_list_id: "x",
-      todo_list_name: "y",
+      todo: { list_id: "x", list_name: "y" },
     });
     expect(v2.migrated).toBe(false);
     expect(v2.config?.configVersion).toBe(2);
+    expect(v2.config?.todo).toEqual({ listId: "x", listName: "y" });
   });
 });

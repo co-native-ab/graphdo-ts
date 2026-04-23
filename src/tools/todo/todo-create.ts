@@ -49,7 +49,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const item = await createTodo(
         client,
-        todoConfig.todoListId,
+        todoConfig.todo.listId,
         {
           title: args.title,
           body: args.body || undefined,

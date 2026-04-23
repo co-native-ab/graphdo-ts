@@ -37,12 +37,17 @@ afterEach(async () => {
 });
 
 const validConfig: Config = {
-  todoListId: "list-123",
-  todoListName: "My Tasks",
+  todo: { listId: "list-123", listName: "My Tasks" },
 };
 
 /** validConfig as it appears in memory after a round-trip through saveConfig/loadConfig. */
 const validConfigPersisted: Config = { ...validConfig, configVersion: 2 };
+
+/** Legacy v1 (camelCase, flat, no `config_version`) form of `validConfig` for migration tests. */
+const validConfigV1OnDisk = {
+  todoListId: "list-123",
+  todoListName: "My Tasks",
+};
 
 describe("configDir", () => {
   it("returns override path when provided", () => {
@@ -91,9 +96,9 @@ describe("loadConfig", () => {
   it("returns parsed Config (with configVersion stamped) when valid v1 file exists", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
-    // Write a legacy v1 (camelCase, no config_version) file directly to
+    // Write a legacy v1 (camelCase, flat, no config_version) file directly to
     // exercise the migration path.
-    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfig));
+    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfigV1OnDisk));
 
     const result = await loadConfig(dir, testSignal());
     expect(result).toEqual(validConfigPersisted);
@@ -145,7 +150,7 @@ describe("loadConfig", () => {
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual({ configVersion: 2, todoListId: "list-1" });
+    expect(result).toEqual({ configVersion: 2, todo: { listId: "list-1" } });
   });
 
   it("strips extra fields and returns valid config", async () => {
@@ -153,7 +158,7 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, "config.json"),
-      JSON.stringify({ ...validConfig, extraField: "ignored" }),
+      JSON.stringify({ ...validConfigV1OnDisk, extraField: "ignored" }),
     );
 
     const result = await loadConfig(dir, testSignal());
@@ -172,7 +177,7 @@ describe("saveConfig", () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it("writes valid JSON in snake_case (v2) that can be read back", async () => {
+  it("writes valid JSON in snake_case (v2) with todo nested that can be read back", async () => {
     const dir = getTempDir();
     await saveConfig(validConfig, dir, testSignal());
 
@@ -180,8 +185,7 @@ describe("saveConfig", () => {
     const parsed = JSON.parse(content) as Record<string, unknown>;
     expect(parsed).toEqual({
       config_version: 2,
-      todo_list_id: "list-123",
-      todo_list_name: "My Tasks",
+      todo: { list_id: "list-123", list_name: "My Tasks" },
     });
   });
 
@@ -244,8 +248,7 @@ describe("round-trip", () => {
   it("save then load returns identical data (with configVersion stamped)", async () => {
     const dir = getTempDir();
     const config: Config = {
-      todoListId: "abc-456",
-      todoListName: "Work Items",
+      todo: { listId: "abc-456", listName: "Work Items" },
     };
 
     await saveConfig(config, dir, testSignal());

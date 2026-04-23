@@ -13,6 +13,11 @@ import { writeJsonAtomic, mkdirOptions, writeFileOptions } from "./fs-options.js
 // In-memory shape (camelCase) — used by the rest of the codebase.
 // ---------------------------------------------------------------------------
 
+export interface TodoConfig {
+  listId?: string;
+  listName?: string;
+}
+
 export interface MarkdownConfig {
   rootFolderId?: string;
   rootFolderName?: string;
@@ -26,8 +31,12 @@ export interface Config {
    * older files are migrated transparently. Stamped onto every save.
    */
   configVersion?: number;
-  todoListId?: string;
-  todoListName?: string;
+  /**
+   * Per-subsystem configuration. Each top-level key here mirrors a
+   * corresponding object on disk (`todo`, `markdown`, …) so the in-memory
+   * and persisted shapes have the same structure modulo casing.
+   */
+  todo?: TodoConfig;
   markdown?: MarkdownConfig;
 }
 
@@ -73,13 +82,19 @@ const ConfigFileSchemaV1 = z
 
 /**
  * v2 — snake_case keys with an explicit `config_version: 2` discriminator.
- * This is the format every `saveConfig` call writes today.
+ * Per-subsystem nested objects (`todo`, `markdown`) mirror the in-memory
+ * structure so disk and code agree on shape modulo casing.
  */
 const ConfigFileSchemaV2 = z
   .object({
     config_version: z.literal(2),
-    todo_list_id: z.string().min(1).optional(),
-    todo_list_name: z.string().min(1).optional(),
+    todo: z
+      .object({
+        list_id: z.string().min(1).optional(),
+        list_name: z.string().min(1).optional(),
+      })
+      .strip()
+      .optional(),
     markdown: z
       .object({
         root_folder_id: z.string().min(1).optional(),
@@ -113,8 +128,11 @@ const MIGRATIONS: readonly Migration[] = [
       // Input is validated against ConfigFileSchemaV1, so we can narrow safely.
       const v1 = input as z.infer<typeof ConfigFileSchemaV1>;
       const out: Record<string, unknown> = { config_version: 2 };
-      if (v1.todoListId !== undefined) out["todo_list_id"] = v1.todoListId;
-      if (v1.todoListName !== undefined) out["todo_list_name"] = v1.todoListName;
+      // Nest legacy flat todoListId/todoListName under the new `todo` object.
+      const todo: Record<string, unknown> = {};
+      if (v1.todoListId !== undefined) todo["list_id"] = v1.todoListId;
+      if (v1.todoListName !== undefined) todo["list_name"] = v1.todoListName;
+      if (Object.keys(todo).length > 0) out["todo"] = todo;
       if (v1.markdown !== undefined) {
         const md: Record<string, unknown> = {};
         if (v1.markdown.rootFolderId !== undefined) md["root_folder_id"] = v1.markdown.rootFolderId;
@@ -188,8 +206,12 @@ function applyMigrations(parsed: unknown, from: number): ConfigFileV2 {
  */
 function toInMemory(file: ConfigFileV2): Config {
   const out: Config = { configVersion: file.config_version };
-  if (file.todo_list_id !== undefined) out.todoListId = file.todo_list_id;
-  if (file.todo_list_name !== undefined) out.todoListName = file.todo_list_name;
+  if (file.todo !== undefined) {
+    const todo: TodoConfig = {};
+    if (file.todo.list_id !== undefined) todo.listId = file.todo.list_id;
+    if (file.todo.list_name !== undefined) todo.listName = file.todo.list_name;
+    out.todo = todo;
+  }
   if (file.markdown !== undefined) {
     const md: MarkdownConfig = {};
     if (file.markdown.root_folder_id !== undefined) md.rootFolderId = file.markdown.root_folder_id;
@@ -209,6 +231,10 @@ function toInMemory(file: ConfigFileV2): Config {
  * so a no-op load → save doesn't churn the file.
  */
 function serialiseConfigFile(config: Config): ConfigFileV2 {
+  const todo: Record<string, string> = {};
+  if (config.todo?.listId !== undefined) todo["list_id"] = config.todo.listId;
+  if (config.todo?.listName !== undefined) todo["list_name"] = config.todo.listName;
+
   const md: Record<string, string> = {};
   if (config.markdown?.rootFolderId !== undefined)
     md["root_folder_id"] = config.markdown.rootFolderId;
@@ -222,8 +248,9 @@ function serialiseConfigFile(config: Config): ConfigFileV2 {
   if (config.markdown !== undefined && Object.keys(md).length > 0) {
     ordered["markdown"] = sortKeys(md);
   }
-  if (config.todoListId !== undefined) ordered["todo_list_id"] = config.todoListId;
-  if (config.todoListName !== undefined) ordered["todo_list_name"] = config.todoListName;
+  if (config.todo !== undefined && Object.keys(todo).length > 0) {
+    ordered["todo"] = sortKeys(todo);
+  }
 
   // Re-validate so we can never silently write malformed data.
   return ConfigFileSchemaV2.parse(ordered);
@@ -407,13 +434,15 @@ export async function saveConfig(config: Config, dir: string, signal: AbortSigna
  */
 export function hasTodoConfig(
   config: Config | null,
-): config is Config & { todoListId: string; todoListName: string } {
+): config is Config & { todo: { listId: string; listName: string } & TodoConfig } {
+  if (config === null) return false;
+  const listId = config.todo?.listId;
+  const listName = config.todo?.listName;
   return (
-    config !== null &&
-    typeof config.todoListId === "string" &&
-    config.todoListId.length > 0 &&
-    typeof config.todoListName === "string" &&
-    config.todoListName.length > 0
+    typeof listId === "string" &&
+    listId.length > 0 &&
+    typeof listName === "string" &&
+    listName.length > 0
   );
 }
 
@@ -460,30 +489,33 @@ export function hasMarkdownConfig(
  * Throws a user-friendly error if missing or invalid (e.g. picker has not
  * been run yet — in which case the user is directed to re-run the picker).
  *
- * Returns the validated config with `todoListId` re-typed as
+ * Returns the validated config with `todo.listId` re-typed as
  * {@link ValidatedGraphId} so it can be passed straight to Graph helpers
  * without an additional validation step. A persisted-but-corrupted
- * `todoListId` (hand-edited config.json) fails loudly here rather than
+ * `todo.listId` (hand-edited config.json) fails loudly here rather than
  * splicing into a Graph URL downstream.
  */
 export async function loadAndValidateTodoConfig(
   dir: string,
   signal: AbortSignal,
-): Promise<Config & { todoListId: ValidatedGraphId; todoListName: string }> {
+): Promise<Config & { todo: { listId: ValidatedGraphId; listName: string } & TodoConfig }> {
   const config = await loadConfig(dir, signal);
   if (!hasTodoConfig(config)) {
     throw new Error("todo list not configured - use the todo_select_list tool to select one");
   }
   let validatedListId: ValidatedGraphId;
   try {
-    validatedListId = validateGraphId("todoListId", config.todoListId);
+    validatedListId = validateGraphId("todo.listId", config.todo.listId);
   } catch (err: unknown) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
       `todo list configuration is corrupted (${reason}) - use the todo_select_list tool to re-select one`,
     );
   }
-  return { ...config, todoListId: validatedListId };
+  return {
+    ...config,
+    todo: { ...config.todo, listId: validatedListId },
+  };
 }
 
 /**
@@ -542,6 +574,8 @@ export async function updateConfig(
   const merged: Config = {
     ...existing,
     ...partial,
+    todo:
+      partial.todo !== undefined ? { ...(existing.todo ?? {}), ...partial.todo } : existing.todo,
     markdown:
       partial.markdown !== undefined
         ? { ...(existing.markdown ?? {}), ...partial.markdown }

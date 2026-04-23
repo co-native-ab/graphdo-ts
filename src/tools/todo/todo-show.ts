@@ -31,13 +31,13 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const taskId = validateGraphId("taskId", args.taskId);
       const client = config.graphClient;
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-      const item = await getTodo(client, todoConfig.todoListId, taskId, signal);
+      const item = await getTodo(client, todoConfig.todo.listId, taskId, signal);
 
       const lines = [
         `Title: ${item.title}`,
         `Status: ${statusLabel(item.status)}`,
         `ID: ${item.id}`,
-        `List: ${todoConfig.todoListName} (${todoConfig.todoListId})`,
+        `List: ${todoConfig.todo.listName} (${todoConfig.todo.listId})`,
       ];
 
       if (item.importance && item.importance !== "normal") {
@@ -58,7 +58,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const checklistItems = await listChecklistItems(
         client,
-        todoConfig.todoListId,
+        todoConfig.todo.listId,
         taskId,
         signal,
       );

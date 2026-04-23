@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Breaking (config file format):** `config.json` is now written in `snake_case` with a top-level `config_version: 2` field. Existing `config.json` files written in the legacy camelCase format are migrated automatically on first load (todo and markdown fields are preserved). See [ADR-0010](docs/adr/0010-snake-case-persisted-config.md) for the rationale.
+- **Breaking (config file format):** `config.json` is now written in `snake_case` with a top-level `config_version: 2` field, and per-subsystem keys are nested into objects (`todo: { list_id, list_name }`, `markdown: { … }`) so disk and in-memory shapes mirror each other. Existing `config.json` files written in the legacy flat camelCase format are migrated automatically on first load (todo and markdown fields are preserved). See [ADR-0010](docs/adr/0010-snake-case-persisted-config.md) for the rationale.
 - `loadConfig()` no longer throws on unparseable JSON — it backs the file up to `config.json.invalid-<timestamp>` and returns `null`, letting tools surface the standard "not configured" error rather than crash.
 - `loadConfig()` refuses to load a `config.json` whose `config_version` is newer than the current build; the file is left untouched (no silent downgrade).
 - `openBrowser` now accepts `https://` URLs to any host (still rejects plain `http://` to non-localhost) so deep-link tools like `markdown_preview_file` can launch external URLs

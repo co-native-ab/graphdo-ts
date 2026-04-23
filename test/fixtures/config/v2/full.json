@@ -5,6 +5,8 @@
     "root_folder_name": "Notes",
     "root_folder_path": "/Notes"
   },
-  "todo_list_id": "list-abc",
-  "todo_list_name": "Inbox"
+  "todo": {
+    "list_id": "list-abc",
+    "list_name": "Inbox"
+  }
 }
