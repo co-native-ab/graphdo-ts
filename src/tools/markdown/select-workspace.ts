@@ -20,14 +20,13 @@ const def: ToolDef = {
   title: "Select Markdown Workspace",
   description:
     "Select the workspace folder that graphdo should use for markdown files. " +
-    "The workspace can be any folder in the signed-in user's OneDrive, or a " +
-    "shared folder/drive accessed via a OneDrive or SharePoint share link. " +
+    "The workspace can be any folder in the signed-in user's OneDrive. " +
     "Call this tool directly when a workspace has not been configured yet - " +
     "do not ask the user which folder, this tool opens a browser navigator " +
     "where the user makes the selection themselves. This is a human-only " +
     "action - the AI agent cannot choose the folder programmatically. " +
     "Calling it again overwrites the stored value.",
-  requiredScopes: [GraphScope.FilesReadWrite, GraphScope.FilesReadWriteAll],
+  requiredScopes: [GraphScope.FilesReadWrite],
 };
 
 function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
@@ -39,7 +38,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         {
           title: "Select Markdown Workspace",
           subtitle:
-            "Navigate to a folder in your OneDrive or paste a OneDrive/SharePoint share link. " +
+            "Navigate to a folder in your OneDrive. " +
             "graphdo will operate on markdown files directly inside the selected folder.",
           initialScope: meDriveScope,
           client,

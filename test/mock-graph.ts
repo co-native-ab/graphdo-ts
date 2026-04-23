@@ -46,12 +46,6 @@ export class MockState {
   driveItemVersions: Map<string, MockDriveItemVersion[]>;
   /** Metadata returned by `GET /me/drive`. */
   drive: { id: string; driveType: string; webUrl: string };
-  /**
-   * Drive items reachable via `/shares/{shareId}/driveItem`. Tests seed
-   * these to exercise the workspace navigator's "Paste share link" flow
-   * without standing up a real OneDrive share.
-   */
-  sharedDriveItems: Map<string, MockDriveFile & { driveId?: string }>;
   private nextId: number;
   private nextVersionSeq: number;
   /** Per-item cTag sequence so cTags monotonically bump on every content write. */
@@ -82,7 +76,6 @@ export class MockState {
       driveType: "business",
       webUrl: "https://contoso-my.sharepoint.com/personal/user_contoso_com/Documents",
     };
-    this.sharedDriveItems = new Map();
     this.nextId = 1;
     this.nextVersionSeq = 1;
     this.cTagSeq = new Map();
@@ -422,27 +415,6 @@ async function handleRequest(
       const normalised = ["me", "drive", ...segments.slice(2)];
       const handled = await handleDriveRequest(state, req, res, method, normalised, parsed);
       if (handled) return;
-    }
-
-    // /shares/{shareId}/driveItem - resolve a sharing URL ----------------
-    if (
-      method === "GET" &&
-      segments[0] === "shares" &&
-      segments[1] !== undefined &&
-      segments[2] === "driveItem"
-    ) {
-      const shareId = segments[1];
-      const item = state.sharedDriveItems.get(shareId);
-      if (item === undefined) {
-        errorResponse(res, 404, "itemNotFound", `share ${shareId} not found`);
-        return;
-      }
-      const view = driveItemView(item);
-      if (item.driveId !== undefined) {
-        view.parentReference = { ...(view.parentReference ?? {}), driveId: item.driveId };
-      }
-      jsonResponse(res, 200, view);
-      return;
     }
 
     errorResponse(res, 404, "NotFound", `no route for ${method} ${parsed.pathname}`);

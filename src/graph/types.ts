@@ -231,21 +231,12 @@ export interface DriveItem {
    */
   webUrl?: string;
   /**
-   * Reference to the item's parent folder. Only `path` is consumed by
-   * graphdo-ts (used to build the human-friendly SharePoint preview URL).
-   * The path is the drive-relative path of the parent, prefixed with
-   * `/drive/root:` (e.g. `/drive/root:/markdown` for an item in the
-   * top-level "markdown" folder).
-   */
-  /**
    * Reference to the item's parent. Optional because graphdo does not need
    * it for most operations. When present, `path` is the drive-relative path
    * of the parent, prefixed with `/drive/root:` (e.g. `/drive/root:/markdown`
-   * for an item in the top-level "markdown" folder), and `driveId` is the
-   * id of the drive containing the parent — the latter is the only way to
-   * know which drive a `/shares/{id}/driveItem` lookup landed on.
+   * for an item in the top-level "markdown" folder).
    */
-  parentReference?: { path?: string; driveId?: string };
+  parentReference?: { path?: string };
 }
 
 export const DriveItemSchema = z
@@ -259,10 +250,7 @@ export const DriveItemSchema = z
     file: z.object({ mimeType: z.string().optional() }).loose().optional(),
     folder: z.object({ childCount: z.number().optional() }).loose().optional(),
     webUrl: z.string().optional(),
-    parentReference: z
-      .object({ path: z.string().optional(), driveId: z.string().optional() })
-      .loose()
-      .optional(),
+    parentReference: z.object({ path: z.string().optional() }).loose().optional(),
   })
   .loose();
 

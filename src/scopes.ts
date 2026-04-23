@@ -8,8 +8,6 @@ export enum GraphScope {
   MailSend = "Mail.Send",
   TasksReadWrite = "Tasks.ReadWrite",
   FilesReadWrite = "Files.ReadWrite",
-  FilesReadWriteAll = "Files.ReadWrite.All",
-  SitesReadAll = "Sites.Read.All",
   UserRead = "User.Read",
   OfflineAccess = "offline_access",
 }
@@ -53,20 +51,6 @@ export const AVAILABLE_SCOPES: readonly ScopeDefinition[] = [
     scope: GraphScope.FilesReadWrite,
     label: "Manage Markdown Files",
     description: "Read and write markdown files in a OneDrive folder you choose",
-    required: false,
-  },
-  {
-    scope: GraphScope.FilesReadWriteAll,
-    label: "Manage Files (All Drives)",
-    description:
-      "Read and write files across all accessible drives (required for shared drives and SharePoint)",
-    required: false,
-  },
-  {
-    scope: GraphScope.SitesReadAll,
-    label: "Read SharePoint Sites",
-    description:
-      "Read information about SharePoint sites (required for SharePoint document libraries)",
     required: false,
   },
 ];

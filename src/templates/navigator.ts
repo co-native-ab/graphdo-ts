@@ -32,32 +32,14 @@ export const NAVIGATOR_STYLE = `
     color: var(--text-secondary);
   }
 
-  .drive-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .drive-tab {
-    background: none;
-    border: none;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.9rem;
+  .drive-label {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
     color: var(--text-secondary);
-    border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-  }
-
-  .drive-tab:hover {
-    color: var(--text-primary);
-  }
-
-  .drive-tab.active {
-    color: var(--brand);
-    border-bottom-color: var(--brand);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
   }
 
   .breadcrumbs {
@@ -166,22 +148,6 @@ export const NAVIGATOR_STYLE = `
     cursor: not-allowed;
   }
 
-  .share-link-section {
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
-  }
-
-  .share-link-input {
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    font-family: inherit;
-    font-size: 0.9rem;
-    margin-bottom: 0.5rem;
-  }
-
   .error-message {
     background: #fee;
     color: #c33;
@@ -224,31 +190,16 @@ export const NAVIGATOR_STYLE = `
   }
 `;
 
-interface NavigatorDrive {
-  id: string;
-  label: string;
-}
-
 interface NavigatorPageConfig {
   title: string;
   subtitle: string;
-  /** Initial set of drive tabs. Always includes the user's own OneDrive. */
-  drives: NavigatorDrive[];
-  /** Active tab on first render. */
-  initialDriveId: string;
+  /** Display name of the drive being navigated (e.g. `"OneDrive"`). */
+  driveLabel: string;
   csrfToken: string;
   nonce: string;
 }
 
-function renderDriveTab(drive: NavigatorDrive, active: boolean): string {
-  return `<button class="drive-tab${active ? " active" : ""}" data-drive-id="${escapeHtml(drive.id)}">${escapeHtml(drive.label)}</button>`;
-}
-
 export function navigatorPageHtml(config: NavigatorPageConfig): string {
-  const driveTabsHtml = config.drives
-    .map((d) => renderDriveTab(d, d.id === config.initialDriveId))
-    .join("\n        ");
-
   return layoutHtml({
     title: `graphdo - ${escapeHtml(config.title)}`,
     extraStyles: NAVIGATOR_STYLE,
@@ -259,9 +210,7 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
       <h1>${escapeHtml(config.title)}</h1>
       <p class="subtitle">${escapeHtml(config.subtitle)}</p>
       <div id="error-container"></div>
-      <div class="drive-tabs" id="drive-tabs">
-        ${driveTabsHtml}
-      </div>
+      <div class="drive-label">${escapeHtml(config.driveLabel)}</div>
       <div class="breadcrumbs" id="breadcrumbs"></div>
       <div class="folder-list" id="folder-list">
         <div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">Loading…</span></div>
@@ -269,10 +218,6 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
       <div class="action-buttons">
         <button id="select-btn" class="btn btn-primary">Use this folder as workspace</button>
         <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
-      </div>
-      <div class="share-link-section">
-        <input id="share-link-input" class="share-link-input" type="text" placeholder="Paste a OneDrive or SharePoint share link..." />
-        <button id="resolve-share-btn" class="btn btn-secondary">Add shared drive</button>
       </div>
     </div>
     <picture>
@@ -282,10 +227,10 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
   </div>`,
     script: `    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content') || '';
 
-      // Navigation stack: [{ driveId, itemId, itemName, itemPath }]. The
-      // last entry is the current location; clicking a breadcrumb pops
-      // back to that entry.
-      let stack = [{ driveId: ${JSON.stringify(config.initialDriveId)}, itemId: 'root', itemName: '/', itemPath: '/' }];
+      // Navigation stack: [{ itemId, itemName, itemPath }]. The last entry
+      // is the current location; clicking a breadcrumb pops back to that
+      // entry.
+      let stack = [{ itemId: 'root', itemName: '/', itemPath: '/' }];
 
       function escapeHtml(text) {
         const div = document.createElement('div');
@@ -345,17 +290,10 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         ).join('');
       }
 
-      function renderDriveTabs(activeDriveId) {
-        document.querySelectorAll('.drive-tab').forEach(tab => {
-          tab.classList.toggle('active', tab.dataset.driveId === activeDriveId);
-        });
-      }
-
       async function loadCurrent() {
         clearError();
         const entry = current();
-        const url = '/children?driveId=' + encodeURIComponent(entry.driveId) +
-                    '&itemId=' + encodeURIComponent(entry.itemId);
+        const url = '/children?itemId=' + encodeURIComponent(entry.itemId);
         try {
           const res = await fetch(url, { method: 'GET', headers: { 'X-CSRF-Token': csrfToken } });
           if (!res.ok) {
@@ -370,14 +308,13 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
           entry.itemPath = data.itemPath;
           renderFolders(data.folders);
           renderBreadcrumbs();
-          renderDriveTabs(entry.driveId);
         } catch (err) {
           showError('Network error: ' + err.message);
         }
       }
 
-      function navigateInto(driveId, itemId, itemName) {
-        stack.push({ driveId, itemId, itemName: itemName || itemId, itemPath: '' });
+      function navigateInto(itemId, itemName) {
+        stack.push({ itemId, itemName: itemName || itemId, itemPath: '' });
         loadCurrent();
       }
 
@@ -386,15 +323,10 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         loadCurrent();
       }
 
-      function switchDrive(driveId) {
-        stack = [{ driveId, itemId: 'root', itemName: '/', itemPath: '/' }];
-        loadCurrent();
-      }
-
       document.getElementById('folder-list').addEventListener('click', (e) => {
         const item = e.target.closest('.folder-item');
         if (item && item.dataset.id) {
-          navigateInto(current().driveId, item.dataset.id, item.dataset.name);
+          navigateInto(item.dataset.id, item.dataset.name);
         }
       });
 
@@ -402,13 +334,6 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         const crumb = e.target.closest('.breadcrumb');
         if (crumb && crumb.dataset.index !== undefined) {
           navigateToBreadcrumb(parseInt(crumb.dataset.index, 10));
-        }
-      });
-
-      document.getElementById('drive-tabs').addEventListener('click', (e) => {
-        const tab = e.target.closest('.drive-tab');
-        if (tab && tab.dataset.driveId) {
-          switchDrive(tab.dataset.driveId);
         }
       });
 
@@ -427,7 +352,6 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({
-              driveId: entry.driveId,
               itemId: entry.itemId,
               itemName: entry.itemName,
               itemPath: entry.itemPath,
@@ -458,50 +382,6 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
           });
         } catch (err) { /* swallow */ }
         window.close();
-      });
-
-      document.getElementById('resolve-share-btn').addEventListener('click', async () => {
-        clearError();
-        const input = document.getElementById('share-link-input');
-        const url = input.value.trim();
-        if (!url) { showError('Please paste a share link'); return; }
-        const btn = document.getElementById('resolve-share-btn');
-        btn.disabled = true;
-        const origLabel = btn.textContent;
-        btn.textContent = 'Resolving…';
-        try {
-          const res = await fetch('/resolve-share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-            body: JSON.stringify({ url: url, csrfToken: csrfToken }),
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            showError('Failed to resolve link: ' + (data.error || res.status));
-            return;
-          }
-          const data = await res.json();
-          // Add a tab if not already present, then jump to the resolved item.
-          const tabs = document.getElementById('drive-tabs');
-          if (!tabs.querySelector('.drive-tab[data-drive-id="' + CSS.escape(data.driveId) + '"]')) {
-            const tab = document.createElement('button');
-            tab.className = 'drive-tab';
-            tab.dataset.driveId = data.driveId;
-            tab.textContent = data.driveLabel || data.driveId;
-            tabs.appendChild(tab);
-          }
-          stack = [
-            { driveId: data.driveId, itemId: 'root', itemName: '/', itemPath: '/' },
-            { driveId: data.driveId, itemId: data.itemId, itemName: data.name, itemPath: '' },
-          ];
-          loadCurrent();
-          input.value = '';
-        } catch (err) {
-          showError('Network error: ' + err.message);
-        } finally {
-          btn.disabled = false;
-          btn.textContent = origLabel;
-        }
       });
 
       loadCurrent();`,
