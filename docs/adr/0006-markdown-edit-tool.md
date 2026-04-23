@@ -457,3 +457,162 @@ verbatim mirror, not a second source of truth.
 - **Edits to historical revisions.** OneDrive does not support writing
   to a prior revision; the agent must use `markdown_get_file_version` +
   `markdown_create_file` / `markdown_update_file` to fork from history.
+
+## Follow-up — `markdown_append` (the deferred tool ships)
+
+> **Status:** Accepted as a follow-up to this ADR.
+> **Date:** 2026-04-22
+
+The "Out of scope" entry above explicitly deferred
+`markdown_insert` / `markdown_append` / `markdown_prepend` on the
+grounds that pure insertion is expressible via `markdown_edit`. After
+re-evaluating actual append-style workflows (journals, daily notes,
+running todo logs, append-only changelogs) we concluded that one of
+those three — **`markdown_append`** — is worth shipping immediately,
+and that the remaining two stay deferred for the reasons originally
+stated.
+
+### Why `markdown_append` specifically
+
+The `markdown_edit` workaround for end-of-file append is `{ old_string:
+<last bytes of file>, new_string: <last bytes of file> + <new content> }`.
+That requires the agent to **first read the file** to discover the tail
+bytes, which defeats the very token-savings rationale for which
+`markdown_edit` exists. Append-style workflows are also the case where
+the tool would otherwise pay off the most (one tiny payload per
+journal entry, repeated all day).
+
+The "where does the anchor go? what if it doesn't exist?" worry that
+deferred `markdown_insert` does not apply to append at all: the
+insertion site is always "after the last byte of the file." Append has
+zero anchor ambiguity, no markdown parser dependency, and no level-aware
+section-boundary semantics to design.
+
+### Research — how other MCP servers handle this
+
+| Server                                                | Insertion surface                                                                                                                                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `modelcontextprotocol/servers` filesystem (reference) | No insert/append/prepend. Single `edit_file` with `{ oldText, newText }` — the same shape this ADR adopted for `markdown_edit`.                                                                                                |
+| `MarkusPfundstein/mcp-obsidian` (community)           | Two tools: a simple `obsidian_append_content` for whole-file append; and a richer `obsidian_patch_content` with `operation: append \| prepend \| replace` × `target_type: heading \| block \| frontmatter` for anchored edits. |
+
+We adopt the simple-append shape from `mcp-obsidian` (one obvious
+insertion site, no anchor parsing) and explicitly **defer** the
+heading-anchored variant. Heading-anchored insertion is more powerful
+but is a separate design conversation: choice of markdown parser /
+heading-detection algorithm, frontmatter handling, level-aware section
+boundaries, and "what if the heading doesn't exist?" disambiguation —
+all material enough to deserve their own ADR rather than be smuggled in
+as a sub-bullet of this one.
+
+### Tool surface
+
+```
+markdown_append(
+  itemId?: string,         // at least one of itemId or fileName (idOrNameShape);
+                           // if both are provided, itemId takes precedence
+  fileName?: string,
+  content: string,         // non-empty after LF normalisation
+  dry_run?: boolean        // default false
+)
+```
+
+Same `idOrNameShape` resolver as the rest of the markdown family.
+
+### Separator policy — auto-LF at the join boundary, never elsewhere
+
+If (and only if) the existing file is **non-empty** and **does not end
+with `\n`**, the tool inserts exactly one `\n` between the existing
+tail and `content`. Otherwise nothing is inserted. The trailing
+newline of `content` itself is preserved verbatim — the tool never
+adds a final newline that was not there in the input.
+
+This is the POSIX "every line ends with `\n`" convention. It is
+invisible in the common case (file already ends with `\n`) and saves
+the agent from having to track whether a trailing newline exists in
+order to avoid producing `## Heading` followed by `next line` glued
+together as `## Headingnext line`. We deliberately do **not**
+auto-add a `\n` after `content` — that would make the tool surreptitiously
+modify the agent's payload, and would make round-trip-stable
+behaviour ("append then preview then append again") impossible to
+reason about.
+
+We do not introduce a configurable separator parameter. The only two
+defensible behaviours are "ensure exactly one `\n` at the join" and
+"insert nothing"; if an agent really wants to control the join
+explicitly it can include the leading `\n` in `content` itself —
+the policy is "exactly one `\n` at the join", so an additional
+leading `\n` would in fact be visible and persisted as a blank line.
+
+### Reused verbatim from `markdown_edit`
+
+Everything below is the same code path as `markdown_edit`, used
+without modification or new wrapper helpers:
+
+- **Concurrency** — `downloadMarkdownContentWithItem` to read content
+  - cTag in one GET, then `updateMarkdownFile` for the conditional PUT.
+    The same `MarkdownCTagMismatchError` reconcile message format
+    (`Current cTag` / `Current Revision` / `Modified` / `Size`, plus the
+    three numbered next-step instructions pointing at
+    `markdown_get_file` and `markdown_diff_file_versions`).
+- **Line-ending normalisation** — `normalizeLineEndings` on the
+  downloaded content, on `content`, and on the persisted result. LF
+  on read, LF on input, LF on write.
+- **Size cap** — `MAX_DIRECT_CONTENT_BYTES` (4 MiB) defence-in-depth
+  re-check on the post-append byte length, with an
+  append-tool-specific error message before the conditional PUT
+  (consistent with how `markdown_edit` reports its own breach).
+- **`dry_run`** — same `(dry run — no changes were written)` header,
+  same omission of `cTag` from `structuredContent` when no PUT
+  happened.
+- **Response shape** — text body authoritative for humans, plus a
+  `structuredContent` mirror for chained calls. Unified diff via
+  `createTwoFilesPatch` with `context: 1` (mirrored into
+  `structuredContent.diff`).
+- **Annotations** — `readOnlyHint: false`, `idempotentHint: false`,
+  `openWorldHint: false`. Same pessimistic-readOnlyHint convention
+  rather than splitting `dry_run` into a separate read-only tool.
+
+### Validation rules unique to `markdown_append`
+
+- **`content` must be non-empty after LF normalisation.** Same
+  rationale as decision 2 of this ADR (a no-op append is almost
+  certainly a model bug; failing loudly is cheaper than silently
+  adding it to the history). Enforced both at the zod layer and as
+  defence-in-depth in the handler.
+- **Subdirectory / unsupported-name guards** — same `item.folder !==
+undefined` and `validateMarkdownFileName(item.name)` checks the rest
+  of the markdown family applies.
+- **`structuredContent.bytesAppended`** is `Buffer.byteLength(after) -
+Buffer.byteLength(before)` and so reflects both the
+  LF-normalised `content` **and** the auto-inserted separator (when
+  applied). The agent does not need to compute the separator's
+  contribution itself.
+
+### Still deferred
+
+- **`markdown_prepend`.** Symmetric to append in implementation but
+  not in usefulness: most markdown files have a metadata header
+  / title line at the top; prepending raw content at byte 0
+  produces broken docs more often than not. The `markdown_edit`
+  workaround `{ old_string: <first line>, new_string: <new content>
+  - <first line> }` already works and the failure mode (anchor not
+    found) is well-defined. Revisit only if real usage shows the
+    workaround is awkward.
+- **`markdown_insert`** (heading- or block-anchored). Defer to a
+  separate ADR as discussed above — the design surface (parser
+  choice, frontmatter handling, level-aware boundaries, "what if the
+  heading doesn't exist?") is large enough to deserve its own
+  conversation rather than being a sub-bullet here.
+
+### Test surface
+
+Mirrors the `markdown_edit` integration tests with the cases that
+are unique to append: separator policy under each of the three
+existing-content shapes (empty, non-empty without trailing `\n`,
+non-empty with trailing `\n`); preservation of `content`'s own
+trailing-newline-or-lack-thereof; CRLF normalisation of both stored
+content and `content`; empty-content rejection; subdirectory guard;
+size-cap breach (atomic, no write); `dry_run` (no write, no cTag in
+`structuredContent`, diff present); 412 cTag mismatch reconcile
+wording; sequential calls; `itemId` addressing parity; happy path with
+full `structuredContent` shape assertions.

@@ -1,6 +1,7 @@
 // Markdown tool barrel.
 
 import type { AnyTool } from "../../tool-registry.js";
+import { markdownAppendFileTool } from "./append-file.js";
 import { markdownCreateFileTool } from "./create-file.js";
 import { markdownDeleteFileTool } from "./delete-file.js";
 import { markdownDiffFileVersionsTool } from "./diff-versions.js";
@@ -20,6 +21,7 @@ export {
   markdownCreateFileTool,
   markdownUpdateFileTool,
   markdownEditFileTool,
+  markdownAppendFileTool,
   markdownDeleteFileTool,
   markdownListFileVersionsTool,
   markdownGetFileVersionTool,
@@ -34,6 +36,7 @@ export const MARKDOWN_TOOLS: readonly AnyTool[] = [
   markdownCreateFileTool,
   markdownUpdateFileTool,
   markdownEditFileTool,
+  markdownAppendFileTool,
   markdownDeleteFileTool,
   markdownListFileVersionsTool,
   markdownGetFileVersionTool,

@@ -41,6 +41,7 @@ describe("integration: discovery & login", () => {
         "login",
         "logout",
         "mail_send",
+        "markdown_append",
         "markdown_create_file",
         "markdown_delete_file",
         "markdown_diff_file_versions",
