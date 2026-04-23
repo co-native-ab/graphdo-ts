@@ -1,0 +1,10 @@
+{
+  "config_version": 2,
+  "markdown": {
+    "root_folder_id": "folder-xyz",
+    "root_folder_name": "Notes",
+    "root_folder_path": "/Notes"
+  },
+  "todo_list_id": "list-abc",
+  "todo_list_name": "Inbox"
+}

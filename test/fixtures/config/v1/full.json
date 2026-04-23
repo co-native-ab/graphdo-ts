@@ -1,0 +1,9 @@
+{
+  "todoListId": "list-abc",
+  "todoListName": "Inbox",
+  "markdown": {
+    "rootFolderId": "folder-xyz",
+    "rootFolderName": "Notes",
+    "rootFolderPath": "/Notes"
+  }
+}

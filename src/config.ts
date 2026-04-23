@@ -7,7 +7,11 @@ import { z } from "zod";
 import { isNodeError } from "./errors.js";
 import { validateGraphId, type ValidatedGraphId } from "./graph/ids.js";
 import { logger } from "./logger.js";
-import { writeJsonAtomic } from "./fs-options.js";
+import { writeJsonAtomic, mkdirOptions, writeFileOptions } from "./fs-options.js";
+
+// ---------------------------------------------------------------------------
+// In-memory shape (camelCase) — used by the rest of the codebase.
+// ---------------------------------------------------------------------------
 
 export interface MarkdownConfig {
   rootFolderId?: string;
@@ -16,23 +20,261 @@ export interface MarkdownConfig {
 }
 
 export interface Config {
+  /**
+   * Schema version of the on-disk file this config was loaded from. Always
+   * equal to {@link CURRENT_CONFIG_VERSION} after `loadConfig` returns —
+   * older files are migrated transparently. Stamped onto every save.
+   */
+  configVersion?: number;
   todoListId?: string;
   todoListName?: string;
   markdown?: MarkdownConfig;
 }
 
-/** Zod schema for runtime validation of config.json content. */
-const ConfigSchema = z.object({
-  todoListId: z.string().min(1).optional(),
-  todoListName: z.string().min(1).optional(),
-  markdown: z
-    .object({
-      rootFolderId: z.string().min(1).optional(),
-      rootFolderName: z.string().min(1).optional(),
-      rootFolderPath: z.string().min(1).optional(),
-    })
-    .optional(),
-});
+// ---------------------------------------------------------------------------
+// On-disk versioning
+//
+// See ADR-0009 (Versioned Config with Forward-Only Migrations) and
+// ADR-0010 (snake_case for All Persisted Config) for the rationale.
+//
+// Adding a new version (vN+1):
+//   1. Bump CURRENT_CONFIG_VERSION.
+//   2. Add ConfigFileSchemaVN+1 (the new on-disk Zod schema, snake_case).
+//   3. Add an entry to MIGRATIONS that takes vN parsed output and returns
+//      vN+1 input. The pipeline re-validates against the next schema after
+//      each step, so migrations can stay small.
+//   4. Update `serialiseConfigFile` if the in-memory → disk mapping changed.
+//   5. Add fixtures under `test/fixtures/config/vN+1/` and a row to the
+//      round-trip matrix in `test/config-migrations.test.ts`.
+// ---------------------------------------------------------------------------
+
+/** Current on-disk config schema version. */
+export const CURRENT_CONFIG_VERSION = 2;
+
+/**
+ * v1 — legacy camelCase, no explicit `config_version` field.
+ *
+ * This schema only exists to read pre-versioning files written by older
+ * graphdo-ts builds. New code should never produce v1 output.
+ */
+const ConfigFileSchemaV1 = z
+  .object({
+    todoListId: z.string().min(1).optional(),
+    todoListName: z.string().min(1).optional(),
+    markdown: z
+      .object({
+        rootFolderId: z.string().min(1).optional(),
+        rootFolderName: z.string().min(1).optional(),
+        rootFolderPath: z.string().min(1).optional(),
+      })
+      .optional(),
+  })
+  .strip();
+
+/**
+ * v2 — snake_case keys with an explicit `config_version: 2` discriminator.
+ * This is the format every `saveConfig` call writes today.
+ */
+const ConfigFileSchemaV2 = z
+  .object({
+    config_version: z.literal(2),
+    todo_list_id: z.string().min(1).optional(),
+    todo_list_name: z.string().min(1).optional(),
+    markdown: z
+      .object({
+        root_folder_id: z.string().min(1).optional(),
+        root_folder_name: z.string().min(1).optional(),
+        root_folder_path: z.string().min(1).optional(),
+      })
+      .strip()
+      .optional(),
+  })
+  .strip();
+
+type ConfigFileV2 = z.infer<typeof ConfigFileSchemaV2>;
+
+interface Migration {
+  from: number;
+  to: number;
+  /** Pure transform: parsed input from version `from`, returns input for version `to`. */
+  migrate: (input: unknown) => unknown;
+}
+
+/**
+ * Ordered list of migrations. Each entry takes the validated output of
+ * version `from` and produces input that must validate against version
+ * `to`'s schema. Migrations are pure: no I/O, no clocks, no Graph calls.
+ */
+const MIGRATIONS: readonly Migration[] = [
+  {
+    from: 1,
+    to: 2,
+    migrate: (input) => {
+      // Input is validated against ConfigFileSchemaV1, so we can narrow safely.
+      const v1 = input as z.infer<typeof ConfigFileSchemaV1>;
+      const out: Record<string, unknown> = { config_version: 2 };
+      if (v1.todoListId !== undefined) out["todo_list_id"] = v1.todoListId;
+      if (v1.todoListName !== undefined) out["todo_list_name"] = v1.todoListName;
+      if (v1.markdown !== undefined) {
+        const md: Record<string, unknown> = {};
+        if (v1.markdown.rootFolderId !== undefined) md["root_folder_id"] = v1.markdown.rootFolderId;
+        if (v1.markdown.rootFolderName !== undefined)
+          md["root_folder_name"] = v1.markdown.rootFolderName;
+        if (v1.markdown.rootFolderPath !== undefined)
+          md["root_folder_path"] = v1.markdown.rootFolderPath;
+        if (Object.keys(md).length > 0) out["markdown"] = md;
+      }
+      return out;
+    },
+  },
+];
+
+/** Per-version Zod schemas, indexed by version number. */
+const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
+  1: ConfigFileSchemaV1,
+  2: ConfigFileSchemaV2,
+};
+
+/**
+ * Detect the on-disk schema version of a parsed JSON value. Files written
+ * before v2 have no `config_version` field, so we treat them as v1.
+ */
+function detectVersion(raw: unknown): number {
+  if (raw !== null && typeof raw === "object" && "config_version" in raw) {
+    const v = (raw as { config_version: unknown }).config_version;
+    if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  }
+  return 1;
+}
+
+/**
+ * Apply every applicable migration to bring `parsed` (already validated as
+ * `from`) up to {@link CURRENT_CONFIG_VERSION}. Each step's output is
+ * validated against the next version's schema, which gives us a safety net
+ * if a migration ever produces malformed data.
+ */
+function applyMigrations(parsed: unknown, from: number): ConfigFileV2 {
+  let current: unknown = parsed;
+  let currentVersion = from;
+  while (currentVersion < CURRENT_CONFIG_VERSION) {
+    const step = MIGRATIONS.find((m) => m.from === currentVersion);
+    if (step === undefined) {
+      throw new Error(
+        `no migration registered from config version ${String(currentVersion)} to ${String(currentVersion + 1)}`,
+      );
+    }
+    logger.info("migrating config", { from: step.from, to: step.to });
+    const next: unknown = step.migrate(current);
+    const nextSchema = SCHEMAS[step.to];
+    if (nextSchema === undefined) {
+      throw new Error(`no schema registered for config version ${String(step.to)}`);
+    }
+    const validated = nextSchema.safeParse(next);
+    if (!validated.success) {
+      throw new Error(
+        `config migration ${String(step.from)} → ${String(step.to)} produced invalid output: ${z.prettifyError(validated.error)}`,
+      );
+    }
+    current = validated.data;
+    currentVersion = step.to;
+  }
+  return current as ConfigFileV2;
+}
+
+/**
+ * Map the on-disk v2 (snake_case) shape into the in-memory `Config`
+ * (camelCase). This is the single (de)serialisation boundary on the read
+ * side — see ADR-0010.
+ */
+function toInMemory(file: ConfigFileV2): Config {
+  const out: Config = { configVersion: file.config_version };
+  if (file.todo_list_id !== undefined) out.todoListId = file.todo_list_id;
+  if (file.todo_list_name !== undefined) out.todoListName = file.todo_list_name;
+  if (file.markdown !== undefined) {
+    const md: MarkdownConfig = {};
+    if (file.markdown.root_folder_id !== undefined) md.rootFolderId = file.markdown.root_folder_id;
+    if (file.markdown.root_folder_name !== undefined)
+      md.rootFolderName = file.markdown.root_folder_name;
+    if (file.markdown.root_folder_path !== undefined)
+      md.rootFolderPath = file.markdown.root_folder_path;
+    out.markdown = md;
+  }
+  return out;
+}
+
+/**
+ * Map an in-memory `Config` into its on-disk v2 (snake_case) shape with a
+ * stable key order: `config_version` first, then top-level keys in
+ * alphabetical order. The stable order keeps round-tripping byte-identical
+ * so a no-op load → save doesn't churn the file.
+ */
+function serialiseConfigFile(config: Config): ConfigFileV2 {
+  const md: Record<string, string> = {};
+  if (config.markdown?.rootFolderId !== undefined)
+    md["root_folder_id"] = config.markdown.rootFolderId;
+  if (config.markdown?.rootFolderName !== undefined)
+    md["root_folder_name"] = config.markdown.rootFolderName;
+  if (config.markdown?.rootFolderPath !== undefined)
+    md["root_folder_path"] = config.markdown.rootFolderPath;
+
+  const ordered: Record<string, unknown> = {};
+  ordered["config_version"] = CURRENT_CONFIG_VERSION;
+  if (config.markdown !== undefined && Object.keys(md).length > 0) {
+    ordered["markdown"] = sortKeys(md);
+  }
+  if (config.todoListId !== undefined) ordered["todo_list_id"] = config.todoListId;
+  if (config.todoListName !== undefined) ordered["todo_list_name"] = config.todoListName;
+
+  // Re-validate so we can never silently write malformed data.
+  return ConfigFileSchemaV2.parse(ordered);
+}
+
+/** Return a new object with keys in alphabetical order. */
+function sortKeys<T extends Record<string, unknown>>(obj: T): T {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj).sort()) {
+    sorted[key] = obj[key];
+  }
+  return sorted as T;
+}
+
+/**
+ * Parse a raw JSON value into the in-memory `Config`. Detects the on-disk
+ * version, validates against that version's schema, runs migrations to
+ * bring it to {@link CURRENT_CONFIG_VERSION}, and maps to camelCase.
+ *
+ * Returns `{ config, migrated }`:
+ * - `config` is `null` when the value fails schema validation (e.g. a
+ *   hand-edit produced empty strings or wrong types). Callers can decide
+ *   to treat this as "no config" without crashing.
+ * - `migrated === true` means the file should be rewritten in the new
+ *   format; only set when `config` is non-null.
+ *
+ * Throws only when `config_version` exceeds the current build — we never
+ * silently downgrade.
+ */
+export function parseConfigFile(raw: unknown): { config: Config | null; migrated: boolean } {
+  const version = detectVersion(raw);
+  if (version > CURRENT_CONFIG_VERSION) {
+    throw new Error(
+      `config.json was written by a newer graphdo-ts (config_version=${String(version)}, this build supports up to ${String(CURRENT_CONFIG_VERSION)}); upgrade graphdo-ts or remove the file`,
+    );
+  }
+  const schema = SCHEMAS[version];
+  if (schema === undefined) {
+    throw new Error(`no schema registered for config version ${String(version)}`);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    logger.warn("config.json failed schema validation", {
+      version,
+      error: z.prettifyError(parsed.error),
+    });
+    return { config: null, migrated: false };
+  }
+  const upgraded = applyMigrations(parsed.data, version);
+  return { config: toInMemory(upgraded), migrated: version !== CURRENT_CONFIG_VERSION };
+}
 
 /**
  * Returns the configuration directory path.
@@ -86,27 +328,73 @@ export async function loadConfig(dir: string, signal: AbortSignal): Promise<Conf
     throw err;
   }
 
+  let raw: unknown;
   try {
-    const raw: unknown = JSON.parse(content);
-    const result = ConfigSchema.safeParse(raw);
-    if (!result.success) {
-      logger.warn("config file failed validation", {
-        path: filePath,
-        error: z.prettifyError(result.error),
-      });
-      return null;
-    }
-    return result.data;
+    raw = JSON.parse(content);
   } catch (cause: unknown) {
-    throw new Error(`failed to parse config at ${filePath}`, { cause });
+    // Unparseable file: back up the original bytes so the user can recover
+    // anything they hand-edited, then treat as "no config" rather than
+    // crashing every tool that needs it.
+    await backupCorruptConfig(filePath, content, signal).catch((backupErr: unknown) => {
+      logger.warn("failed to back up corrupt config.json", {
+        path: filePath,
+        error: backupErr instanceof Error ? backupErr.message : String(backupErr),
+      });
+    });
+    logger.warn("config.json is not valid JSON; backed up and ignored", {
+      path: filePath,
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    return null;
   }
+
+  const { config, migrated } = parseConfigFile(raw);
+  if (config === null) return null;
+  if (migrated) {
+    logger.info("rewriting config.json after migration", {
+      path: filePath,
+      to: CURRENT_CONFIG_VERSION,
+    });
+    await writeJsonAtomic(filePath, serialiseConfigFile(config), signal);
+  }
+  return config;
+}
+
+/**
+ * Move an unparseable `config.json` aside to `config.json.invalid-<ts>` so
+ * the user can inspect what they had before. Best-effort: failures are
+ * logged but never bubble up to the caller (we still want tools to return
+ * the helpful "not configured" error rather than crash).
+ */
+async function backupCorruptConfig(
+  filePath: string,
+  originalBytes: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) throw signal.reason;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `${filePath}.invalid-${ts}`;
+  await writeJsonRawAtomic(backupPath, originalBytes, signal);
+  logger.info("corrupt config.json backed up", { path: backupPath });
+}
+
+/** Like `writeJsonAtomic` but writes a raw string verbatim (used for the corruption backup). */
+async function writeJsonRawAtomic(
+  filePath: string,
+  body: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) throw signal.reason;
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, mkdirOptions());
+  await fs.writeFile(filePath, body, writeFileOptions(signal));
 }
 
 /** Writes config atomically: writes to a temp file then renames into place. */
 export async function saveConfig(config: Config, dir: string, signal: AbortSignal): Promise<void> {
   const filePath = configPath(dir);
   logger.debug("saving config", { path: filePath });
-  await writeJsonAtomic(filePath, config, signal);
+  await writeJsonAtomic(filePath, serialiseConfigFile(config), signal);
   logger.debug("config saved", { path: filePath });
 }
 
