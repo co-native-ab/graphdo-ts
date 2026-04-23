@@ -61,6 +61,25 @@ export interface Config {
 export const CURRENT_CONFIG_VERSION = 2;
 
 /**
+ * Public, version-pinned URL of the JSON Schema describing the current
+ * on-disk shape. Embedded as the `$schema` field of every saved
+ * `config.json` so editors (VS Code, JetBrains, …) pick it up automatically
+ * for completion and validation when the user hand-edits the file.
+ *
+ * Pinned to `main` (not a release tag) on purpose: bug-fix updates to the
+ * schema (tighter patterns, better descriptions) should reach existing
+ * users without a graphdo-ts upgrade. Breaking shape changes get a new
+ * `config-v{N+1}.json` file and a new `config_version` literal — the URL
+ * here is then bumped to the new file, but the old file stays in the repo
+ * so already-written `config.json`s keep validating.
+ *
+ * See `schemas/README.md` for the full version table and the rules for
+ * adding a new version.
+ */
+export const CONFIG_SCHEMA_URL =
+  "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json";
+
+/**
  * v1 — legacy camelCase, no explicit `config_version` field.
  *
  * This schema only exists to read pre-versioning files written by older
@@ -226,11 +245,12 @@ function toInMemory(file: ConfigFileV2): Config {
 
 /**
  * Map an in-memory `Config` into its on-disk v2 (snake_case) shape with a
- * stable key order: `config_version` first, then top-level keys in
- * alphabetical order. The stable order keeps round-tripping byte-identical
- * so a no-op load → save doesn't churn the file.
+ * stable key order: `$schema` first (editor hint), then `config_version`,
+ * then remaining top-level keys in alphabetical order. The stable order
+ * keeps round-tripping byte-identical so a no-op load → save doesn't churn
+ * the file.
  */
-function serialiseConfigFile(config: Config): ConfigFileV2 {
+function serialiseConfigFile(config: Config): Record<string, unknown> {
   const todo: Record<string, string> = {};
   if (config.todo?.listId !== undefined) todo["list_id"] = config.todo.listId;
   if (config.todo?.listName !== undefined) todo["list_name"] = config.todo.listName;
@@ -243,17 +263,28 @@ function serialiseConfigFile(config: Config): ConfigFileV2 {
   if (config.markdown?.rootFolderPath !== undefined)
     md["root_folder_path"] = config.markdown.rootFolderPath;
 
-  const ordered: Record<string, unknown> = {};
-  ordered["config_version"] = CURRENT_CONFIG_VERSION;
-  if (config.markdown !== undefined && Object.keys(md).length > 0) {
-    ordered["markdown"] = sortKeys(md);
-  }
-  if (config.todo !== undefined && Object.keys(todo).length > 0) {
-    ordered["todo"] = sortKeys(todo);
-  }
+  // Re-validate the snake_case payload so we can never silently write
+  // malformed data. `$schema` is not part of the Zod schema (it's
+  // `.strip()`ed on load), so it's not validated here — but it's a fixed
+  // string constant under our control, so that's fine.
+  const validated = ConfigFileSchemaV2.parse({
+    config_version: CURRENT_CONFIG_VERSION,
+    ...(Object.keys(md).length > 0 ? { markdown: md } : {}),
+    ...(Object.keys(todo).length > 0 ? { todo: todo } : {}),
+  });
 
-  // Re-validate so we can never silently write malformed data.
-  return ConfigFileSchemaV2.parse(ordered);
+  // Build the on-disk object with deterministic key order:
+  //   $schema, config_version, then remaining keys alphabetically.
+  // `$schema` is emitted first so editors (VS Code, JetBrains, …) pick it
+  // up immediately when the file is opened. It's stripped on load by the
+  // Zod `.strip()` on `ConfigFileSchemaV2`, then re-added here on save, so
+  // a no-op load → save round-trip stays byte-identical.
+  const ordered: Record<string, unknown> = {};
+  ordered["$schema"] = CONFIG_SCHEMA_URL;
+  ordered["config_version"] = validated.config_version;
+  if (validated.markdown !== undefined) ordered["markdown"] = sortKeys(validated.markdown);
+  if (validated.todo !== undefined) ordered["todo"] = sortKeys(validated.todo);
+  return ordered;
 }
 
 /**

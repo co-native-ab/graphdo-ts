@@ -150,6 +150,34 @@ describe("v1 → v2 migration semantics", () => {
   });
 });
 
+describe("$schema editor hint", () => {
+  it("v1 → v2 migration writes a $schema URL pointing at the version-pinned schema on main", async () => {
+    const dir = await seedFixture(1, "full");
+    await loadConfig(dir, testSignal());
+    const raw = JSON.parse(await fs.readFile(path.join(dir, "config.json"), "utf-8")) as Record<
+      string,
+      unknown
+    >;
+    expect(raw["$schema"]).toBe(
+      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+    );
+    // Ordering: editors look at the very first key; assert it is $schema.
+    expect(Object.keys(raw)[0]).toBe("$schema");
+  });
+
+  it("strips $schema on load (it never leaks into the in-memory Config)", () => {
+    const { config } = parseConfigFile({
+      $schema: "https://example.invalid/anything.json",
+      config_version: 2,
+      todo: { list_id: "x", list_name: "y" },
+    });
+    expect(config).toEqual({
+      configVersion: 2,
+      todo: { listId: "x", listName: "y" },
+    });
+  });
+});
+
 describe("forward-compat refusal", () => {
   it("throws when config_version exceeds the current build", async () => {
     const dir = getTempDir();

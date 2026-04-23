@@ -54,6 +54,16 @@ Specifically:
 - Structured logger output also uses snake_case keys
   (`{ todo_list_id, root_folder_id }`) because logger output is
   parseable text consumed by humans and pipelines, not in-memory state.
+- Every saved `config.json` embeds a `$schema` field (always emitted as
+  the first key) pointing at the version-pinned JSON Schema published in
+  this repo under [`schemas/`](../../schemas/README.md) — e.g.
+  `https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json`.
+  Editors that understand JSON Schema (VS Code, JetBrains, neovim with
+  `coc-json`, …) then offer completion and validation on hand-edits with
+  zero per-user setup. The Zod loader `.strip()`s `$schema` back out so
+  it never leaks into the in-memory `Config`. The `$` prefix is a
+  recognised JSON Schema convention, so it does not violate the
+  snake_case rule above.
 
 This explicitly does **not** apply to:
 

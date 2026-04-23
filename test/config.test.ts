@@ -184,9 +184,25 @@ describe("saveConfig", () => {
     const content = await fs.readFile(path.join(dir, "config.json"), "utf-8");
     const parsed = JSON.parse(content) as Record<string, unknown>;
     expect(parsed).toEqual({
+      $schema:
+        "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
       config_version: 2,
       todo: { list_id: "list-123", list_name: "My Tasks" },
     });
+  });
+
+  it("emits $schema as the first key so editors pick it up immediately", async () => {
+    const dir = getTempDir();
+    await saveConfig(validConfig, dir, testSignal());
+
+    const content = await fs.readFile(path.join(dir, "config.json"), "utf-8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const keys = Object.keys(parsed);
+    expect(keys[0]).toBe("$schema");
+    expect(keys[1]).toBe("config_version");
+    expect(parsed["$schema"]).toBe(
+      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+    );
   });
 
   it("file exists after save (atomic write)", async () => {

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v1.json",
+  "title": "graphdo-ts config (v1, legacy)",
+  "description": "Pre-versioning on-disk shape of `config.json`. New builds never write this shape; it is documented here so editors and external tools can validate legacy files that have not yet been auto-migrated to v2 by the next graphdo-ts launch.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Optional editor hint pointing back to this schema."
+    },
+    "todoListId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Microsoft Graph todoTaskList id selected via `todo_select_list`."
+    },
+    "todoListName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name of the selected todo list. Cached for human-readable status output."
+    },
+    "markdown": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "rootFolderId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OneDrive driveItem id of the markdown workspace folder."
+        },
+        "rootFolderName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rootFolderPath": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

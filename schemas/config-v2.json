@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+  "title": "graphdo-ts config (v2)",
+  "description": "Versioned snake_case on-disk shape of `config.json`. Written by graphdo-ts ≥ the release that introduced ADR-0009 / ADR-0010. See https://github.com/co-native-ab/graphdo-ts/blob/main/docs/adr/0009-versioned-config-with-forward-only-migrations.md and https://github.com/co-native-ab/graphdo-ts/blob/main/docs/adr/0010-snake-case-for-all-persisted-config.md for rationale.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["config_version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Editor hint pointing at this schema. Stripped on load and re-emitted on save by graphdo-ts; safe to omit if you are hand-authoring the file."
+    },
+    "config_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "On-disk schema version discriminator. Files with a higher value than the running build supports are rejected (never silently downgraded)."
+    },
+    "todo": {
+      "type": "object",
+      "description": "Selection persisted by the `todo_select_list` tool.",
+      "additionalProperties": false,
+      "properties": {
+        "list_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Microsoft Graph todoTaskList id. Opaque token: must not contain `/`, `\\`, or whitespace."
+        },
+        "list_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name of the selected list. Cached so `auth_status` can show it without an extra Graph round-trip."
+        }
+      }
+    },
+    "markdown": {
+      "type": "object",
+      "description": "Selection persisted by the `markdown_select_root_folder` tool.",
+      "additionalProperties": false,
+      "properties": {
+        "root_folder_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OneDrive driveItem id of a single top-level workspace folder. Opaque token: must not equal `/`, contain `/`, `\\`, or whitespace."
+        },
+        "root_folder_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_folder_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display-only path (e.g. `/Notes`). Never used to address the folder; the `root_folder_id` is the source of truth."
+        }
+      }
+    }
+  }
+}

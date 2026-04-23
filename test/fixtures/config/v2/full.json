@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
   "config_version": 2,
   "markdown": {
     "root_folder_id": "folder-xyz",
