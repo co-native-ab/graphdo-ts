@@ -22,8 +22,10 @@
   "scripts": {
     "icons": "node scripts/encode-icons.mjs",
     "icons:check": "node scripts/encode-icons.mjs --check",
+    "schemas:generate": "tsx scripts/generate-schemas.ts",
+    "schemas:check": "tsx scripts/generate-schemas.ts --check",
     "preview": "node scripts/preview-pages.mjs",
-    "build": "npm run icons && node build.mjs",
+    "build": "npm run icons && npm run schemas:generate && node build.mjs",
     "mcpb": "node scripts/bundle-mcpb.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -33,7 +35,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run icons:check && npm run lint && npm run typecheck && npm run test"
+    "check": "npm run format:check && npm run icons:check && npm run schemas:check && npm run lint && npm run typecheck && npm run test"
   },
   "keywords": [
     "mcp",
@@ -61,6 +63,7 @@
     "esbuild": "^0.28.0",
     "eslint": "^10.2.0",
     "prettier": "^3.8.2",
+    "tsx": "^4.20.6",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1",
     "vitest": "^4.1.4"

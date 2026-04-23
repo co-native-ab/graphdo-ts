@@ -30,7 +30,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const stepId = validateGraphId("stepId", args.stepId);
       const client = config.graphClient;
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
-      await deleteChecklistItem(client, todoConfig.todoListId, taskId, stepId, signal);
+      await deleteChecklistItem(client, todoConfig.todo.listId, taskId, stepId, signal);
 
       return { content: [{ type: "text", text: `Step "${args.stepId}" deleted.` }] };
     } catch (err: unknown) {

@@ -57,7 +57,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
       const items = await listTodos(
         client,
-        todoConfig.todoListId,
+        todoConfig.todo.listId,
         args.top,
         args.skip,
         args.filter,
@@ -73,7 +73,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
         return `${num}. ${emoji}${imp} ${item.title}${due} (${item.id})`;
       });
 
-      const header = `Todos in "${todoConfig.todoListName}":\n`;
+      const header = `Todos in "${todoConfig.todo.listName}":\n`;
       const footer = `\nShowing ${String(items.length)} items (skip: ${String(args.skip)}, top: ${String(args.top)})`;
       const text =
         items.length > 0

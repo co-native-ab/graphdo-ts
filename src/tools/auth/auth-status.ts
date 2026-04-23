@@ -48,8 +48,8 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       lines.push("");
 
       const cfg = await loadConfig(config.configDir, signal);
-      if (cfg?.todoListId && cfg.todoListName) {
-        lines.push(`Todo list: ${cfg.todoListName} (${cfg.todoListId})`);
+      if (cfg?.todo?.listId && cfg.todo.listName) {
+        lines.push(`Todo list: ${cfg.todo.listName} (${cfg.todo.listId})`);
       } else {
         lines.push("Todo list: Not configured");
         lines.push('Use the "todo_select_list" tool to select a todo list.');

@@ -118,8 +118,8 @@ describe("integration: todo", () => {
 
         const config = await loadConfig(tempConfigDir, testSignal());
         expect(config).not.toBeNull();
-        expect(config!.todoListId).toBe("list-2");
-        expect(config!.todoListName).toBe("Work");
+        expect(config!.todo?.listId).toBe("list-2");
+        expect(config!.todo?.listName).toBe("Work");
       } finally {
         env.graphState.todoLists = originalLists;
         await rm(tempConfigDir, { recursive: true, force: true });

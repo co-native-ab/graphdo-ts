@@ -46,7 +46,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
       const todoConfig = await loadAndValidateTodoConfig(config.configDir, signal);
       const item = await updateChecklistItem(
         client,
-        todoConfig.todoListId,
+        todoConfig.todo.listId,
         taskId,
         stepId,
         { displayName: args.displayName, isChecked: args.isChecked },

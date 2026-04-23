@@ -62,7 +62,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
           },
           onSelect: async (option, s) => {
             await updateConfig(
-              { todoListId: option.id, todoListName: option.label },
+              { todo: { listId: option.id, listName: option.label } },
               config.configDir,
               s,
             );

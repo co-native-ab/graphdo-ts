@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+  "config_version": 2,
+  "markdown": {
+    "root_folder_id": "folder-xyz",
+    "root_folder_name": "Notes",
+    "root_folder_path": "/Notes"
+  },
+  "todo": {
+    "list_id": "list-abc",
+    "list_name": "Inbox"
+  }
+}

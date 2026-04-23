@@ -37,6 +37,14 @@ afterEach(async () => {
 });
 
 const validConfig: Config = {
+  todo: { listId: "list-123", listName: "My Tasks" },
+};
+
+/** validConfig as it appears in memory after a round-trip through saveConfig/loadConfig. */
+const validConfigPersisted: Config = { ...validConfig, configVersion: 2 };
+
+/** Legacy v1 (camelCase, flat, no `config_version`) form of `validConfig` for migration tests. */
+const validConfigV1OnDisk = {
   todoListId: "list-123",
   todoListName: "My Tasks",
 };
@@ -85,30 +93,42 @@ describe("loadConfig", () => {
     expect(result).toBeNull();
   });
 
-  it("returns parsed Config when valid file exists", async () => {
+  it("returns parsed Config (with configVersion stamped) when valid v1 file exists", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfig));
+    // Write a legacy v1 (camelCase, flat, no config_version) file directly to
+    // exercise the migration path.
+    await fs.writeFile(path.join(dir, "config.json"), JSON.stringify(validConfigV1OnDisk));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual(validConfig);
+    expect(result).toEqual(validConfigPersisted);
   });
 
-  it("throws when JSON is invalid", async () => {
+  it("returns null and backs up the file when JSON is invalid", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), "{not valid json!!!");
 
-    await expect(loadConfig(dir, testSignal())).rejects.toThrow("failed to parse config");
+    const result = await loadConfig(dir, testSignal());
+    expect(result).toBeNull();
+
+    // The corrupt original was preserved alongside the live file.
+    const files = await fs.readdir(dir);
+    const backups = files.filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups).toHaveLength(1);
+    const backupName = backups[0];
+    if (backupName === undefined) throw new Error("no backup file produced");
+    const backupContent = await fs.readFile(path.join(dir, backupName), "utf-8");
+    expect(backupContent).toBe("{not valid json!!!");
   });
 
-  it("strips extra fields and returns empty config for unknown shape", async () => {
+  it("strips extra fields and returns config containing only the version", async () => {
     const dir = getTempDir();
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual({});
+    expect(result).toEqual({ configVersion: 2 });
   });
 
   it("returns null for valid JSON with empty required fields", async () => {
@@ -130,7 +150,7 @@ describe("loadConfig", () => {
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual({ todoListId: "list-1" });
+    expect(result).toEqual({ configVersion: 2, todo: { listId: "list-1" } });
   });
 
   it("strips extra fields and returns valid config", async () => {
@@ -138,11 +158,11 @@ describe("loadConfig", () => {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, "config.json"),
-      JSON.stringify({ ...validConfig, extraField: "ignored" }),
+      JSON.stringify({ ...validConfigV1OnDisk, extraField: "ignored" }),
     );
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual(validConfig);
+    expect(result).toEqual(validConfigPersisted);
   });
 });
 
@@ -157,13 +177,32 @@ describe("saveConfig", () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it("writes valid JSON that can be read back", async () => {
+  it("writes valid JSON in snake_case (v2) with todo nested that can be read back", async () => {
     const dir = getTempDir();
     await saveConfig(validConfig, dir, testSignal());
 
     const content = await fs.readFile(path.join(dir, "config.json"), "utf-8");
-    const parsed = JSON.parse(content) as Config;
-    expect(parsed).toEqual(validConfig);
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    expect(parsed).toEqual({
+      $schema:
+        "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+      config_version: 2,
+      todo: { list_id: "list-123", list_name: "My Tasks" },
+    });
+  });
+
+  it("emits $schema as the first key so editors pick it up immediately", async () => {
+    const dir = getTempDir();
+    await saveConfig(validConfig, dir, testSignal());
+
+    const content = await fs.readFile(path.join(dir, "config.json"), "utf-8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const keys = Object.keys(parsed);
+    expect(keys[0]).toBe("$schema");
+    expect(keys[1]).toBe("config_version");
+    expect(parsed["$schema"]).toBe(
+      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+    );
   });
 
   it("file exists after save (atomic write)", async () => {
@@ -217,22 +256,21 @@ describe("loadAndValidateTodoConfig", () => {
     await saveConfig(validConfig, dir, testSignal());
 
     const result = await loadAndValidateTodoConfig(dir, testSignal());
-    expect(result).toEqual(validConfig);
+    expect(result).toEqual(validConfigPersisted);
   });
 });
 
 describe("round-trip", () => {
-  it("save then load returns identical data", async () => {
+  it("save then load returns identical data (with configVersion stamped)", async () => {
     const dir = getTempDir();
     const config: Config = {
-      todoListId: "abc-456",
-      todoListName: "Work Items",
+      todo: { listId: "abc-456", listName: "Work Items" },
     };
 
     await saveConfig(config, dir, testSignal());
     const loaded = await loadConfig(dir, testSignal());
 
-    expect(loaded).toEqual(config);
+    expect(loaded).toEqual({ ...config, configVersion: 2 });
   });
 });
 

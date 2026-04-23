@@ -159,7 +159,7 @@ npm run test -- -t "todo_select_list"      # Filter by test name
 ```bash
 npm run lint                          # ESLint (strict + stylistic)
 npm run typecheck                     # tsc --noEmit
-npm run check                         # format:check + icons:check + lint + typecheck + test (all five)
+npm run check                         # format:check + icons:check + schemas:check + lint + typecheck + test (all six)
 ```
 
 ### Building
@@ -187,7 +187,7 @@ Add handlers to `handleRequest()` in `test/mock-graph.ts`. Follow the pattern: c
 4. **Register in `src/index.ts`** - add `registerXxxTools(server, config)` call in `createMcpServer()`
 5. **Add tests** - both Graph layer tests and integration tests. Pass `testSignal()` to all async calls.
 6. **Input validation** - use `zod` schemas in `inputSchema` (the MCP SDK validates automatically)
-7. Run `npm run check` (format:check + icons:check + lint + typecheck + test)
+7. Run `npm run check` (format:check + icons:check + schemas:check + lint + typecheck + test)
 
 ## CI/CD
 
@@ -235,7 +235,7 @@ Published as `@co-native-ab/graphdo-ts` with OIDC Trusted Publishing (no tokens)
 
 Stored in the config directory (`~/.config/graphdo-ts` on Linux, OS-appropriate elsewhere):
 
-- `config.json` - selected todo list ID and display name
+- `config.json` — versioned, snake_case JSON describing the user's selections (current schema: v2). Top-level keys are `$schema` (raw.githubusercontent.com URL of the matching `schemas/config-vN.json` for editor support), `config_version` (integer discriminator), and per-subsystem objects (`todo: { list_id, list_name }`, `markdown: { root_folder_id, root_folder_name, root_folder_path }`). The in-memory `Config` type (camelCase) is derived mechanically from the current Zod schema, so the on-disk and in-memory shapes mirror each other modulo casing. Older files are migrated forward on first load. See ADR-0009, ADR-0010, and `schemas/README.md`.
 - `msal_cache.json` - MSAL token cache (managed by MSAL library)
 - `account.json` - cached MSAL account info for silent token acquisition
 

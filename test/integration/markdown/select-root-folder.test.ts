@@ -198,7 +198,7 @@ describe("integration: markdown_select_root_folder", () => {
     const tempConfigDir = await mkdtemp(path.join(tmpdir(), "graphdo-md-merge-"));
     try {
       await saveConfig(
-        { todoListId: "keep-me", todoListName: "Keep Me" },
+        { todo: { listId: "keep-me", listName: "Keep Me" } },
         tempConfigDir,
         testSignal(),
       );
@@ -239,7 +239,7 @@ describe("integration: markdown_select_root_folder", () => {
       expect(r.isError).toBeFalsy();
 
       const cfg = await loadConfig(tempConfigDir, testSignal());
-      expect(cfg?.todoListId).toBe("keep-me");
+      expect(cfg?.todo?.listId).toBe("keep-me");
       expect(cfg?.markdown?.rootFolderId).toBe("folder-1");
     } finally {
       await rm(tempConfigDir, { recursive: true, force: true });

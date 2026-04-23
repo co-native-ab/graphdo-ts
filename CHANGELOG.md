@@ -18,9 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Body size limit (1 MB) on picker POST handler to prevent memory exhaustion ([TD-016])
 - Zod runtime validation in `loadConfig()` replacing unsafe `JSON.parse` cast ([TD-018])
 - New `docs-writer` agent for project documentation tasks
+- Versioned `config.json` schema with explicit `config_version` field and a forward-only migration pipeline (see [ADR-0009](docs/adr/0009-versioned-config-and-migrations.md))
+- ADR-0009 (Versioned Config with Forward-Only Migrations) and ADR-0010 (snake_case for All Persisted Config)
+- Corrupt `config.json` files are now backed up to `config.json.invalid-<timestamp>` on next load instead of crashing tools
+- Public, version-pinned JSON Schemas for `config.json` under [`schemas/`](schemas/README.md) (`config-v1.json`, `config-v2.json`), **generated from the per-version Zod schemas in `src/config.ts`** by [`scripts/generate-schemas.ts`](scripts/generate-schemas.ts). Generation is wired into `npm run build`; `npm run schemas:check` (part of `npm run check` and CI) fails on any drift from the Zod source of truth. A frozen-history snapshot test (`test/schemas-generated.test.ts` + `test/fixtures/schemas-frozen/`) forces a visible PR diff — and ideally a `config_version` bump — whenever an already-published schema would change. Every saved `config.json` now embeds a `$schema` field pointing at the v2 schema on `main`, so editors (VS Code, JetBrains, …) get completion and validation when the user hand-edits the file.
 
 ### Changed
 
+- **Breaking (config file format):** `config.json` is now written in `snake_case` with a top-level `config_version: 2` field, and per-subsystem keys are nested into objects (`todo: { list_id, list_name }`, `markdown: { … }`) so disk and in-memory shapes mirror each other. Existing `config.json` files written in the legacy flat camelCase format are migrated automatically on first load (todo and markdown fields are preserved). See [ADR-0010](docs/adr/0010-snake-case-persisted-config.md) for the rationale.
+- `loadConfig()` no longer throws on unparseable JSON — it backs the file up to `config.json.invalid-<timestamp>` and returns `null`, letting tools surface the standard "not configured" error rather than crash.
+- `loadConfig()` refuses to load a `config.json` whose `config_version` is newer than the current build; the file is left untouched (no silent downgrade).
 - `openBrowser` now accepts `https://` URLs to any host (still rejects plain `http://` to non-localhost) so deep-link tools like `markdown_preview_file` can launch external URLs
 - Standardized Node.js version to >=22 across `manifest.json`, `README.md`, `build.mjs`, and `package.json` ([TD-012])
 - Split 1,249-line integration test file into focused test modules with shared helpers ([TD-022])

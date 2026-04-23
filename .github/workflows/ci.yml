@@ -30,6 +30,8 @@ jobs:
         run: npm run format:check
       - name: Icons check
         run: npm run icons:check
+      - name: Schemas check
+        run: npm run schemas:check
       - name: Lint
         run: npm run lint
       - name: Typecheck
