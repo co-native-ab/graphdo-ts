@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Versioned `config.json` schema with explicit `config_version` field and a forward-only migration pipeline (see [ADR-0009](docs/adr/0009-versioned-config-and-migrations.md))
 - ADR-0009 (Versioned Config with Forward-Only Migrations) and ADR-0010 (snake_case for All Persisted Config)
 - Corrupt `config.json` files are now backed up to `config.json.invalid-<timestamp>` on next load instead of crashing tools
-- Public, version-pinned JSON Schemas for `config.json` under [`schemas/`](schemas/README.md) (`config-v1.json`, `config-v2.json`); every saved `config.json` now embeds a `$schema` field pointing at the v2 schema on `main`, so editors (VS Code, JetBrains, …) get completion and validation when the user hand-edits the file
+- Public, version-pinned JSON Schemas for `config.json` under [`schemas/`](schemas/README.md) (`config-v1.json`, `config-v2.json`), **generated from the per-version Zod schemas in `src/config.ts`** by [`scripts/generate-schemas.ts`](scripts/generate-schemas.ts). Generation is wired into `npm run build`; `npm run schemas:check` (part of `npm run check` and CI) fails on any drift from the Zod source of truth. A frozen-history snapshot test (`test/schemas-generated.test.ts` + `test/fixtures/schemas-frozen/`) forces a visible PR diff — and ideally a `config_version` bump — whenever an already-published schema would change. Every saved `config.json` now embeds a `$schema` field pointing at the v2 schema on `main`, so editors (VS Code, JetBrains, …) get completion and validation when the user hand-edits the file.
 
 ### Changed
 

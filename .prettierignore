@@ -4,3 +4,10 @@ coverage/
 html-preview/
 *.mcpb
 package-lock.json
+
+# Generated JSON Schema artefacts. Owned by `scripts/generate-schemas.ts`
+# (run via `npm run schemas:generate`); reformatting them with prettier
+# would create drift between the generator output and the on-disk file
+# and silently break `npm run schemas:check`.
+schemas/
+test/fixtures/schemas-frozen/

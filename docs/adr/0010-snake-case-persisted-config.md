@@ -64,6 +64,33 @@ Specifically:
   it never leaks into the in-memory `Config`. The `$` prefix is a
   recognised JSON Schema convention, so it does not violate the
   snake_case rule above.
+- The published JSON Schemas under `schemas/config-v{N}.json` are
+  **generated** from the per-version Zod schemas in `src/config.ts`.
+  [`scripts/generate-schemas.ts`](../../scripts/generate-schemas.ts)
+  walks the `SCHEMAS` map and writes one file per registered version
+  using `z.toJSONSchema()`. The generator runs as part of `npm run
+build`; `npm run schemas:check` (wired into `npm run check` and CI)
+  fails if any committed `schemas/config-vN.json` has drifted from what
+  the generator would emit right now. This guarantees the Zod schemas
+  are the **single source of truth** — there is no separate JSON
+  Schema artefact that can rot independently. The `$id`, `title`, and
+  `description` of each published file come from `.meta()` on the Zod
+  schema itself, and field-level `description`s come from `.describe()`.
+- A change to `ConfigFileSchemaV{N}` for an _already-published_ version
+  N is treated as a contract change. The frozen-history snapshot test
+  (`test/schemas-generated.test.ts`, comparing the generator output to
+  immutable copies under `test/fixtures/schemas-frozen/`) fails on any
+  such change. The fix is one of:
+  1. (Recommended) Add `ConfigFileSchemaV{N+1}`, bump
+     `CURRENT_CONFIG_VERSION`, register a migration in `MIGRATIONS`,
+     and leave V{N} untouched.
+  2. Acknowledge a non-breaking widening of V{N} (e.g., a new optional
+     field) by updating the frozen snapshot — a visible, reviewable PR
+     diff that signals the developer thought about backward
+     compatibility.
+     This means we cannot _accidentally_ ship a breaking change to a
+     published schema; the test forces a conscious choice during code
+     review.
 
 This explicitly does **not** apply to:
 

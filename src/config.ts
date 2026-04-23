@@ -76,54 +76,129 @@ export const CURRENT_CONFIG_VERSION = 2;
  * See `schemas/README.md` for the full version table and the rules for
  * adding a new version.
  */
-export const CONFIG_SCHEMA_URL =
-  "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json";
+export const CONFIG_SCHEMA_URL = configSchemaUrl(CURRENT_CONFIG_VERSION);
+
+/**
+ * Build the canonical raw.githubusercontent.com URL for the JSON Schema
+ * file describing on-disk version `v`. Centralising the URL shape here
+ * keeps {@link CONFIG_SCHEMA_URL}, the per-version `$id` metadata and the
+ * generator script ({@link ../scripts/generate-schemas.ts}) in lockstep.
+ */
+export function configSchemaUrl(v: number): string {
+  return `https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v${String(v)}.json`;
+}
 
 /**
  * v1 — legacy camelCase, no explicit `config_version` field.
  *
  * This schema only exists to read pre-versioning files written by older
- * graphdo-ts builds. New code should never produce v1 output.
+ * graphdo-ts builds. New code should never produce v1 output. The
+ * generator emits a corresponding `schemas/config-v1.json` so older
+ * files still validate against a public, version-pinned JSON Schema even
+ * though the loader auto-migrates them on next launch.
  */
-const ConfigFileSchemaV1 = z
+export const ConfigFileSchemaV1 = z
   .object({
-    todoListId: z.string().min(1).optional(),
-    todoListName: z.string().min(1).optional(),
+    todoListId: z
+      .string()
+      .min(1)
+      .describe(
+        "Microsoft Graph todoTaskList id (legacy flat key, renamed to `todo.list_id` in v2).",
+      )
+      .optional(),
+    todoListName: z
+      .string()
+      .min(1)
+      .describe(
+        "Display name of the selected todo list (legacy flat key, renamed to `todo.list_name` in v2).",
+      )
+      .optional(),
     markdown: z
       .object({
-        rootFolderId: z.string().min(1).optional(),
+        rootFolderId: z
+          .string()
+          .min(1)
+          .describe("OneDrive driveItem id of the markdown workspace folder.")
+          .optional(),
         rootFolderName: z.string().min(1).optional(),
         rootFolderPath: z.string().min(1).optional(),
       })
+      .strip()
       .optional(),
   })
-  .strip();
+  .strip()
+  .meta({
+    $id: configSchemaUrl(1),
+    title: "graphdo-ts config (v1, legacy)",
+    description:
+      "Pre-versioning on-disk shape of `config.json`. New builds never write this shape; it is documented here so editors and external tools can validate legacy files that have not yet been auto-migrated to v2 by the next graphdo-ts launch.",
+  });
 
 /**
  * v2 — snake_case keys with an explicit `config_version: 2` discriminator.
  * Per-subsystem nested objects (`todo`, `markdown`) mirror the in-memory
  * structure so disk and code agree on shape modulo casing.
+ *
+ * The generator (`scripts/generate-schemas.ts`) emits this Zod schema as
+ * `schemas/config-v2.json`. The published JSON Schema file is therefore
+ * always derivable from this single source of truth — see ADR-0010.
  */
-const ConfigFileSchemaV2 = z
+export const ConfigFileSchemaV2 = z
   .object({
-    config_version: z.literal(2),
+    config_version: z
+      .literal(2)
+      .describe(
+        "On-disk schema version discriminator. Files with a higher value than the running build supports are rejected (never silently downgraded).",
+      ),
     todo: z
       .object({
-        list_id: z.string().min(1).optional(),
-        list_name: z.string().min(1).optional(),
+        list_id: z
+          .string()
+          .min(1)
+          .describe(
+            "Microsoft Graph todoTaskList id. Opaque token: must not contain `/`, `\\`, or whitespace.",
+          )
+          .optional(),
+        list_name: z
+          .string()
+          .min(1)
+          .describe(
+            "Display name of the selected list. Cached so `auth_status` can show it without an extra Graph round-trip.",
+          )
+          .optional(),
       })
       .strip()
+      .describe("Selection persisted by the `todo_select_list` tool.")
       .optional(),
     markdown: z
       .object({
-        root_folder_id: z.string().min(1).optional(),
+        root_folder_id: z
+          .string()
+          .min(1)
+          .describe(
+            "OneDrive driveItem id of a single top-level workspace folder. Opaque token: must not equal `/`, contain `/`, `\\`, or whitespace.",
+          )
+          .optional(),
         root_folder_name: z.string().min(1).optional(),
-        root_folder_path: z.string().min(1).optional(),
+        root_folder_path: z
+          .string()
+          .min(1)
+          .describe(
+            "Display-only path (e.g. `/Notes`). Never used to address the folder; the `root_folder_id` is the source of truth.",
+          )
+          .optional(),
       })
       .strip()
+      .describe("Selection persisted by the `markdown_select_root_folder` tool.")
       .optional(),
   })
-  .strip();
+  .strip()
+  .meta({
+    $id: configSchemaUrl(2),
+    title: "graphdo-ts config (v2)",
+    description:
+      "Versioned snake_case on-disk shape of `config.json`. Written by graphdo-ts ≥ the release that introduced ADR-0009 / ADR-0010. Generated from the Zod source of truth in `src/config.ts` by `scripts/generate-schemas.ts`; do not edit by hand.",
+  });
 
 type ConfigFileV2 = z.infer<typeof ConfigFileSchemaV2>;
 
@@ -167,7 +242,13 @@ const MIGRATIONS: readonly Migration[] = [
 ];
 
 /** Per-version Zod schemas, indexed by version number. */
-const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
+/**
+ * Per-version Zod schemas, indexed by version number. Public so the
+ * generator script (`scripts/generate-schemas.ts`) can iterate it to emit
+ * one `schemas/config-vN.json` per version. **Adding a new version means
+ * exactly one place to update.**
+ */
+export const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
   1: ConfigFileSchemaV1,
   2: ConfigFileSchemaV2,
 };
