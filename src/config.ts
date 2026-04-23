@@ -295,7 +295,6 @@ const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
-/** Per-version Zod schemas, indexed by version number. */
 /**
  * Per-version Zod schemas, indexed by version number. Public so the
  * generator script (`scripts/generate-schemas.ts`) can iterate it to emit
@@ -381,9 +380,9 @@ function applyMigrations(parsed: unknown, from: number): CurrentConfigFile {
 }
 
 /**
- * Map the on-disk v2 (snake_case) shape into the in-memory `Config`
- * (camelCase). This is the single (de)serialisation boundary on the read
- * side — see ADR-0010.
+ * Map the on-disk (snake_case) shape for the current schema version into
+ * the in-memory `Config` (camelCase). This is the single
+ * (de)serialisation boundary on the read side — see ADR-0010.
  */
 function toInMemory(file: CurrentConfigFile): Config {
   const out: Config = { configVersion: file.config_version };
@@ -406,11 +405,11 @@ function toInMemory(file: CurrentConfigFile): Config {
 }
 
 /**
- * Map an in-memory `Config` into its on-disk v2 (snake_case) shape with a
- * stable key order: `$schema` first (editor hint), then `config_version`,
- * then remaining top-level keys in alphabetical order. The stable order
- * keeps round-tripping byte-identical so a no-op load → save doesn't churn
- * the file.
+ * Map an in-memory `Config` into its on-disk (snake_case) shape for the
+ * current schema version with a stable key order: `$schema` first (editor
+ * hint), then `config_version`, then remaining top-level keys in
+ * alphabetical order. The stable order keeps round-tripping byte-identical
+ * so a no-op load → save doesn't churn the file.
  */
 function serialiseConfigFile(config: Config): Record<string, unknown> {
   const todo: Record<string, string> = {};

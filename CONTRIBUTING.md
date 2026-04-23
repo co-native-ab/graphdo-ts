@@ -23,7 +23,7 @@ npm run typecheck    # tsc --noEmit
 npm run test         # Run tests via vitest
 npm run format       # Format code with Prettier
 npm run format:check # Check formatting without writing
-npm run check        # format:check + lint + typecheck + test (all four)
+npm run check        # format:check + icons:check + schemas:check + lint + typecheck + test (all six)
 npm run build        # Build with esbuild (dist/index.js)
 ```
 
@@ -74,30 +74,53 @@ See the [Adding New Tools](AGENTS.md#adding-new-tools) section in AGENTS.md for 
 ## Config Naming & Migrations
 
 `config.json` keys are **`snake_case`** on disk; the in-memory `Config`
-type stays `camelCase`. The mapping happens in exactly one place
-(`parseConfigFile` / `serialiseConfigFile` in `src/config.ts`). See
+type stays `camelCase`. The `Config` type is **derived** from the
+current on-disk Zod schema (`CurrentConfigSchema` in `src/config.ts`)
+via a `SnakeToCamelDeep` mapped type, so adding a field to the schema
+makes it appear on `Config` automatically. The two casing-boundary
+functions (`parseConfigFile` / `serialiseConfigFile` in
+`src/config.ts`) are the single point where camelCase ↔ snake_case
+conversion happens. See
 [ADR-0009](docs/adr/0009-versioned-config-and-migrations.md) and
 [ADR-0010](docs/adr/0010-snake-case-persisted-config.md).
 
-To add a new config field:
+To add a new (non-breaking) config field:
 
-1. Add the camelCase field to the `Config` interface in `src/config.ts`.
-2. Add the snake_case field to `ConfigFileSchemaV{CURRENT}` and to the
-   `serialiseConfigFile` / `toInMemory` mappings.
+1. Add the snake_case field to `ConfigFileSchemaV{CURRENT}` in
+   `src/config.ts` with a `.describe()` block.
+2. Wire the new field into the `serialiseConfigFile` / `toInMemory`
+   mappings — TypeScript will flag both sides until they match.
+3. Run `npm run schemas:generate` to refresh
+   `schemas/config-v{CURRENT}.json` (or let `npm run check` tell you
+   it drifted).
 
-To make a **breaking** config change (renaming a field, changing nesting,
-dropping a field):
+The camelCase `Config` shape updates automatically — you do not edit
+the `Config` type directly.
 
-1. Bump `CURRENT_CONFIG_VERSION` in `src/config.ts`.
-2. Add `ConfigFileSchemaV{N+1}` describing the new on-disk shape
-   (snake_case, includes `config_version: N+1`).
-3. Append a `MIGRATIONS` entry `{ from: N, to: N+1, migrate }`. The
+To make a **breaking** config change (renaming a field, changing
+nesting, dropping a field):
+
+1. Add `ConfigFileSchemaV{N+1}` describing the new on-disk shape
+   (snake_case, includes `config_version: z.literal(N+1)` and a
+   `.meta({ $id: configSchemaUrl(N+1), title, description })` block).
+2. Register it in `SCHEMAS` and bump `CURRENT_CONFIG_VERSION`.
+3. **Retarget the `CurrentConfigSchema` cast** in `src/config.ts` to
+   `as typeof ConfigFileSchemaV{N+1}`. This is the only line that
+   names a specific version after the bump — the in-memory `Config`
+   type, the migration pipeline's terminal type, and the serialiser's
+   re-validation all follow automatically.
+4. Append a `MIGRATIONS` entry `{ from: N, to: N+1, migrate }`. The
    `migrate` function must be **pure** — no I/O, no clocks, no Graph
    calls. Its output is re-validated against `ConfigFileSchemaV{N+1}`.
-4. Update `serialiseConfigFile` / `toInMemory` if the in-memory shape
-   changed.
-5. Add a fixture under `test/fixtures/config/v{N+1}/` and a row to the
-   round-trip matrix in `test/config-migrations.test.ts`.
+5. Update `serialiseConfigFile` / `toInMemory` if the on-disk →
+   in-memory mapping changed (the compiler will tell you).
+6. Run `npm run schemas:generate` to emit
+   `schemas/config-v{N+1}.json`, then copy it to
+   `test/fixtures/schemas-frozen/config-v{N+1}.json` (the snapshot
+   test refuses to run without it) and add a row to the version table
+   in [`schemas/README.md`](schemas/README.md).
+7. Add a fixture under `test/fixtures/config/v{N+1}/` and a row to
+   the round-trip matrix in `test/config-migrations.test.ts`.
 
 ## License
 
