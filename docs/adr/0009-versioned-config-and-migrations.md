@@ -94,10 +94,18 @@ deterministic, and lets us check them into source with confidence.
 ## Consequences
 
 - Every future breaking config change has a single, obvious workflow:
-  bump `CURRENT_CONFIG_VERSION`, add `ConfigFileSchemaVN+1`, add a
-  `MIGRATIONS` entry, add a fixture under
+  add `ConfigFileSchemaVN+1`, register it in `SCHEMAS`, bump
+  `CURRENT_CONFIG_VERSION`, retarget the `CurrentConfigSchema` cast,
+  add a `MIGRATIONS` entry, add a fixture under
   `test/fixtures/config/vN+1/`, add a row to the round-trip matrix in
-  `test/config-migrations.test.ts`. The contributor docs mirror this.
+  `test/config-migrations.test.ts`. The contributor docs (the
+  `Adding a new version` block at the top of `src/config.ts` and the
+  matching section of `schemas/README.md`) mirror this. The in-memory
+  `Config` type is derived from `CurrentConfigFile` via a
+  `SnakeToCamelDeep` mapped type, so new schema fields appear on
+  `Config` automatically and the compiler then flags `toInMemory` /
+  `serialiseConfigFile` until both sides of the casing boundary are
+  wired up.
 - Migration tests own correctness: round-trip per version, byte-stable
   load → save → load, "newer than current" refusal, corrupt-file
   backup, schema enforcement on migration output.

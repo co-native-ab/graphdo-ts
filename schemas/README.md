@@ -57,17 +57,26 @@ existing version file.
 ## Adding a new version (vN+1)
 
 1. **Define the new Zod schema** in
-   [`src/config.ts`](../src/config.ts): `ConfigFileSchemaVN+1` with
-   field-level `.describe()` and a top-level
+   [`src/config.ts`](../src/config.ts): `ConfigFileSchemaVN+1` with a
+   `config_version: z.literal(N+1)` discriminator, field-level
+   `.describe()`, and a top-level
    `.meta({ $id: configSchemaUrl(N+1), title, description })`.
 2. **Register it** in `SCHEMAS` and bump `CURRENT_CONFIG_VERSION`.
-3. **Add a migration** in `MIGRATIONS` from vN to vN+1.
-4. **Run `npm run schemas:generate`** — the new
+3. **Retarget the `CurrentConfigSchema` cast** in `src/config.ts` to
+   `as typeof ConfigFileSchemaVN+1`. This is the **only** line that
+   names a specific version after the bump — the in-memory `Config`
+   type, the migration pipeline's terminal type, and the serialiser's
+   re-validation all follow automatically. If a field was added,
+   removed, or renamed at the schema level, TypeScript will surface
+   the gap at the two casing-boundary functions (`toInMemory`,
+   `serialiseConfigFile`).
+4. **Add a migration** in `MIGRATIONS` from vN to vN+1.
+5. **Run `npm run schemas:generate`** — the new
    `schemas/config-vN+1.json` is written automatically.
-5. **Add a frozen-history snapshot** at
+6. **Add a frozen-history snapshot** at
    `test/fixtures/schemas-frozen/config-vN+1.json` (copy of the freshly
    generated file). The snapshot test refuses to run without it.
-6. **Add a row** to the table above. Do **not** delete or edit the
+7. **Add a row** to the table above. Do **not** delete or edit the
    older `config-vN.json` files — they are an immutable contract for
    anyone who downloaded one of them via the raw URL.
 

@@ -11,34 +11,77 @@ import { writeJsonAtomic, mkdirOptions, writeFileOptions } from "./fs-options.js
 
 // ---------------------------------------------------------------------------
 // In-memory shape (camelCase) — used by the rest of the codebase.
+//
+// `Config` is **derived** from the on-disk schema for the current version
+// (see `CurrentConfigFile` further down) by mechanically converting every
+// snake_case key to camelCase. Adding a field to `ConfigFileSchemaV{N}`
+// therefore makes it appear on `Config` automatically, and the compiler
+// then flags `toInMemory` / `serialiseConfigFile` (the two casing-boundary
+// functions) until both sides are wired up.
+//
+// The only hand-tweak is `configVersion`: on disk it's a required
+// `z.literal(N)` discriminator (part of the schema's identity), but in
+// memory we keep it as `?: number` so callers can construct a `Config`
+// without restating the version (saves stamp it back on with
+// `CURRENT_CONFIG_VERSION`).
 // ---------------------------------------------------------------------------
 
-export interface TodoConfig {
-  listId?: string;
-  listName?: string;
-}
+/**
+ * Convert a snake_case string literal type to camelCase at the type level.
+ * Used by {@link SnakeToCamelDeep} to derive the in-memory `Config` from
+ * the on-disk Zod schema.
+ */
+type SnakeToCamel<S extends string> = S extends `${infer Head}_${infer Tail}`
+  ? `${Head}${Capitalize<SnakeToCamel<Tail>>}`
+  : S;
 
-export interface MarkdownConfig {
-  rootFolderId?: string;
-  rootFolderName?: string;
-  rootFolderPath?: string;
-}
+/**
+ * Recursively rename every snake_case key on `T` (and its nested objects)
+ * to camelCase, preserving optionality. Key remapping via `as` is
+ * homomorphic over the optional modifier, so `{ list_id?: string }`
+ * becomes `{ listId?: string }` automatically. Arrays and non-object
+ * values pass through unchanged.
+ */
+type SnakeToCamelDeep<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T as K extends string ? SnakeToCamel<K> : K]: SnakeToCamelDeep<T[K]> }
+    : T;
 
-export interface Config {
+/**
+ * In-memory configuration shape. Derived from {@link CurrentConfigFile}
+ * (the on-disk schema for {@link CURRENT_CONFIG_VERSION}) by converting
+ * snake_case to camelCase, then relaxing `configVersion` from the
+ * required `z.literal(N)` discriminator to an optional number so callers
+ * can build a `Config` without restating the version.
+ *
+ * Bumping {@link CURRENT_CONFIG_VERSION} retargets this type at the new
+ * schema automatically — any new fields appear here without further
+ * edits, and removed/renamed fields surface as type errors at the two
+ * casing-boundary functions (`toInMemory`, `serialiseConfigFile`).
+ */
+export type Config = Omit<SnakeToCamelDeep<CurrentConfigFile>, "configVersion"> & {
   /**
    * Schema version of the on-disk file this config was loaded from. Always
    * equal to {@link CURRENT_CONFIG_VERSION} after `loadConfig` returns —
    * older files are migrated transparently. Stamped onto every save.
    */
   configVersion?: number;
-  /**
-   * Per-subsystem configuration. Each top-level key here mirrors a
-   * corresponding object on disk (`todo`, `markdown`, …) so the in-memory
-   * and persisted shapes have the same structure modulo casing.
-   */
-  todo?: TodoConfig;
-  markdown?: MarkdownConfig;
-}
+};
+
+/**
+ * Derived alias for the `todo` subsystem object. Kept as a named export so
+ * existing imports keep working; its shape now follows whatever the
+ * current on-disk schema declares for `todo`.
+ */
+export type TodoConfig = NonNullable<Config["todo"]>;
+
+/**
+ * Derived alias for the `markdown` subsystem object. Kept as a named
+ * export so existing imports keep working; its shape now follows whatever
+ * the current on-disk schema declares for `markdown`.
+ */
+export type MarkdownConfig = NonNullable<Config["markdown"]>;
 
 // ---------------------------------------------------------------------------
 // On-disk versioning
@@ -47,13 +90,26 @@ export interface Config {
 // ADR-0010 (snake_case for All Persisted Config) for the rationale.
 //
 // Adding a new version (vN+1):
-//   1. Bump CURRENT_CONFIG_VERSION.
-//   2. Add ConfigFileSchemaVN+1 (the new on-disk Zod schema, snake_case).
-//   3. Add an entry to MIGRATIONS that takes vN parsed output and returns
+//   1. Add ConfigFileSchemaVN+1 (the new on-disk Zod schema, snake_case)
+//      with a `config_version: z.literal(N+1)` discriminator and a
+//      `.meta({ $id: configSchemaUrl(N+1), title, description })` block.
+//   2. Register it in SCHEMAS and bump CURRENT_CONFIG_VERSION.
+//   3. Retarget the `as typeof ConfigFileSchemaV…` cast on
+//      {@link CurrentConfigSchema} to the new schema. **This is the only
+//      place that names a specific version after the bump** — the
+//      in-memory `Config` type, the migration pipeline's terminal type,
+//      and the serialiser's re-validation all follow automatically.
+//   4. Add an entry to MIGRATIONS that takes vN parsed output and returns
 //      vN+1 input. The pipeline re-validates against the next schema after
 //      each step, so migrations can stay small.
-//   4. Update `serialiseConfigFile` if the in-memory → disk mapping changed.
-//   5. Add fixtures under `test/fixtures/config/vN+1/` and a row to the
+//   5. Update `serialiseConfigFile` if the in-memory → disk mapping
+//      changed (the compiler will tell you — any field that exists on the
+//      derived `Config` but isn't written here will surface as a type
+//      error or a missing key in the validated output).
+//   6. Run `npm run schemas:generate` to emit `schemas/config-vN+1.json`,
+//      copy it to `test/fixtures/schemas-frozen/config-vN+1.json`, and add
+//      a row to the table in `schemas/README.md`.
+//   7. Add fixtures under `test/fixtures/config/vN+1/` and a row to the
 //      round-trip matrix in `test/config-migrations.test.ts`.
 // ---------------------------------------------------------------------------
 
@@ -200,8 +256,6 @@ export const ConfigFileSchemaV2 = z
       "Versioned snake_case on-disk shape of `config.json`. Written by graphdo-ts ≥ the release that introduced ADR-0009 / ADR-0010. Generated from the Zod source of truth in `src/config.ts` by `scripts/generate-schemas.ts`; do not edit by hand.",
   });
 
-type ConfigFileV2 = z.infer<typeof ConfigFileSchemaV2>;
-
 interface Migration {
   from: number;
   to: number;
@@ -254,6 +308,33 @@ export const SCHEMAS: Readonly<Record<number, z.ZodType>> = {
 };
 
 /**
+ * The Zod schema for the **current** on-disk version
+ * ({@link CURRENT_CONFIG_VERSION}). The narrowing cast below is the
+ * single point that names a specific `ConfigFileSchemaV…` after a
+ * version bump — every other reference (the migration pipeline's
+ * terminal type, the serialiser's re-validation, the in-memory `Config`
+ * type) flows from here.
+ *
+ * Why the cast? `SCHEMAS` is intentionally typed as
+ * `Record<number, z.ZodType>` so it can hold every historical version
+ * uniformly, which means indexed access widens to `z.ZodType` and loses
+ * the inferred output shape. Re-narrowing here keeps the rest of the
+ * file strongly typed without duplicating the version literal in many
+ * places.
+ *
+ * **When bumping to vN+1, this is the only line that needs retargeting**
+ * (in addition to defining the new schema and adding it to `SCHEMAS`).
+ */
+export const CurrentConfigSchema = SCHEMAS[CURRENT_CONFIG_VERSION] as typeof ConfigFileSchemaV2;
+
+/**
+ * Inferred TypeScript type for the current on-disk schema. Used as the
+ * terminal type of the migration pipeline and as the input type of
+ * {@link toInMemory}. Tracks {@link CurrentConfigSchema} automatically.
+ */
+export type CurrentConfigFile = z.infer<typeof CurrentConfigSchema>;
+
+/**
  * Detect the on-disk schema version of a parsed JSON value. Files written
  * before v2 have no `config_version` field, so we treat them as v1.
  */
@@ -271,7 +352,7 @@ function detectVersion(raw: unknown): number {
  * validated against the next version's schema, which gives us a safety net
  * if a migration ever produces malformed data.
  */
-function applyMigrations(parsed: unknown, from: number): ConfigFileV2 {
+function applyMigrations(parsed: unknown, from: number): CurrentConfigFile {
   let current: unknown = parsed;
   let currentVersion = from;
   while (currentVersion < CURRENT_CONFIG_VERSION) {
@@ -296,7 +377,7 @@ function applyMigrations(parsed: unknown, from: number): ConfigFileV2 {
     current = validated.data;
     currentVersion = step.to;
   }
-  return current as ConfigFileV2;
+  return current as CurrentConfigFile;
 }
 
 /**
@@ -304,7 +385,7 @@ function applyMigrations(parsed: unknown, from: number): ConfigFileV2 {
  * (camelCase). This is the single (de)serialisation boundary on the read
  * side — see ADR-0010.
  */
-function toInMemory(file: ConfigFileV2): Config {
+function toInMemory(file: CurrentConfigFile): Config {
   const out: Config = { configVersion: file.config_version };
   if (file.todo !== undefined) {
     const todo: TodoConfig = {};
@@ -348,7 +429,7 @@ function serialiseConfigFile(config: Config): Record<string, unknown> {
   // malformed data. `$schema` is not part of the Zod schema (it's
   // `.strip()`ed on load), so it's not validated here — but it's a fixed
   // string constant under our control, so that's fine.
-  const validated = ConfigFileSchemaV2.parse({
+  const validated = CurrentConfigSchema.parse({
     config_version: CURRENT_CONFIG_VERSION,
     ...(Object.keys(md).length > 0 ? { markdown: md } : {}),
     ...(Object.keys(todo).length > 0 ? { todo: todo } : {}),
@@ -358,8 +439,8 @@ function serialiseConfigFile(config: Config): Record<string, unknown> {
   //   $schema, config_version, then remaining keys alphabetically.
   // `$schema` is emitted first so editors (VS Code, JetBrains, …) pick it
   // up immediately when the file is opened. It's stripped on load by the
-  // Zod `.strip()` on `ConfigFileSchemaV2`, then re-added here on save, so
-  // a no-op load → save round-trip stays byte-identical.
+  // Zod `.strip()` on the per-version schema, then re-added here on save,
+  // so a no-op load → save round-trip stays byte-identical.
   const ordered: Record<string, unknown> = {};
   ordered["$schema"] = CONFIG_SCHEMA_URL;
   ordered["config_version"] = validated.config_version;
