@@ -229,7 +229,11 @@ function serialiseConfigFile(config: Config): ConfigFileV2 {
   return ConfigFileSchemaV2.parse(ordered);
 }
 
-/** Return a new object with keys in alphabetical order. */
+/**
+ * Return a new object with keys in alphabetical order. Used by
+ * `serialiseConfigFile` to keep a no-op load → save byte-identical so a
+ * fresh build doesn't churn the user's `config.json` on every start.
+ */
 function sortKeys<T extends Record<string, unknown>>(obj: T): T {
   const sorted: Record<string, unknown> = {};
   for (const key of Object.keys(obj).sort()) {
