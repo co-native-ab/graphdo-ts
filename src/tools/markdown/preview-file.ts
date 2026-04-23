@@ -7,7 +7,7 @@ import { meDriveScope } from "../../graph/drives.js";
 import {
   MARKDOWN_FILE_NAME_RULES,
   buildMarkdownPreviewUrl,
-  getMyDrive,
+  getDrive,
 } from "../../graph/markdown.js";
 import type { ServerConfig } from "../../index.js";
 import { logger } from "../../logger.js";
@@ -43,10 +43,11 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
     try {
       const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      
-      const scope = cfg.workspace.driveId === "me"
-        ? meDriveScope
-        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
 
       const item = await resolveDriveItem(
         client,

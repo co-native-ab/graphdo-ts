@@ -64,7 +64,7 @@ describe("integration: dynamic tool state", () => {
     expect(names).toContain("todo_update_step");
     expect(names).toContain("todo_delete_step");
     expect(names).toContain("todo_select_list");
-    expect(names).toContain("markdown_select_root_folder");
+    expect(names).toContain("markdown_select_workspace");
     expect(names).toContain("markdown_list_files");
     expect(names).toContain("markdown_get_file");
     expect(names).toContain("markdown_create_file");

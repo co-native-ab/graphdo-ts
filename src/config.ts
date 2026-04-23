@@ -331,7 +331,9 @@ export const ConfigFileSchemaV3 = z
         item_name: z
           .string()
           .min(1)
-          .describe("Display name of the workspace folder. Cached for the same reason as drive_name.")
+          .describe(
+            "Display name of the workspace folder. Cached for the same reason as drive_name.",
+          )
           .optional(),
         item_path: z
           .string()
@@ -391,7 +393,7 @@ const MIGRATIONS: readonly Migration[] = [
       const v2 = input as z.infer<typeof ConfigFileSchemaV2>;
       const out: Record<string, unknown> = { config_version: 3 };
       if (v2.todo !== undefined) out["todo"] = v2.todo;
-      if (v2.markdown !== undefined && v2.markdown.root_folder_id !== undefined) {
+      if (v2.markdown?.root_folder_id !== undefined) {
         // Map the legacy single-folder selection on the user's own OneDrive to
         // the new workspace shape. We use the `"me"` drive_id sentinel rather
         // than calling Graph (`/me/drive`) because migrations are pure (no
@@ -812,9 +814,7 @@ export function workspaceDriveIdError(driveId: unknown): string | null {
  * it will fail with a user-friendly error directing the user to re-run the
  * picker.
  */
-export function hasWorkspaceConfig(
-  config: Config | null,
-): config is Config & {
+export function hasWorkspaceConfig(config: Config | null): config is Config & {
   workspace: { driveId: string; itemId: string } & WorkspaceConfig;
 } {
   if (config === null) return false;

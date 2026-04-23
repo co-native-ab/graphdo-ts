@@ -191,10 +191,12 @@ describe("integration: status & errors", () => {
         await saveConfig(
           {
             todo: { listId: "list-1", listName: "My Tasks" },
-            markdown: {
-              rootFolderId: "folder-1",
-              rootFolderName: "Notes",
-              rootFolderPath: "/drive/root:/Notes",
+            workspace: {
+              driveId: "me",
+              itemId: "folder-1",
+              driveName: "OneDrive",
+              itemName: "Notes",
+              itemPath: "/drive/root:/Notes",
             },
           },
           mdConfigDir,
@@ -225,7 +227,7 @@ describe("integration: status & errors", () => {
 
         expect(result.isError).toBeFalsy();
         const text = firstText(result);
-        expect(text).toContain("Markdown root folder:");
+        expect(text).toContain("Markdown workspace:");
         expect(text).toContain("folder-1");
         // The preferred label order is rootFolderPath > rootFolderName > ""
         expect(text).toContain("/drive/root:/Notes");

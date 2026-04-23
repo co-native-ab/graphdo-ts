@@ -51,7 +51,7 @@ describe("integration: discovery & login", () => {
         "markdown_list_file_versions",
         "markdown_list_files",
         "markdown_preview_file",
-        "markdown_select_root_folder",
+        "markdown_select_workspace",
         "markdown_update_file",
         "todo_add_step",
         "todo_complete",

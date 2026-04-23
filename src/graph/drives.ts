@@ -2,23 +2,25 @@
 //
 // `DriveScope` discriminates between the two ways graphdo can address a
 // drive: `/me/drive` (the signed-in user's own OneDrive) and
-// `/drives/{driveId}` (an explicit drive id, used today only by the
-// generalised abstraction itself; production tools currently always
-// construct `{ kind: "me" }`). Centralising the URL building here keeps
-// every Graph helper free of hard-coded `/me/drive…` strings and makes the
-// future cross-drive PR a localised change.
+// `/drives/{driveId}` (an explicit drive id, used by the workspace picker
+// when the user pastes a share link to a folder on another drive).
+// Centralising the URL building here keeps every Graph helper free of
+// hard-coded `/me/drive…` strings.
 
-import type { ValidatedGraphId } from "./ids.js";
+import { HttpMethod, parseResponse, type GraphClient } from "./client.js";
+import { validateGraphId, type ValidatedGraphId } from "./ids.js";
+import { DriveItemSchema } from "./types.js";
 
 /**
  * Identifies the drive a Graph operation should target.
  *
- * - `{ kind: "me" }` resolves to `/me/drive…` and is the only variant
- *   constructed by current tools (we read it from the `"me"` sentinel
- *   stored in `workspace.driveId`).
+ * - `{ kind: "me" }` resolves to `/me/drive…` and is the default for the
+ *   user's own OneDrive (we read it from the `"me"` sentinel stored in
+ *   `workspace.driveId`).
  * - `{ kind: "drive"; driveId }` resolves to `/drives/{driveId}…` and is
- *   reserved for the future cross-drive PR (shared drives, SharePoint
- *   document libraries). The `driveId` must be a {@link ValidatedGraphId}
+ *   constructed when the user pastes a share link in the workspace
+ *   picker (the resolved share's `driveId` is persisted to
+ *   `workspace.driveId`). The `driveId` must be a {@link ValidatedGraphId}
  *   so it cannot smuggle a path segment into the Graph URL.
  */
 export type DriveScope =
@@ -61,75 +63,79 @@ export function driveRootChildrenPath(scope: DriveScope, suffix = ""): string {
  * is the caller's responsibility — if it contains user-supplied data, the
  * caller must `encodeURIComponent` it.
  */
-export function driveItemPath(
-  scope: DriveScope,
-  itemId: ValidatedGraphId,
-  suffix = "",
-): string {
+export function driveItemPath(scope: DriveScope, itemId: ValidatedGraphId, suffix = ""): string {
   return `${driveMetadataPath(scope)}/items/${encodeURIComponent(itemId)}${suffix}`;
 }
 
+/** Resolved drive item from a share link. */
+export interface ResolvedShare {
+  readonly driveId: ValidatedGraphId;
+  readonly itemId: ValidatedGraphId;
+  readonly name: string;
+  readonly webUrl?: string;
+}
+
 /**
- * Resolve a OneDrive or SharePoint sharing link to a drive item.
- *
- * Takes a public or tenant-scoped share URL (from the "Share" button in
- * OneDrive / SharePoint) and returns the drive item metadata. Uses the
- * `/shares/{encoded-sharing-url}/driveItem` endpoint.
- *
- * The `sharingUrl` is encoded using Graph's share id format: `u!` + base64url
- * (without padding) of the UTF-8 bytes of the URL. See
- * https://learn.microsoft.com/en-us/graph/api/shares-get
- *
- * @returns The resolved drive item with `driveId`, `itemId`, `name`, and
- *   optional `webUrl`. Both IDs are validated before returning (defence in
- *   depth — Graph occasionally returns weird shapes in edge cases).
- * @throws GraphRequestError on 404 (link expired, not accessible, or invalid),
- *   403 (permission denied), or any other Graph API error.
+ * Encode a sharing URL into the Graph `u!{base64url}` share id used in
+ * `/shares/{id}/driveItem` requests. RFC 4648 §5: base64url uses `-` and
+ * `_` instead of `+` and `/`, and strips `=` padding.
  */
-export async function resolveShareLink(
-  client: { request: (method: import("./client.js").HttpMethod, path: string, signal: AbortSignal) => Promise<Response> },
-  sharingUrl: string,
-  signal: AbortSignal,
-): Promise<{
-  driveId: ValidatedGraphId;
-  itemId: ValidatedGraphId;
-  name: string;
-  webUrl?: string;
-}> {
-  // Encode the sharing URL using the Graph share id format: u! + base64url without padding.
-  // RFC 4648 §5: base64url uses - and _ instead of + and /, and strips = padding.
+export function encodeShareId(sharingUrl: string): string {
   const utf8Bytes = new TextEncoder().encode(sharingUrl);
-  const base64 = btoa(String.fromCharCode(...utf8Bytes))
+  // Buffer is available everywhere Node 22+ runs and avoids the
+  // `String.fromCharCode(...utf8Bytes)` call that blows the stack on
+  // very long URLs.
+  const base64 = Buffer.from(utf8Bytes)
+    .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
-  const shareId = `u!${base64}`;
+  return `u!${base64}`;
+}
 
+/**
+ * Resolve a OneDrive or SharePoint sharing link to a drive item via
+ * `GET /shares/{share-id}/driveItem`.
+ *
+ * Encodes the URL using the Graph share id format (`u!` + base64url of the
+ * UTF-8 bytes; see {@link encodeShareId}) and then fetches the underlying
+ * drive item. Returns the validated `driveId` and `itemId` that subsequent
+ * Graph calls should be addressed to (the `driveId` may be different from
+ * the user's own — that is the whole point of pasting a share link), plus
+ * the item's display name and optional `webUrl` for the picker UI.
+ *
+ * See https://learn.microsoft.com/en-us/graph/api/shares-get.
+ *
+ * @throws GraphRequestError on 404 (link expired or not accessible),
+ *   403 (permission denied), or any other Graph API error. `GraphClient`
+ *   already throws on non-2xx — this wrapper does not need to second-guess.
+ */
+export async function resolveShareLink(
+  client: GraphClient,
+  sharingUrl: string,
+  signal: AbortSignal,
+): Promise<ResolvedShare> {
+  const shareId = encodeShareId(sharingUrl);
   const path = `/shares/${encodeURIComponent(shareId)}/driveItem`;
-  
-  const { HttpMethod, parseResponse, GraphRequestError } = await import("./client.js");
-  const { DriveItemSchema } = await import("./types.js");
-  const { validateGraphId } = await import("./ids.js");
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const item = await parseResponse(response, DriveItemSchema, HttpMethod.GET, path);
 
-  const res = await client.request(HttpMethod.GET, path, signal);
-  if (!res.ok) {
-    const err = await GraphRequestError.fromResponse(res, HttpMethod.GET, path);
-    throw err;
+  // Defence in depth: re-validate IDs even though they came from Graph.
+  // The driveId lives on the parentReference; if it's missing we cannot
+  // address the resolved item via /drives/{id}/items/{id}, so fail loudly.
+  const parentDriveId = item.parentReference?.driveId;
+  if (parentDriveId === undefined) {
+    throw new Error(
+      `Graph /shares response did not include parentReference.driveId for ${sharingUrl}`,
+    );
   }
-
-  const item = await parseResponse(res, DriveItemSchema, signal);
-
-  // Defence in depth: validate both IDs even though they came from Graph.
-  const driveId = validateGraphId(
-    "driveId",
-    item.parentReference?.driveId ?? item.id, // fallback to itemId if driveId missing (shouldn't happen)
-  );
-  const itemId = validateGraphId("itemId", item.id);
+  const driveId = validateGraphId("parentReference.driveId", parentDriveId);
+  const itemId = validateGraphId("item.id", item.id);
 
   return {
     driveId,
     itemId,
     name: item.name,
-    webUrl: item.webUrl,
+    ...(item.webUrl !== undefined ? { webUrl: item.webUrl } : {}),
   };
 }

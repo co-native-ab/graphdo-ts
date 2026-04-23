@@ -55,11 +55,12 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      
-      const scope = cfg.workspace.driveId === "me"
-        ? meDriveScope
-        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
-      
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
       const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       // Enforce naming rules against the resolved item too. This catches

@@ -47,11 +47,12 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
     try {
       const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      
-      const scope = cfg.workspace.driveId === "me"
-        ? meDriveScope
-        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
-      
+
+      const scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
       const item = await createMarkdownFile(
         client,
         scope,

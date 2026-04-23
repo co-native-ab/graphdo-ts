@@ -97,31 +97,44 @@ describe("markdown graph operations", () => {
   });
 
   it("listRootFolders returns only folders", async () => {
-    const folders = await listRootFolders(client, testSignal());
+    const folders = await listRootFolders(client, meDriveScope, testSignal());
     expect(folders.map((f) => f.id)).toEqual(["folder-1", "folder-2"]);
     expect(folders.every((f) => f.folder !== undefined)).toBe(true);
   });
 
   it("listMarkdownFiles filters to .md files, case-insensitive", async () => {
-    const files = await listMarkdownFiles(client, gid("folder-1"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("folder-1"), testSignal());
     expect(files.map((f) => f.name).sort()).toEqual(["Notes.MD", "ideas.md"]);
   });
 
   it("listMarkdownFiles returns empty array when folder has no markdown files", async () => {
-    const files = await listMarkdownFiles(client, gid("folder-2"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("folder-2"), testSignal());
     expect(files).toEqual([]);
   });
 
   it("findMarkdownFileByName matches case-insensitively", async () => {
-    const a = await findMarkdownFileByName(client, meDriveScope, gid("folder-1"), "IDEAS.md", testSignal());
+    const a = await findMarkdownFileByName(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      "IDEAS.md",
+      testSignal(),
+    );
     expect(a?.id).toBe("file-md-1");
-    const b = await findMarkdownFileByName(client, meDriveScope, gid("folder-1"), "notes.md", testSignal());
+    const b = await findMarkdownFileByName(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      "notes.md",
+      testSignal(),
+    );
     expect(b?.id).toBe("file-md-2");
   });
 
   it("findMarkdownFileByName returns null for unknown file", async () => {
     const result = await findMarkdownFileByName(
       client,
+      meDriveScope,
       gid("folder-1"),
       "missing.md",
       testSignal(),
@@ -136,12 +149,22 @@ describe("markdown graph operations", () => {
   });
 
   it("downloadMarkdownContent returns UTF-8 body", async () => {
-    const body = await downloadMarkdownContent(client, meDriveScope, gid("file-md-1"), testSignal());
+    const body = await downloadMarkdownContent(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(body).toBe("hello world!");
   });
 
   it("downloadMarkdownContentWithItem returns content + the DriveItem with cTag in one round trip", async () => {
-    const result = await downloadMarkdownContentWithItem(client, meDriveScope, gid("file-md-1"), testSignal());
+    const result = await downloadMarkdownContentWithItem(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(result.content).toBe("hello world!");
     expect(result.item.id).toBe("file-md-1");
     expect(result.item.name).toBe("ideas.md");
@@ -179,9 +202,9 @@ describe("markdown graph operations", () => {
     });
     env.state.driveFolderChildren.set("folder-1", existing);
 
-    await expect(downloadMarkdownContent(client, meDriveScope, gid("huge"), testSignal())).rejects.toBeInstanceOf(
-      MarkdownFileTooLargeError,
-    );
+    await expect(
+      downloadMarkdownContent(client, meDriveScope, gid("huge"), testSignal()),
+    ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
   it("downloadMarkdownContent allows a file whose reported size equals MAX_DIRECT_CONTENT_BYTES (boundary)", async () => {
@@ -196,7 +219,12 @@ describe("markdown graph operations", () => {
     });
     env.state.driveFolderChildren.set("folder-1", existing);
 
-    const body = await downloadMarkdownContent(client, meDriveScope, gid("exact-4mb"), testSignal());
+    const body = await downloadMarkdownContent(
+      client,
+      meDriveScope,
+      gid("exact-4mb"),
+      testSignal(),
+    );
     expect(body.length).toBe(MAX_DIRECT_CONTENT_BYTES);
   });
 
@@ -204,6 +232,7 @@ describe("markdown graph operations", () => {
     // Sanity check that the new API is wired up (replaces the legacy upload tests).
     const created = await createMarkdownFile(
       client,
+      meDriveScope,
       gid("folder-2"),
       "fresh.md",
       "# Fresh\n",
@@ -216,6 +245,7 @@ describe("markdown graph operations", () => {
   it("createMarkdownFile creates a brand-new file and returns a cTag", async () => {
     const item = await createMarkdownFile(
       client,
+      meDriveScope,
       gid("folder-1"),
       "new-note.md",
       "# Hello\n",
@@ -224,7 +254,7 @@ describe("markdown graph operations", () => {
     expect(item.name).toBe("new-note.md");
     expect(item.cTag).toBeTruthy();
 
-    const files = await listMarkdownFiles(client, gid("folder-1"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("folder-1"), testSignal());
     expect(files.map((f) => f.name)).toContain("new-note.md");
 
     const stored = await downloadMarkdownContent(client, meDriveScope, gid(item.id), testSignal());
@@ -244,6 +274,7 @@ describe("markdown graph operations", () => {
     const exact = "a".repeat(MAX_DIRECT_CONTENT_BYTES);
     const item = await createMarkdownFile(
       client,
+      meDriveScope,
       gid("folder-1"),
       "exact-4mb.md",
       exact,
@@ -255,7 +286,14 @@ describe("markdown graph operations", () => {
   it("createMarkdownFile rejects a payload of MAX_DIRECT_CONTENT_BYTES + 1 (boundary)", async () => {
     const overByOne = "a".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
     await expect(
-      createMarkdownFile(client, meDriveScope, gid("folder-1"), "over-by-one.md", overByOne, testSignal()),
+      createMarkdownFile(
+        client,
+        meDriveScope,
+        gid("folder-1"),
+        "over-by-one.md",
+        overByOne,
+        testSignal(),
+      ),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -265,7 +303,12 @@ describe("markdown graph operations", () => {
     ).rejects.toBeInstanceOf(MarkdownFileAlreadyExistsError);
 
     // The existing file's content was NOT changed.
-    const body = await downloadMarkdownContent(client, meDriveScope, gid("file-md-1"), testSignal());
+    const body = await downloadMarkdownContent(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(body).toBe("hello world!");
   });
 
@@ -276,6 +319,7 @@ describe("markdown graph operations", () => {
 
     const updated = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       beforeCTag!,
       "updated content",
@@ -285,14 +329,26 @@ describe("markdown graph operations", () => {
     expect(updated.cTag).toBeTruthy();
     expect(updated.cTag).not.toBe(beforeCTag);
 
-    const body = await downloadMarkdownContent(client, meDriveScope, gid("file-md-1"), testSignal());
+    const body = await downloadMarkdownContent(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(body).toBe("updated content");
   });
 
   it("updateMarkdownFile throws MarkdownCTagMismatchError when the supplied cTag is stale", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
     // First update bumps the cTag.
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "v2", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "v2",
+      testSignal(),
+    );
 
     // Second update with the now-stale cTag must fail with the typed error.
     await expect(
@@ -300,16 +356,35 @@ describe("markdown graph operations", () => {
     ).rejects.toBeInstanceOf(MarkdownCTagMismatchError);
 
     // Content was NOT changed by the failed update.
-    const body = await downloadMarkdownContent(client, meDriveScope, gid("file-md-1"), testSignal());
+    const body = await downloadMarkdownContent(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(body).toBe("v2");
   });
 
   it("updateMarkdownFile cTag-mismatch error carries the current item with the new cTag", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "v2", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "v2",
+      testSignal(),
+    );
 
     try {
-      await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "v3", testSignal());
+      await updateMarkdownFile(
+        client,
+        meDriveScope,
+        gid("file-md-1"),
+        before.cTag!,
+        "v3",
+        testSignal(),
+      );
       throw new Error("expected MarkdownCTagMismatchError");
     } catch (err) {
       expect(err).toBeInstanceOf(MarkdownCTagMismatchError);
@@ -330,7 +405,14 @@ describe("markdown graph operations", () => {
   it("updateMarkdownFile rejects payloads over 4 MiB without hitting the network", async () => {
     const oversized = "a".repeat(1024 * 1024).repeat(5);
     await expect(
-      updateMarkdownFile(client, meDriveScope, gid("file-md-1"), "any-cTag", oversized, testSignal()),
+      updateMarkdownFile(
+        client,
+        meDriveScope,
+        gid("file-md-1"),
+        "any-cTag",
+        oversized,
+        testSignal(),
+      ),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
@@ -339,6 +421,7 @@ describe("markdown graph operations", () => {
     const exact = "a".repeat(MAX_DIRECT_CONTENT_BYTES);
     const updated = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       before.cTag!,
       exact,
@@ -350,13 +433,20 @@ describe("markdown graph operations", () => {
   it("updateMarkdownFile rejects a payload of MAX_DIRECT_CONTENT_BYTES + 1 (boundary)", async () => {
     const overByOne = "a".repeat(MAX_DIRECT_CONTENT_BYTES + 1);
     await expect(
-      updateMarkdownFile(client, meDriveScope, gid("file-md-1"), "any-cTag", overByOne, testSignal()),
+      updateMarkdownFile(
+        client,
+        meDriveScope,
+        gid("file-md-1"),
+        "any-cTag",
+        overByOne,
+        testSignal(),
+      ),
     ).rejects.toBeInstanceOf(MarkdownFileTooLargeError);
   });
 
   it("deleteDriveItem removes the file", async () => {
     await deleteDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const files = await listMarkdownFiles(client, gid("folder-1"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("folder-1"), testSignal());
     expect(files.map((f) => f.id)).not.toContain("file-md-1");
   });
 });
@@ -420,13 +510,23 @@ describe("markdown graph operations: classification & validation", () => {
   });
 
   it("listMarkdownFolderEntries classifies supported .md files", async () => {
-    const entries = await listMarkdownFolderEntries(client, meDriveScope, gid("folder-1"), testSignal());
+    const entries = await listMarkdownFolderEntries(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      testSignal(),
+    );
     const supported = entries.filter((e) => e.kind === MarkdownFolderEntryKind.Supported);
     expect(supported.map((e) => e.item.id)).toEqual(["ok-1"]);
   });
 
   it("listMarkdownFolderEntries flags subdirectories as unsupported", async () => {
-    const entries = await listMarkdownFolderEntries(client, meDriveScope, gid("folder-1"), testSignal());
+    const entries = await listMarkdownFolderEntries(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      testSignal(),
+    );
     const subdir = entries.find((e) => e.item.id === "subdir-1");
     expect(subdir).toBeDefined();
     expect(subdir!.kind).toBe(MarkdownFolderEntryKind.Unsupported);
@@ -436,7 +536,12 @@ describe("markdown graph operations: classification & validation", () => {
   });
 
   it("listMarkdownFolderEntries flags .md files with unsupported names", async () => {
-    const entries = await listMarkdownFolderEntries(client, meDriveScope, gid("folder-1"), testSignal());
+    const entries = await listMarkdownFolderEntries(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      testSignal(),
+    );
     const weird = entries.find((e) => e.item.id === "weird-1");
     expect(weird?.kind).toBe(MarkdownFolderEntryKind.Unsupported);
     if (weird?.kind === MarkdownFolderEntryKind.Unsupported) {
@@ -450,12 +555,17 @@ describe("markdown graph operations: classification & validation", () => {
   });
 
   it("listMarkdownFolderEntries omits non-markdown files entirely", async () => {
-    const entries = await listMarkdownFolderEntries(client, meDriveScope, gid("folder-1"), testSignal());
+    const entries = await listMarkdownFolderEntries(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      testSignal(),
+    );
     expect(entries.some((e) => e.item.id === "txt-1")).toBe(false);
   });
 
   it("listMarkdownFiles returns only supported entries", async () => {
-    const files = await listMarkdownFiles(client, gid("folder-1"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("folder-1"), testSignal());
     expect(files.map((f) => f.id)).toEqual(["ok-1"]);
   });
 
@@ -468,6 +578,7 @@ describe("markdown graph operations: classification & validation", () => {
   it("findMarkdownFileByName returns null for a valid-but-missing name", async () => {
     const result = await findMarkdownFileByName(
       client,
+      meDriveScope,
       gid("folder-1"),
       "missing.md",
       testSignal(),
@@ -478,7 +589,13 @@ describe("markdown graph operations: classification & validation", () => {
   it("findMarkdownFileByName does not match a file whose remote name is unsupported", async () => {
     // Even though "weird@name.md" exists remotely, it should not be reachable
     // by name-based lookup because listMarkdownFiles filters it out.
-    const result = await findMarkdownFileByName(client, meDriveScope, gid("folder-1"), "notes.md", testSignal());
+    const result = await findMarkdownFileByName(
+      client,
+      meDriveScope,
+      gid("folder-1"),
+      "notes.md",
+      testSignal(),
+    );
     expect(result).toBeNull();
   });
 
@@ -551,7 +668,12 @@ describe("markdown version history graph operations", () => {
   it("listDriveItemVersions returns only the current version for a file with no prior writes", async () => {
     // Real OneDrive includes the current version as the first (and only) entry
     // when the file has never been overwritten.
-    const versions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const versions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(versions).toHaveLength(1);
     expect(versions[0]?.id).toBeTruthy();
   });
@@ -560,14 +682,27 @@ describe("markdown version history graph operations", () => {
     const start = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
     const after1 = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       start.cTag!,
       "v2",
       testSignal(),
     );
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), after1.cTag!, "v3", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      after1.cTag!,
+      "v3",
+      testSignal(),
+    );
 
-    const versions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const versions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     // Current version + two historical snapshots (the original + v2).
     expect(versions).toHaveLength(3);
     // Every version carries a non-empty ID and a timestamp.
@@ -581,6 +716,7 @@ describe("markdown version history graph operations", () => {
     if (!priorVersion) throw new Error("expected at least two versions");
     const priorContent = await downloadDriveItemVersionContent(
       client,
+      meDriveScope,
       gid("file-md-1"),
       gid(priorVersion.id),
       testSignal(),
@@ -590,14 +726,27 @@ describe("markdown version history graph operations", () => {
 
   it("downloadDriveItemVersionContent returns the stored content", async () => {
     const start = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), start.cTag!, "updated", testSignal());
-    const versions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      start.cTag!,
+      "updated",
+      testSignal(),
+    );
+    const versions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     // versions[0] is the current version; versions[1] is the prior snapshot.
     expect(versions).toHaveLength(2);
     const prior = versions[1];
     if (!prior) throw new Error("expected prior version");
     const content = await downloadDriveItemVersionContent(
       client,
+      meDriveScope,
       gid("file-md-1"),
       gid(prior.id),
       testSignal(),
@@ -609,6 +758,7 @@ describe("markdown version history graph operations", () => {
     await expect(
       downloadDriveItemVersionContent(
         client,
+        meDriveScope,
         gid("file-md-1"),
         gid("does-not-exist"),
         testSignal(),
@@ -647,6 +797,7 @@ describe("markdown current revision tracking", () => {
   it("createMarkdownFile omits `version` on the returned drive item", async () => {
     const created = await createMarkdownFile(
       client,
+      meDriveScope,
       gid("folder-2"),
       "fresh.md",
       "one",
@@ -659,6 +810,7 @@ describe("markdown current revision tracking", () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
     const after = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       before.cTag!,
       "v1",
@@ -669,42 +821,76 @@ describe("markdown current revision tracking", () => {
 
   it("/versions surfaces a stable, monotonically-bumping current revision id even though the drive item omits `version`", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const beforeVersions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const beforeVersions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const v0 = beforeVersions[0]?.id;
     expect(v0).toBeTruthy();
 
     const after1 = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       before.cTag!,
       "v1",
       testSignal(),
     );
-    const v1Versions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const v1Versions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const v1 = v1Versions[0]?.id;
     expect(v1).toBeTruthy();
     expect(v1).not.toBe(v0);
 
     const after2 = await updateMarkdownFile(
       client,
+      meDriveScope,
       gid("file-md-1"),
       after1.cTag!,
       "v2",
       testSignal(),
     );
     void after2;
-    const v2Versions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const v2Versions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     expect(v2Versions[0]?.id).not.toBe(v1);
   });
 
   it("prior revision ID surfaces as a history entry after an update", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const beforeVersions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const beforeVersions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const priorRevision = beforeVersions[0]?.id;
     expect(priorRevision).toBeTruthy();
 
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "v1", testSignal());
-    const history = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "v1",
+      testSignal(),
+    );
+    const history = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     // The first overwrite promotes the prior current revision into history.
     expect(history.map((v) => v.id)).toContain(priorRevision);
   });
@@ -730,7 +916,12 @@ describe("resolveCurrentRevision", () => {
     // the resolver must return it without consulting /versions.
     const item = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
     const itemWithVersion = { ...item, version: "synthetic-rev" };
-    const resolved = await resolveCurrentRevision(client, meDriveScope, itemWithVersion, testSignal());
+    const resolved = await resolveCurrentRevision(
+      client,
+      meDriveScope,
+      itemWithVersion,
+      testSignal(),
+    );
     expect(resolved).toBe("synthetic-rev");
   });
 
@@ -739,7 +930,12 @@ describe("resolveCurrentRevision", () => {
     // The mock already mirrors real Graph and omits `version` on the item,
     // so no synthetic stripping is needed.
     expect(item.version).toBeUndefined();
-    const history = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const history = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const expected = history[0]?.id;
     expect(expected).toBeTruthy();
 
@@ -788,14 +984,32 @@ describe("getRevisionContent", () => {
 
   it("returns live content when the revision id is the current one (taken from /versions, since item.version is omitted by Graph)", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "current-body", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "current-body",
+      testSignal(),
+    );
     const current = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
     // The mock omits `version` on the drive item to mirror real Graph; the
     // current version ID must come from the /versions list.
-    const history = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const history = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const currentVersionId = history[0]?.id;
     if (!currentVersionId) throw new Error("expected at least one version in the list");
-    const body = await getRevisionContent(client, meDriveScope, current, gid(currentVersionId), testSignal());
+    const body = await getRevisionContent(
+      client,
+      meDriveScope,
+      current,
+      gid(currentVersionId),
+      testSignal(),
+    );
     expect(body).toEqual({ content: "current-body", isCurrent: true });
   });
 
@@ -808,6 +1022,7 @@ describe("getRevisionContent", () => {
     const itemWithVersion = { ...item, version: "synthetic-rev" };
     const body = await getRevisionContent(
       client,
+      meDriveScope,
       itemWithVersion,
       gid("synthetic-rev"),
       testSignal(),
@@ -820,12 +1035,30 @@ describe("getRevisionContent", () => {
 
   it("returns historical content when the revision id matches a /versions entry", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const beforeVersions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const beforeVersions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const originalRevision = beforeVersions[0]?.id;
     expect(originalRevision).toBeTruthy();
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "second-body", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "second-body",
+      testSignal(),
+    );
     const current = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const body = await getRevisionContent(client, meDriveScope, current, gid(originalRevision!), testSignal());
+    const body = await getRevisionContent(
+      client,
+      meDriveScope,
+      current,
+      gid(originalRevision!),
+      testSignal(),
+    );
     expect(body).toEqual({ content: "hello world!", isCurrent: false });
   });
 
@@ -838,12 +1071,29 @@ describe("getRevisionContent", () => {
 
   it("unknown-version error enumerates both the current revision and history", async () => {
     const before = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const beforeVersions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const beforeVersions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const originalRevision = beforeVersions[0]?.id;
     expect(originalRevision).toBeTruthy();
-    await updateMarkdownFile(client, meDriveScope, gid("file-md-1"), before.cTag!, "v2", testSignal());
+    await updateMarkdownFile(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      before.cTag!,
+      "v2",
+      testSignal(),
+    );
     const current = await getDriveItem(client, meDriveScope, gid("file-md-1"), testSignal());
-    const currentVersions = await listDriveItemVersions(client, meDriveScope, gid("file-md-1"), testSignal());
+    const currentVersions = await listDriveItemVersions(
+      client,
+      meDriveScope,
+      gid("file-md-1"),
+      testSignal(),
+    );
     const currentRevision = currentVersions[0]?.id;
     expect(currentRevision).toBeTruthy();
     try {
@@ -885,7 +1135,7 @@ describe("listRootFolders / listMarkdownFiles pagination", () => {
       name: `Folder ${String(i).padStart(4, "0")}`,
       folder: { childCount: 0 },
     }));
-    const folders = await listRootFolders(client, testSignal());
+    const folders = await listRootFolders(client, meDriveScope, testSignal());
     expect(folders).toHaveLength(total);
     // First page boundary, mid page, and last page boundary all retained.
     expect(folders[0]?.id).toBe("folder-0");
@@ -900,7 +1150,7 @@ describe("listRootFolders / listMarkdownFiles pagination", () => {
         ? { id: `f-${String(i)}`, name: `F${String(i)}`, folder: { childCount: 0 } }
         : { id: `s-${String(i)}`, name: `s${String(i)}.txt`, file: { mimeType: "text/plain" } },
     );
-    const folders = await listRootFolders(client, testSignal());
+    const folders = await listRootFolders(client, meDriveScope, testSignal());
     // Even indices are folders -> 125 folders in 250 entries.
     expect(folders).toHaveLength(125);
     expect(folders.every((f) => f.folder !== undefined)).toBe(true);
@@ -917,7 +1167,7 @@ describe("listRootFolders / listMarkdownFiles pagination", () => {
         file: { mimeType: "text/markdown" },
       })),
     );
-    const files = await listMarkdownFiles(client, gid("big-folder"), testSignal());
+    const files = await listMarkdownFiles(client, meDriveScope, gid("big-folder"), testSignal());
     expect(files).toHaveLength(total);
   });
 });

@@ -58,13 +58,15 @@ export const AVAILABLE_SCOPES: readonly ScopeDefinition[] = [
   {
     scope: GraphScope.FilesReadWriteAll,
     label: "Manage Files (All Drives)",
-    description: "Read and write files across all accessible drives (required for shared drives and SharePoint)",
+    description:
+      "Read and write files across all accessible drives (required for shared drives and SharePoint)",
     required: false,
   },
   {
     scope: GraphScope.SitesReadAll,
     label: "Read SharePoint Sites",
-    description: "Read information about SharePoint sites (required for SharePoint document libraries)",
+    description:
+      "Read information about SharePoint sites (required for SharePoint document libraries)",
     required: false,
   },
 ];

@@ -43,7 +43,7 @@ describe("integration: markdown gating", () => {
     const { tools } = await c.listTools();
     const names = tools.map((t: { name: string }) => t.name);
     for (const n of [
-      "markdown_select_root_folder",
+      "markdown_select_workspace",
       "markdown_list_files",
       "markdown_get_file",
       "markdown_create_file",
@@ -63,7 +63,7 @@ describe("integration: markdown gating", () => {
       arguments: {},
     })) as ToolResult;
     expect(result.isError).toBe(true);
-    expect(firstText(result)).toContain("markdown root folder not configured");
+    expect(firstText(result)).toContain("markdown workspace not configured");
   });
 
   it("markdown_get_file, markdown_create_file, markdown_update_file, markdown_delete_file all require configuration", async () => {
@@ -85,21 +85,24 @@ describe("integration: markdown gating", () => {
     ]) {
       const r = (await c.callTool(call)) as ToolResult;
       expect(r.isError).toBe(true);
-      expect(firstText(r)).toContain("markdown root folder not configured");
+      expect(firstText(r)).toContain("markdown workspace not configured");
     }
   });
 
-  it("rejects a manually-corrupted config whose rootFolderId is '/' with a clear error that points back to the picker", async () => {
+  it("rejects a manually-corrupted config whose workspace itemId is '/' with a clear error that points back to the picker", async () => {
     // Simulate someone editing config.json by hand and putting "/" (the drive
     // root) where a single folder ID is expected. All four markdown tools
-    // must refuse to run and direct the user to markdown_select_root_folder.
+    // must refuse to run and direct the user to markdown_select_workspace.
     const dir = await mkdtemp(path.join(tmpdir(), "graphdo-md-bad-"));
     try {
       const { writeFile, mkdir } = await import("node:fs/promises");
       await mkdir(dir, { recursive: true });
       await writeFile(
         path.join(dir, "config.json"),
-        JSON.stringify({ markdown: { rootFolderId: "/" } }),
+        JSON.stringify({
+          config_version: 3,
+          workspace: { drive_id: "me", item_id: "/" },
+        }),
       );
 
       const auth = new MockAuthenticator({ token: "md-bad-token" });
@@ -130,21 +133,23 @@ describe("integration: markdown gating", () => {
         const r = (await client.callTool(call)) as ToolResult;
         expect(r.isError, `${call.name} should fail`).toBe(true);
         const text = firstText(r);
-        expect(text).toMatch(/markdown root folder/i);
+        expect(text).toMatch(/markdown workspace/i);
         expect(text).toMatch(/drive root|invalid/i);
-        expect(text).toContain("markdown_select_root_folder");
+        expect(text).toContain("markdown_select_workspace");
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("rejects a manually-corrupted config whose rootFolderId contains a subpath", async () => {
+  it("rejects a manually-corrupted config whose workspace itemId contains a subpath", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "graphdo-md-bad2-"));
     try {
       await saveConfig(
         // saveConfig's schema allows any non-empty string, matching a hand-edit
-        { markdown: { rootFolderId: "folder-1/sub" } } as Parameters<typeof saveConfig>[0],
+        { workspace: { driveId: "me", itemId: "folder-1/sub" } } as Parameters<
+          typeof saveConfig
+        >[0],
         dir,
         testSignal(),
       );
@@ -170,7 +175,7 @@ describe("integration: markdown gating", () => {
       })) as ToolResult;
       expect(r.isError).toBe(true);
       expect(firstText(r)).toMatch(/path separator/);
-      expect(firstText(r)).toContain("markdown_select_root_folder");
+      expect(firstText(r)).toContain("markdown_select_workspace");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

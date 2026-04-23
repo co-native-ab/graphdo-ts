@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 
 import type { GraphClient } from "../../src/graph/client.js";
+import { meDriveScope } from "../../src/graph/drives.js";
 import {
   DEFAULT_ONEDRIVE_WEB_URL,
   formatRevision,
@@ -58,9 +59,9 @@ describe("markdown-helpers", () => {
   describe("resolveDriveItem", () => {
     it("throws when neither itemId nor fileName is provided", async () => {
       const client = makeStubClient({ status: 200, body: {} });
-      await expect(resolveDriveItem(client, gid("folder-1"), {}, testSignal())).rejects.toThrow(
-        /Either itemId or fileName/,
-      );
+      await expect(
+        resolveDriveItem(client, meDriveScope, gid("folder-1"), {}, testSignal()),
+      ).rejects.toThrow(/Either itemId or fileName/);
     });
   });
 

@@ -866,11 +866,7 @@ export async function downloadDriveItemVersionContent(
   versionId: ValidatedGraphId,
   signal: AbortSignal,
 ): Promise<string> {
-  const path = driveItemPath(
-    scope,
-    itemId,
-    `/versions/${encodeURIComponent(versionId)}/content`,
-  );
+  const path = driveItemPath(scope, itemId, `/versions/${encodeURIComponent(versionId)}/content`);
   logger.debug("downloading drive item version content", { scope: scope.kind, itemId, versionId });
 
   const response = await client.request(HttpMethod.GET, path, signal);

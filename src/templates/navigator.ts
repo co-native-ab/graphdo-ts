@@ -224,11 +224,6 @@ export const NAVIGATOR_STYLE = `
   }
 `;
 
-interface NavigatorFolder {
-  id: string;
-  name: string;
-}
-
 interface NavigatorDrive {
   id: string;
   label: string;
@@ -237,10 +232,10 @@ interface NavigatorDrive {
 interface NavigatorPageConfig {
   title: string;
   subtitle: string;
+  /** Initial set of drive tabs. Always includes the user's own OneDrive. */
   drives: NavigatorDrive[];
-  activeDriveId: string;
-  breadcrumbs: Array<{ id: string; label: string }>;
-  folders: NavigatorFolder[];
+  /** Active tab on first render. */
+  initialDriveId: string;
   csrfToken: string;
   nonce: string;
 }
@@ -249,33 +244,10 @@ function renderDriveTab(drive: NavigatorDrive, active: boolean): string {
   return `<button class="drive-tab${active ? " active" : ""}" data-drive-id="${escapeHtml(drive.id)}">${escapeHtml(drive.label)}</button>`;
 }
 
-function renderBreadcrumb(crumb: { id: string; label: string }, isLast: boolean): string {
-  if (isLast) {
-    return `<span class="breadcrumb-current">${escapeHtml(crumb.label)}</span>`;
-  }
-  return `<button class="breadcrumb" data-item-id="${escapeHtml(crumb.id)}">${escapeHtml(crumb.label)}</button><span class="breadcrumb-separator">/</span>`;
-}
-
-function renderFolder(folder: NavigatorFolder): string {
-  return `<div class="folder-item" data-id="${escapeHtml(folder.id)}">
-    <span class="folder-icon">📁</span>
-    <span class="folder-name">${escapeHtml(folder.name)}</span>
-  </div>`;
-}
-
 export function navigatorPageHtml(config: NavigatorPageConfig): string {
   const driveTabsHtml = config.drives
-    .map((d) => renderDriveTab(d, d.id === config.activeDriveId))
+    .map((d) => renderDriveTab(d, d.id === config.initialDriveId))
     .join("\n        ");
-
-  const breadcrumbsHtml = config.breadcrumbs
-    .map((crumb, idx) => renderBreadcrumb(crumb, idx === config.breadcrumbs.length - 1))
-    .join("\n        ");
-
-  const foldersHtml =
-    config.folders.length > 0
-      ? config.folders.map(renderFolder).join("\n          ")
-      : '<div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">No subfolders</span></div>';
 
   return layoutHtml({
     title: `graphdo - ${escapeHtml(config.title)}`,
@@ -290,11 +262,9 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
       <div class="drive-tabs" id="drive-tabs">
         ${driveTabsHtml}
       </div>
-      <div class="breadcrumbs" id="breadcrumbs">
-        ${breadcrumbsHtml}
-      </div>
+      <div class="breadcrumbs" id="breadcrumbs"></div>
       <div class="folder-list" id="folder-list">
-        ${foldersHtml}
+        <div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">Loading…</span></div>
       </div>
       <div class="action-buttons">
         <button id="select-btn" class="btn btn-primary">Use this folder as workspace</button>
@@ -305,228 +275,235 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         <button id="resolve-share-btn" class="btn btn-secondary">Add shared drive</button>
       </div>
     </div>
-  </div>
-  <script nonce="${escapeHtml(config.nonce)}">
-    (function() {
-      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-      
-      let currentDrive = ${JSON.stringify(config.activeDriveId)};
-      let currentItem = ${JSON.stringify(config.breadcrumbs[config.breadcrumbs.length - 1]?.id || "")};
-      let currentPath = ${JSON.stringify(config.breadcrumbs.map(b => b.label).join("/"))};
-      
-      function showError(msg) {
-        const container = document.getElementById('error-container');
-        container.innerHTML = '<div class="error-message">' + escapeHtml(msg) + '</div>';
+    <picture>
+      <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
+      <img src="${logoDarkDataUri}" alt="graphdo" class="brand-footer">
+    </picture>
+  </div>`,
+    script: `    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content') || '';
+
+      // Navigation stack: [{ driveId, itemId, itemName, itemPath }]. The
+      // last entry is the current location; clicking a breadcrumb pops
+      // back to that entry.
+      let stack = [{ driveId: ${JSON.stringify(config.initialDriveId)}, itemId: 'root', itemName: '/', itemPath: '/' }];
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
       }
-      
+
+      function showError(msg) {
+        document.getElementById('error-container').innerHTML =
+          '<div class="error-message">' + escapeHtml(msg) + '</div>';
+      }
+
       function clearError() {
         document.getElementById('error-container').innerHTML = '';
       }
-      
-      function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-      }
-      
+
       function showDone(message, detail) {
-        document.getElementById('navigator').innerHTML = 
-          '<div class="done-card"><div class="done-icon">✓</div>' +
+        document.getElementById('navigator').innerHTML =
+          '<div class="done-card"><div class="done-icon">&#10003;</div>' +
           '<div class="done-message">' + escapeHtml(message) + '</div>' +
           '<div class="done-detail">' + escapeHtml(detail) + '</div>' +
-          '<div class="countdown">Closing in <span id="countdown">3</span> seconds...</div></div>';
-        
+          '<div class="countdown">Closing in <span id="countdown">3</span>s&hellip;</div></div>';
         let count = 3;
         const timer = setInterval(() => {
           count--;
           const el = document.getElementById('countdown');
           if (el) el.textContent = String(count);
-          if (count <= 0) {
-            clearInterval(timer);
-            window.close();
-          }
+          if (count <= 0) { clearInterval(timer); window.close(); }
         }, 1000);
       }
-      
-      async function loadChildren(driveId, itemId) {
-        clearError();
-        const scope = driveId === 'me' ? 'me' : driveId;
-        const url = '/children?scope=' + encodeURIComponent(scope) + '&itemId=' + encodeURIComponent(itemId);
-        
-        try {
-          const res = await fetch(url, {
-            method: 'GET',
-            headers: { 'X-CSRF-Token': csrfToken }
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            showError('Failed to load folders: ' + text);
-            return;
+
+      function current() { return stack[stack.length - 1]; }
+
+      function renderBreadcrumbs() {
+        const container = document.getElementById('breadcrumbs');
+        container.innerHTML = stack.map((entry, idx) => {
+          const isLast = idx === stack.length - 1;
+          if (isLast) {
+            return '<span class="breadcrumb-current">' + escapeHtml(entry.itemName) + '</span>';
           }
-          const data = await res.json();
-          renderFolders(data.folders);
-          renderBreadcrumbs(data.breadcrumbs);
-          currentDrive = driveId;
-          currentItem = itemId;
-          currentPath = data.path;
-        } catch (err) {
-          showError('Network error: ' + err.message);
-        }
+          return '<button class="breadcrumb" data-index="' + idx + '">' +
+            escapeHtml(entry.itemName) + '</button><span class="breadcrumb-separator">/</span>';
+        }).join('');
       }
-      
+
       function renderFolders(folders) {
         const list = document.getElementById('folder-list');
         if (folders.length === 0) {
           list.innerHTML = '<div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">No subfolders</span></div>';
           return;
         }
-        list.innerHTML = folders.map(f => 
-          '<div class="folder-item" data-id="' + escapeHtml(f.id) + '">' +
-          '<span class="folder-icon">📁</span>' +
-          '<span class="folder-name">' + escapeHtml(f.name) + '</span>' +
+        list.innerHTML = folders.map(f =>
+          '<div class="folder-item" data-id="' + escapeHtml(f.id) + '" data-name="' + escapeHtml(f.name) + '">' +
+            '<span class="folder-icon">&#128193;</span>' +
+            '<span class="folder-name">' + escapeHtml(f.name) + '</span>' +
           '</div>'
         ).join('');
       }
-      
-      function renderBreadcrumbs(breadcrumbs) {
-        const container = document.getElementById('breadcrumbs');
-        container.innerHTML = breadcrumbs.map((crumb, idx) => {
-          if (idx === breadcrumbs.length - 1) {
-            return '<span class="breadcrumb-current">' + escapeHtml(crumb.label) + '</span>';
-          }
-          return '<button class="breadcrumb" data-item-id="' + escapeHtml(crumb.id) + '">' + 
-                 escapeHtml(crumb.label) + '</button><span class="breadcrumb-separator">/</span>';
-        }).join('');
+
+      function renderDriveTabs(activeDriveId) {
+        document.querySelectorAll('.drive-tab').forEach(tab => {
+          tab.classList.toggle('active', tab.dataset.driveId === activeDriveId);
+        });
       }
-      
+
+      async function loadCurrent() {
+        clearError();
+        const entry = current();
+        const url = '/children?driveId=' + encodeURIComponent(entry.driveId) +
+                    '&itemId=' + encodeURIComponent(entry.itemId);
+        try {
+          const res = await fetch(url, { method: 'GET', headers: { 'X-CSRF-Token': csrfToken } });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            showError('Failed to load folders: ' + (data.error || res.status));
+            return;
+          }
+          const data = await res.json();
+          // Update the current entry with the resolved name/path so
+          // breadcrumbs and persisted selection use Graph's canonical values.
+          entry.itemName = data.itemName;
+          entry.itemPath = data.itemPath;
+          renderFolders(data.folders);
+          renderBreadcrumbs();
+          renderDriveTabs(entry.driveId);
+        } catch (err) {
+          showError('Network error: ' + err.message);
+        }
+      }
+
+      function navigateInto(driveId, itemId, itemName) {
+        stack.push({ driveId, itemId, itemName: itemName || itemId, itemPath: '' });
+        loadCurrent();
+      }
+
+      function navigateToBreadcrumb(index) {
+        stack = stack.slice(0, index + 1);
+        loadCurrent();
+      }
+
+      function switchDrive(driveId) {
+        stack = [{ driveId, itemId: 'root', itemName: '/', itemPath: '/' }];
+        loadCurrent();
+      }
+
       document.getElementById('folder-list').addEventListener('click', (e) => {
         const item = e.target.closest('.folder-item');
         if (item && item.dataset.id) {
-          loadChildren(currentDrive, item.dataset.id);
+          navigateInto(current().driveId, item.dataset.id, item.dataset.name);
         }
       });
-      
+
       document.getElementById('breadcrumbs').addEventListener('click', (e) => {
         const crumb = e.target.closest('.breadcrumb');
-        if (crumb && crumb.dataset.itemId) {
-          loadChildren(currentDrive, crumb.dataset.itemId);
+        if (crumb && crumb.dataset.index !== undefined) {
+          navigateToBreadcrumb(parseInt(crumb.dataset.index, 10));
         }
       });
-      
+
       document.getElementById('drive-tabs').addEventListener('click', (e) => {
         const tab = e.target.closest('.drive-tab');
         if (tab && tab.dataset.driveId) {
-          loadChildren(tab.dataset.driveId, 'root');
+          switchDrive(tab.dataset.driveId);
         }
       });
-      
+
       document.getElementById('select-btn').addEventListener('click', async () => {
         clearError();
+        const entry = current();
+        if (entry.itemId === 'root') {
+          showError('Pick a folder inside the drive — the drive root cannot be the workspace.');
+          return;
+        }
         const btn = document.getElementById('select-btn');
         btn.disabled = true;
-        btn.textContent = 'Saving...';
-        
+        btn.textContent = 'Saving…';
         try {
           const res = await fetch('/select', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': csrfToken
-            },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({
-              driveId: currentDrive,
-              itemId: currentItem,
-              path: currentPath,
-              csrfToken
-            })
+              driveId: entry.driveId,
+              itemId: entry.itemId,
+              itemName: entry.itemName,
+              itemPath: entry.itemPath,
+              csrfToken: csrfToken,
+            }),
           });
-          
           if (!res.ok) {
-            const text = await res.text();
-            showError('Selection failed: ' + text);
+            const data = await res.json().catch(() => ({}));
+            showError('Selection failed: ' + (data.error || res.status));
             btn.disabled = false;
             btn.textContent = 'Use this folder as workspace';
             return;
           }
-          
-          showDone('Workspace configured', currentPath);
+          showDone('Workspace configured', entry.itemPath || entry.itemName);
         } catch (err) {
           showError('Network error: ' + err.message);
           btn.disabled = false;
           btn.textContent = 'Use this folder as workspace';
         }
       });
-      
+
       document.getElementById('cancel-btn').addEventListener('click', async () => {
         try {
           await fetch('/cancel', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ csrfToken })
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ csrfToken: csrfToken }),
           });
-        } catch (err) {
-          console.error('Cancel failed:', err);
-        }
+        } catch (err) { /* swallow */ }
         window.close();
       });
-      
+
       document.getElementById('resolve-share-btn').addEventListener('click', async () => {
         clearError();
         const input = document.getElementById('share-link-input');
         const url = input.value.trim();
-        if (!url) {
-          showError('Please paste a share link');
-          return;
-        }
-        
+        if (!url) { showError('Please paste a share link'); return; }
         const btn = document.getElementById('resolve-share-btn');
         btn.disabled = true;
-        btn.textContent = 'Resolving...';
-        
+        const origLabel = btn.textContent;
+        btn.textContent = 'Resolving…';
         try {
           const res = await fetch('/resolve-share', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ url, csrfToken })
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ url: url, csrfToken: csrfToken }),
           });
-          
           if (!res.ok) {
-            const text = await res.text();
-            showError('Failed to resolve link: ' + text);
-            btn.disabled = false;
-            btn.textContent = 'Add shared drive';
+            const data = await res.json().catch(() => ({}));
+            showError('Failed to resolve link: ' + (data.error || res.status));
             return;
           }
-          
           const data = await res.json();
-          
-          // Add new drive tab
+          // Add a tab if not already present, then jump to the resolved item.
           const tabs = document.getElementById('drive-tabs');
-          const newTab = document.createElement('button');
-          newTab.className = 'drive-tab';
-          newTab.dataset.driveId = data.driveId;
-          newTab.textContent = data.name || data.driveId;
-          tabs.appendChild(newTab);
-          
-          // Navigate to it
-          loadChildren(data.driveId, data.itemId);
-          
+          if (!tabs.querySelector('.drive-tab[data-drive-id="' + CSS.escape(data.driveId) + '"]')) {
+            const tab = document.createElement('button');
+            tab.className = 'drive-tab';
+            tab.dataset.driveId = data.driveId;
+            tab.textContent = data.driveLabel || data.driveId;
+            tabs.appendChild(tab);
+          }
+          stack = [
+            { driveId: data.driveId, itemId: 'root', itemName: '/', itemPath: '/' },
+            { driveId: data.driveId, itemId: data.itemId, itemName: data.name, itemPath: '' },
+          ];
+          loadCurrent();
           input.value = '';
-          btn.disabled = false;
-          btn.textContent = 'Add shared drive';
         } catch (err) {
           showError('Network error: ' + err.message);
+        } finally {
           btn.disabled = false;
-          btn.textContent = 'Add shared drive';
+          btn.textContent = origLabel;
         }
       });
-    })();
-  </script>`,
+
+      loadCurrent();`,
   });
 }

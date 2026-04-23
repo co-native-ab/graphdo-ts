@@ -137,7 +137,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
   return async (args, { signal }) => {
     // Hoist scope outside try block so error handlers can access it
     let scope: import("../../graph/drives.js").DriveScope | undefined;
-    
+
     try {
       if (!args.itemId && !args.fileName) {
         return {
@@ -148,11 +148,12 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
 
       const cfg = await loadAndValidateWorkspaceConfig(config.configDir, signal);
       const client = config.graphClient;
-      
-      scope = cfg.workspace.driveId === "me"
-        ? meDriveScope
-        : { kind: "drive" as const, driveId: cfg.workspace.driveId };
-      
+
+      scope =
+        cfg.workspace.driveId === "me"
+          ? meDriveScope
+          : { kind: "drive" as const, driveId: cfg.workspace.driveId };
+
       const item = await resolveDriveItem(client, scope, cfg.workspace.itemId, args, signal);
 
       if (item.folder !== undefined) {
@@ -359,7 +360,12 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
     } catch (err: unknown) {
       if (err instanceof MarkdownCTagMismatchError && scope) {
         const cur = err.currentItem;
-        const currentRevision = await resolveCurrentRevision(config.graphClient, scope, cur, signal);
+        const currentRevision = await resolveCurrentRevision(
+          config.graphClient,
+          scope,
+          cur,
+          signal,
+        );
         return {
           content: [
             {

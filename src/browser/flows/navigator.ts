@@ -1,75 +1,102 @@
 // Navigator flow descriptor — browser-based workspace folder navigator.
 //
 // Provides a navigable browser UI for selecting a workspace folder from any
-// accessible drive: the user's own OneDrive, or a shared drive/folder via
-// pasted share link.
+// drive the user can reach: their own OneDrive (the initial scope) or any
+// drive surfaced by pasting a OneDrive / SharePoint share link. The picker
+// is reachable only via the human-only `markdown_select_workspace` tool —
+// the AI agent cannot programmatically change the configured workspace.
+//
+// Routes:
+//   GET  /                page (initial folder listing rendered server-side)
+//   GET  /children?…      JSON list of immediate child folders + breadcrumbs
+//   POST /resolve-share   resolve a pasted share URL → switch active drive
+//   POST /select          persist the current folder as the workspace
+//   POST /cancel          tear the server down
+//
+// Like every other browser flow, the local server runs on 127.0.0.1, ships
+// a per-request CSP nonce, and pins POST handlers behind a CSRF token.
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { UserCancelledError } from "../../errors.js";
-import type { GraphClient } from "../../graph/client.js";
-import { HttpMethod } from "../../graph/client.js";
-import type { DriveScope } from "../../graph/drives.js";
-import { driveItemPath, driveMetadataPath, driveRootChildrenPath, meDriveScope, resolveShareLink } from "../../graph/drives.js";
-import type { ValidatedGraphId } from "../../graph/ids.js";
-import { validateGraphId } from "../../graph/ids.js";
+import {
+  GraphRequestError,
+  HttpMethod,
+  parseResponse,
+  type GraphClient,
+} from "../../graph/client.js";
+import {
+  driveItemPath,
+  driveMetadataPath,
+  driveRootChildrenPath,
+  meDriveScope,
+  resolveShareLink,
+  type DriveScope,
+  type ResolvedShare,
+} from "../../graph/drives.js";
+import { tryValidateGraphId, validateGraphId, type ValidatedGraphId } from "../../graph/ids.js";
+import { DriveItemSchema, DriveSchema, GraphListResponseSchema } from "../../graph/types.js";
 import { logger } from "../../logger.js";
 import { navigatorPageHtml } from "../../templates/navigator.js";
 import type { BrowserFlow, FlowContext, RouteTable } from "../server.js";
-import { readJsonWithCsrf, respondAndClose, runBrowserFlow } from "../server.js";
+import { readJsonWithCsrf, respondAndClose, runBrowserFlow, serveHtml } from "../server.js";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 export interface NavigatorSelection {
-  scope: DriveScope;
-  itemId: ValidatedGraphId;
-  name: string;
-  path: string;
-}
-
-export interface NavigatorConfig {
-  title: string;
-  subtitle: string;
-  /** The drive and folder to show when the navigator first opens. */
-  initialScope: DriveScope;
-  /** Graph client for fetching folder children and resolving share links. */
-  client: GraphClient;
-  /** Called when the user selects a folder. */
-  onSelect: (selection: NavigatorSelection, signal: AbortSignal) => Promise<void>;
-  /** Timeout in milliseconds (default: 120_000 - 2 minutes). */
-  timeoutMs?: number;
+  readonly scope: DriveScope;
+  /** Display name of the resolved drive (e.g. `"OneDrive"`). */
+  readonly driveName: string;
+  /** The selected folder's drive item id. */
+  readonly itemId: ValidatedGraphId;
+  /** The selected folder's display name. */
+  readonly itemName: string;
+  /** Slash-joined display path within the drive (e.g. `/Notes/2026`). */
+  readonly itemPath: string;
 }
 
 export interface NavigatorResult {
-  selected: NavigatorSelection;
+  readonly selected: NavigatorSelection;
+}
+
+export interface NavigatorConfig {
+  readonly title: string;
+  readonly subtitle: string;
+  /** The drive the navigator opens to (always the user's own OneDrive today). */
+  readonly initialScope: DriveScope;
+  readonly client: GraphClient;
+  /** Called inside the flow's signal scope when the user picks a folder. */
+  readonly onSelect: (selection: NavigatorSelection, signal: AbortSignal) => Promise<void>;
+  readonly timeoutMs?: number;
 }
 
 export interface NavigatorHandle {
-  url: string;
-  waitForSelection: Promise<NavigatorResult>;
+  readonly url: string;
+  readonly waitForSelection: Promise<NavigatorResult>;
 }
 
 // ---------------------------------------------------------------------------
-// Schemas
+// HTTP body schemas
 // ---------------------------------------------------------------------------
 
 const ChildrenQuerySchema = z.object({
-  scope: z.string(),
-  itemId: z.string(),
+  driveId: z.string().min(1),
+  /** `"root"` for the drive root, otherwise an opaque drive item id. */
+  itemId: z.string().min(1),
 });
 
 const ResolveShareBodySchema = z.object({
-  url: z.string(),
+  url: z.string().min(1),
   csrfToken: z.string(),
 });
 
 const SelectionSchema = z.object({
-  driveId: z.string(),
-  itemId: z.string(),
-  path: z.string(),
+  driveId: z.string().min(1),
+  itemId: z.string().min(1),
+  itemName: z.string().min(1),
+  itemPath: z.string().min(1),
   csrfToken: z.string(),
 });
 
@@ -78,125 +105,110 @@ const CancelSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Helper: parse folder children from Graph response
+// Helpers
 // ---------------------------------------------------------------------------
 
-async function loadFolderChildren(
+interface KnownDrive {
+  readonly id: string; // `"me"` for the user's own drive, otherwise the validated drive id.
+  readonly label: string;
+  readonly scope: DriveScope;
+}
+
+function scopeForDriveId(driveId: string): DriveScope {
+  if (driveId === "me") return meDriveScope;
+  return { kind: "drive", driveId: validateGraphId("driveId", driveId) };
+}
+
+function driveIdForScope(scope: DriveScope): string {
+  return scope.kind === "me" ? "me" : scope.driveId;
+}
+
+interface FolderChild {
+  readonly id: ValidatedGraphId;
+  readonly name: string;
+}
+
+async function listChildFolders(
   client: GraphClient,
   scope: DriveScope,
   itemId: ValidatedGraphId | "root",
   signal: AbortSignal,
-): Promise<Array<{ id: ValidatedGraphId; name: string }>> {
-  const path = itemId === "root"
-    ? driveRootChildrenPath(scope)
-    : driveItemPath(scope, itemId, "/children");
-
-  const res = await client.request(HttpMethod.GET, path, signal);
-  if (!res.ok) {
-    const { parseResponse, GraphRequestError } = await import("../../graph/client.js");
-    const err = await GraphRequestError.fromResponse(res, HttpMethod.GET, path);
-    throw err;
-  }
-
-  const { parseResponse } = await import("../../graph/client.js");
-  const { GraphListResponseSchema, DriveItemSchema } = await import("../../graph/types.js");
-  
-  const data = await parseResponse(res, GraphListResponseSchema(DriveItemSchema), signal);
-  
-  // Filter to folders only and validate IDs
-  const folders: Array<{ id: ValidatedGraphId; name: string }> = [];
+): Promise<FolderChild[]> {
+  const path =
+    itemId === "root"
+      ? driveRootChildrenPath(scope, "?$top=200")
+      : driveItemPath(scope, itemId, "/children?$top=200");
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const data = await parseResponse(
+    response,
+    GraphListResponseSchema(DriveItemSchema),
+    HttpMethod.GET,
+    path,
+  );
+  const out: FolderChild[] = [];
   for (const item of data.value) {
-    if (item.folder !== undefined) {
-      folders.push({
-        id: validateGraphId("folder item id", item.id),
-        name: item.name,
+    if (item.folder === undefined) continue;
+    const validated = tryValidateGraphId("driveItem.id", item.id);
+    if (!validated.ok) {
+      logger.warn("navigator: skipping child with invalid id", {
+        reason: validated.reason,
+        rawId: item.id,
       });
+      continue;
     }
+    out.push({ id: validated.value, name: item.name });
   }
-  
-  return folders;
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
 }
 
-// ---------------------------------------------------------------------------
-// Helper: build breadcrumbs from Graph item metadata
-// ---------------------------------------------------------------------------
-
-interface Breadcrumb {
-  id: string;
-  label: string;
+interface FolderInfo {
+  readonly name: string;
+  /** Drive-relative display path (e.g. `/Notes/2026`). */
+  readonly path: string;
 }
 
-async function loadBreadcrumbs(
+async function getFolderInfo(
   client: GraphClient,
   scope: DriveScope,
   itemId: ValidatedGraphId | "root",
   signal: AbortSignal,
-): Promise<{ breadcrumbs: Breadcrumb[]; currentName: string }> {
-  if (itemId === "root") {
-    return {
-      breadcrumbs: [{ id: "root", label: "/" }],
-      currentName: "/",
-    };
-  }
-
+): Promise<FolderInfo> {
+  if (itemId === "root") return { name: "/", path: "/" };
   const path = driveItemPath(scope, itemId);
-  const res = await client.request(HttpMethod.GET, path, signal);
-  if (!res.ok) {
-    const { parseResponse, GraphRequestError } = await import("../../graph/client.js");
-    const err = await GraphRequestError.fromResponse(res, HttpMethod.GET, path);
-    throw err;
-  }
-
-  const { parseResponse } = await import("../../graph/client.js");
-  const { DriveItemSchema } = await import("../../graph/types.js");
-  const item = await parseResponse(res, DriveItemSchema, signal);
-
-  // Build breadcrumbs from parent path (Graph returns `/drive/root:/path/to/folder`)
-  const breadcrumbs: Breadcrumb[] = [{ id: "root", label: "/" }];
-  
-  if (item.parentReference?.path) {
-    // Extract path segments after "/drive/root:"
-    const match = item.parentReference.path.match(/\/drive\/root:(.*)$/);
-    if (match && match[1]) {
-      const segments = match[1].split("/").filter(Boolean);
-      // We don't have IDs for intermediate segments from this response, so we can't make them clickable
-      // For now, just show them as non-clickable text (future PR can add path-to-id resolution)
-    }
-  }
-  
-  // Add current folder as the last segment
-  breadcrumbs.push({ id: itemId, label: item.name });
-
-  return {
-    breadcrumbs,
-    currentName: item.name,
-  };
+  const response = await client.request(HttpMethod.GET, path, signal);
+  const item = await parseResponse(response, DriveItemSchema, HttpMethod.GET, path);
+  // parentReference.path looks like `/drive/root:/Notes` or `/drives/{id}/root:/Notes`.
+  // Strip the prefix and append the item name.
+  const parentPath = item.parentReference?.path ?? "";
+  const match = /(?:\/drive|\/drives\/[^/]+)\/root:(.*)$/.exec(parentPath);
+  const parent = match?.[1] ?? "";
+  const trimmedParent = parent === "" ? "" : parent.replace(/\/+$/, "");
+  const display = `${trimmedParent}/${item.name}`;
+  return { name: item.name, path: display.startsWith("/") ? display : `/${display}` };
 }
 
-// ---------------------------------------------------------------------------
-// Helper: load drive name
-// ---------------------------------------------------------------------------
-
-async function getDriveName(
+async function getDriveDisplayName(
   client: GraphClient,
   scope: DriveScope,
   signal: AbortSignal,
 ): Promise<string> {
-  if (scope.kind === "me") {
-    return "OneDrive";
-  }
-
-  const path = driveMetadataPath(scope);
-  const res = await client.request(HttpMethod.GET, path, signal);
-  if (!res.ok) {
-    // Fallback to drive ID if we can't load metadata
+  if (scope.kind === "me") return "OneDrive";
+  try {
+    const path = driveMetadataPath(scope);
+    const response = await client.request(HttpMethod.GET, path, signal);
+    const drive = await parseResponse(response, DriveSchema, HttpMethod.GET, path);
+    return drive.driveType !== undefined && drive.driveType.length > 0
+      ? `${drive.driveType} drive`
+      : scope.driveId;
+  } catch (err: unknown) {
+    if (signal.aborted) throw err;
+    logger.debug("navigator: failed to fetch drive metadata; falling back to id", {
+      driveId: scope.driveId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return scope.driveId;
   }
-
-  const { parseResponse } = await import("../../graph/client.js");
-  const { DriveSchema } = await import("../../graph/types.js");
-  const drive = await parseResponse(res, DriveSchema, signal);
-  return drive.name ?? scope.driveId;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,47 +223,42 @@ export function navigatorFlow(
     name: "navigator",
     timeoutMs: config.timeoutMs,
     routes: (ctx: FlowContext<NavigatorResult>): RouteTable => {
-      // Mutable state: discovered drives (starts with just the initial scope)
-      const state = {
-        drives: [
-          {
-            id: config.initialScope.kind === "me" ? "me" : config.initialScope.driveId,
-            label: "OneDrive",
-            scope: config.initialScope,
-          },
-        ],
-      };
+      // Mutable per-flow state — discovered drives. Always starts with the
+      // initial scope (the user's own OneDrive). Each successful share-link
+      // paste appends to this list and the page rerenders the tabs from
+      // /children responses.
+      const drives: KnownDrive[] = [
+        {
+          id: driveIdForScope(config.initialScope),
+          label: "OneDrive",
+          scope: config.initialScope,
+        },
+      ];
+
+      function knownDriveLabel(driveId: string): string | undefined {
+        return drives.find((d) => d.id === driveId)?.label;
+      }
 
       return {
-        "GET /": async (_req, res, nonce) => {
+        "GET /": (_req, res, nonce) => {
           try {
-            // Load initial folder listing
-            const folders = await loadFolderChildren(
-              config.client,
-              config.initialScope,
-              "root",
-              signal,
-            );
-            
-            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(
+            serveHtml(
+              res,
               navigatorPageHtml({
                 title: config.title,
                 subtitle: config.subtitle,
-                drives: state.drives.map((d) => ({ id: d.id, label: d.label })),
-                activeDriveId: state.drives[0]?.id ?? "me",
-                breadcrumbs: [{ id: "root", label: "/" }],
-                folders: folders.map((f) => ({ id: f.id, name: f.name })),
+                drives: drives.map((d) => ({ id: d.id, label: d.label })),
+                initialDriveId: drives[0]?.id ?? "me",
                 csrfToken: ctx.csrfToken,
                 nonce,
               }),
             );
           } catch (err: unknown) {
-            logger.error("navigator initial load failed", {
+            logger.error("navigator initial page render failed", {
               error: err instanceof Error ? err.message : String(err),
             });
             res.writeHead(500, { "Content-Type": "text/plain" });
-            res.end("Failed to load initial folder listing");
+            res.end("Failed to render workspace navigator");
           }
         },
 
@@ -259,54 +266,46 @@ export function navigatorFlow(
           void (async () => {
             try {
               const url = new URL(req.url ?? "", `http://${req.headers.host ?? "localhost"}`);
-              const rawScope = url.searchParams.get("scope");
-              const rawItemId = url.searchParams.get("itemId");
-
               const parsed = ChildrenQuerySchema.safeParse({
-                scope: rawScope,
-                itemId: rawItemId,
+                driveId: url.searchParams.get("driveId"),
+                itemId: url.searchParams.get("itemId"),
               });
               if (!parsed.success) {
-                res.writeHead(400, { "Content-Type": "text/plain" });
-                res.end("Invalid query parameters");
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "invalid driveId or itemId" }));
                 return;
               }
-
-              // Build DriveScope from the scope parameter
-              const scope: DriveScope =
-                parsed.data.scope === "me"
-                  ? meDriveScope
-                  : { kind: "drive", driveId: validateGraphId("driveId", parsed.data.scope) };
-
+              const scope = scopeForDriveId(parsed.data.driveId);
               const itemId =
                 parsed.data.itemId === "root"
-                  ? "root"
+                  ? ("root" as const)
                   : validateGraphId("itemId", parsed.data.itemId);
-
-              const folders = await loadFolderChildren(config.client, scope, itemId, signal);
-              const { breadcrumbs, currentName } = await loadBreadcrumbs(
-                config.client,
-                scope,
-                itemId,
-                signal,
-              );
-
-              const path = breadcrumbs.map((b) => b.label).join("/").replace(/\/+/g, "/");
-
+              const [info, folders] = await Promise.all([
+                getFolderInfo(config.client, scope, itemId, signal),
+                listChildFolders(config.client, scope, itemId, signal),
+              ]);
               res.writeHead(200, { "Content-Type": "application/json" });
               res.end(
                 JSON.stringify({
+                  driveId: parsed.data.driveId,
+                  itemId: parsed.data.itemId,
+                  itemName: info.name,
+                  itemPath: info.path,
                   folders: folders.map((f) => ({ id: f.id, name: f.name })),
-                  breadcrumbs,
-                  path,
+                  driveLabel: knownDriveLabel(parsed.data.driveId) ?? "drive",
                 }),
               );
             } catch (err: unknown) {
-              logger.error("navigator children load failed", {
-                error: err instanceof Error ? err.message : String(err),
-              });
-              res.writeHead(500, { "Content-Type": "text/plain" });
-              res.end("Failed to load folder children");
+              if (signal.aborted) return;
+              const message =
+                err instanceof GraphRequestError
+                  ? err.graphMessage
+                  : err instanceof Error
+                    ? err.message
+                    : String(err);
+              logger.warn("navigator children load failed", { error: message });
+              res.writeHead(502, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: message }));
             }
           })();
         },
@@ -314,43 +313,36 @@ export function navigatorFlow(
         "POST /resolve-share": (req, res) => {
           readJsonWithCsrf(req, res, ctx, ResolveShareBodySchema, async (data) => {
             try {
-              const resolved = await resolveShareLink(config.client, data.url, signal);
-
-              // Add the new drive to state
-              const driveId = resolved.driveId;
-              const driveName = await getDriveName(
+              const resolved: ResolvedShare = await resolveShareLink(
                 config.client,
-                { kind: "drive", driveId },
+                data.url,
                 signal,
               );
-
-              // Check if already added
-              const exists = state.drives.some((d) => d.id === driveId);
-              if (!exists) {
-                state.drives.push({
-                  id: driveId,
-                  label: driveName,
-                  scope: { kind: "drive", driveId },
-                });
+              const newScope: DriveScope = { kind: "drive", driveId: resolved.driveId };
+              if (!drives.some((d) => d.id === resolved.driveId)) {
+                const label = await getDriveDisplayName(config.client, newScope, signal);
+                drives.push({ id: resolved.driveId, label, scope: newScope });
               }
-
               res.writeHead(200, { "Content-Type": "application/json" });
               res.end(
                 JSON.stringify({
-                  driveId,
+                  driveId: resolved.driveId,
                   itemId: resolved.itemId,
                   name: resolved.name,
+                  driveLabel: knownDriveLabel(resolved.driveId) ?? resolved.driveId,
                 }),
               );
-              logger.info("share link resolved", { driveId, itemId: resolved.itemId });
             } catch (err: unknown) {
-              logger.error("share link resolution failed", {
-                error: err instanceof Error ? err.message : String(err),
-              });
-              res.writeHead(400, { "Content-Type": "text/plain" });
-              res.end(
-                err instanceof Error ? err.message : "Failed to resolve share link",
-              );
+              if (signal.aborted) return;
+              const message =
+                err instanceof GraphRequestError
+                  ? err.graphMessage
+                  : err instanceof Error
+                    ? err.message
+                    : String(err);
+              logger.warn("navigator share resolution failed", { error: message });
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: message }));
             }
           });
         },
@@ -358,45 +350,24 @@ export function navigatorFlow(
         "POST /select": (req, res) => {
           readJsonWithCsrf(req, res, ctx, SelectionSchema, async (data) => {
             try {
-              // Build scope from driveId
-              const scope: DriveScope =
-                data.driveId === "me"
-                  ? meDriveScope
-                  : { kind: "drive", driveId: validateGraphId("driveId", data.driveId) };
-
+              const scope = scopeForDriveId(data.driveId);
               const itemId = validateGraphId("itemId", data.itemId);
-
-              // Load the item to get its name
-              const { breadcrumbs, currentName } = await loadBreadcrumbs(
-                config.client,
-                scope,
-                itemId,
-                signal,
-              );
-
+              const driveName = knownDriveLabel(data.driveId) ?? "drive";
               const selection: NavigatorSelection = {
                 scope,
+                driveName,
                 itemId,
-                name: currentName,
-                path: data.path,
+                itemName: data.itemName,
+                itemPath: data.itemPath,
               };
-
               await config.onSelect(selection, signal);
-
-              logger.info("navigator selection made", {
-                driveId: data.driveId,
-                itemId: data.itemId,
-                path: data.path,
-              });
-
-              respondAndClose(res, ctx.server, { ok: true });
+              respondAndClose(res, ctx.server, { ok: true, label: data.itemName });
               ctx.resolve({ selected: selection });
             } catch (err: unknown) {
-              logger.error("navigator selection failed", {
-                error: err instanceof Error ? err.message : String(err),
-              });
-              res.writeHead(500, { "Content-Type": "text/plain" });
-              res.end(err instanceof Error ? err.message : "Selection failed");
+              const message = err instanceof Error ? err.message : String(err);
+              logger.error("navigator selection persist failed", { error: message });
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: message }));
             }
           });
         },
@@ -412,13 +383,10 @@ export function navigatorFlow(
   };
 }
 
-// ---------------------------------------------------------------------------
-// runNavigator — public wrapper
-// ---------------------------------------------------------------------------
-
 /**
- * Start a local navigator server. Returns the URL immediately and a promise
- * that resolves when the user selects a workspace folder.
+ * Start a local navigator server. Returns the URL to surface to the user
+ * and a promise that resolves when they pick a folder (or rejects on
+ * cancel / timeout / abort).
  */
 export async function runNavigator(
   config: NavigatorConfig,

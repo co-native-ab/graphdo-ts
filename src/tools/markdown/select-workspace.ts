@@ -44,18 +44,16 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
           initialScope: meDriveScope,
           client,
           onSelect: async (selection, s) => {
-            const driveId =
-              selection.scope.kind === "me" ? "me" : selection.scope.driveId;
-            const driveName = selection.scope.kind === "me" ? "OneDrive" : selection.scope.driveId;
+            const driveId = selection.scope.kind === "me" ? "me" : selection.scope.driveId;
 
             await updateConfig(
               {
                 workspace: {
                   driveId,
                   itemId: selection.itemId,
-                  driveName,
-                  itemName: selection.name,
-                  itemPath: selection.path,
+                  driveName: selection.driveName,
+                  itemName: selection.itemName,
+                  itemPath: selection.itemPath,
                 },
               },
               config.configDir,
@@ -91,7 +89,7 @@ function handler(config: ServerConfig): ToolCallback<typeof inputSchema> {
           {
             type: "text",
             text:
-              `${instruction}\n\nMarkdown workspace configured: ${result.selected.path} ` +
+              `${instruction}\n\nMarkdown workspace configured: ${result.selected.itemPath} ` +
               `(${result.selected.itemId})`,
           },
         ],
