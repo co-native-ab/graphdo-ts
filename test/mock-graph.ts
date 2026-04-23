@@ -1117,3 +1117,16 @@ function headerValue(req: http.IncomingMessage, name: string): string | null {
   if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") return v[0];
   return null;
 }
+
+  // /shares/{shareId}/driveItem - resolve share link
+  if (method === "GET" && segments[0] === "shares" && segments[2] === "driveItem") {
+    if (!state.sharedDriveItems) {
+      state.sharedDriveItems = new Map();
+    }
+    const shareId = segments[1];
+    const item = state.sharedDriveItems.get(shareId);
+    if (!item) {
+      return error(404, "ShareNotFound", "Share link not found");
+    }
+    return ok(item);
+  }
