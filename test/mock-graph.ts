@@ -396,8 +396,24 @@ async function handleRequest(
     }
 
     // OneDrive / drive routes -------------------------------------------
+    // Accept both `/me/drive/…` (the user's own OneDrive) and
+    // `/drives/{driveId}/…` (any drive id). For the explicit form, validate
+    // the driveId matches the mock's configured drive — anything else is a
+    // 404 the same way real Graph would return it. Both forms are then
+    // routed through handleDriveRequest by normalising the segments to the
+    // `/me/drive/…` shape.
     if (segments[0] === "me" && segments[1] === "drive") {
       const handled = await handleDriveRequest(state, req, res, method, segments, parsed);
+      if (handled) return;
+    }
+    if (segments[0] === "drives" && segments[1] !== undefined) {
+      const driveId = segments[1];
+      if (driveId !== state.drive.id) {
+        errorResponse(res, 404, "itemNotFound", `drive ${driveId} not found`);
+        return;
+      }
+      const normalised = ["me", "drive", ...segments.slice(2)];
+      const handled = await handleDriveRequest(state, req, res, method, normalised, parsed);
       if (handled) return;
     }
 

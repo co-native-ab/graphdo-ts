@@ -41,7 +41,7 @@ const validConfig: Config = {
 };
 
 /** validConfig as it appears in memory after a round-trip through saveConfig/loadConfig. */
-const validConfigPersisted: Config = { ...validConfig, configVersion: 2 };
+const validConfigPersisted: Config = { ...validConfig, configVersion: 3 };
 
 /** Legacy v1 (camelCase, flat, no `config_version`) form of `validConfig` for migration tests. */
 const validConfigV1OnDisk = {
@@ -128,7 +128,7 @@ describe("loadConfig", () => {
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ foo: 123 }));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual({ configVersion: 2 });
+    expect(result).toEqual({ configVersion: 3 });
   });
 
   it("returns null for valid JSON with empty required fields", async () => {
@@ -150,7 +150,7 @@ describe("loadConfig", () => {
     await fs.writeFile(path.join(dir, "config.json"), JSON.stringify({ todoListId: "list-1" }));
 
     const result = await loadConfig(dir, testSignal());
-    expect(result).toEqual({ configVersion: 2, todo: { listId: "list-1" } });
+    expect(result).toEqual({ configVersion: 3, todo: { listId: "list-1" } });
   });
 
   it("strips extra fields and returns valid config", async () => {
@@ -177,7 +177,7 @@ describe("saveConfig", () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it("writes valid JSON in snake_case (v2) with todo nested that can be read back", async () => {
+  it("writes valid JSON in snake_case (current version) with todo nested that can be read back", async () => {
     const dir = getTempDir();
     await saveConfig(validConfig, dir, testSignal());
 
@@ -185,8 +185,8 @@ describe("saveConfig", () => {
     const parsed = JSON.parse(content) as Record<string, unknown>;
     expect(parsed).toEqual({
       $schema:
-        "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
-      config_version: 2,
+        "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v3.json",
+      config_version: 3,
       todo: { list_id: "list-123", list_name: "My Tasks" },
     });
   });
@@ -201,7 +201,7 @@ describe("saveConfig", () => {
     expect(keys[0]).toBe("$schema");
     expect(keys[1]).toBe("config_version");
     expect(parsed["$schema"]).toBe(
-      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v2.json",
+      "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v3.json",
     );
   });
 
@@ -270,101 +270,130 @@ describe("round-trip", () => {
     await saveConfig(config, dir, testSignal());
     const loaded = await loadConfig(dir, testSignal());
 
-    expect(loaded).toEqual({ ...config, configVersion: 2 });
+    expect(loaded).toEqual({ ...config, configVersion: 3 });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Strict markdown root folder validation
+// Strict workspace validation
 // ---------------------------------------------------------------------------
 
 import {
-  hasMarkdownConfig,
-  loadAndValidateMarkdownConfig,
-  markdownRootFolderIdError,
+  hasWorkspaceConfig,
+  loadAndValidateWorkspaceConfig,
+  workspaceItemIdError,
+  workspaceDriveIdError,
 } from "../src/config.js";
 
-describe("markdownRootFolderIdError", () => {
+describe("workspaceItemIdError", () => {
   it("accepts a plausible opaque drive item ID", () => {
-    expect(markdownRootFolderIdError("01ABCDEF1234567890ABCDEF")).toBeNull();
-    expect(markdownRootFolderIdError("folder-1")).toBeNull();
+    expect(workspaceItemIdError("01ABCDEF1234567890ABCDEF")).toBeNull();
+    expect(workspaceItemIdError("folder-1")).toBeNull();
   });
   it("rejects non-strings", () => {
-    expect(markdownRootFolderIdError(undefined)).toBe("missing");
-    expect(markdownRootFolderIdError(null)).toBe("missing");
-    expect(markdownRootFolderIdError(42)).toBe("missing");
+    expect(workspaceItemIdError(undefined)).toBe("missing");
+    expect(workspaceItemIdError(null)).toBe("missing");
+    expect(workspaceItemIdError(42)).toBe("missing");
   });
   it("rejects the empty string", () => {
-    expect(markdownRootFolderIdError("")).toBe("empty");
+    expect(workspaceItemIdError("")).toBe("empty");
   });
   it("rejects values equal to / or \\", () => {
-    expect(markdownRootFolderIdError("/")).toContain("drive root");
-    expect(markdownRootFolderIdError("\\")).toContain("drive root");
+    expect(workspaceItemIdError("/")).toContain("drive root");
+    expect(workspaceItemIdError("\\")).toContain("drive root");
   });
   it("rejects values containing path separators (subpaths)", () => {
-    expect(markdownRootFolderIdError("foo/bar")).toContain("path separator");
-    expect(markdownRootFolderIdError("foo\\bar")).toContain("path separator");
-    expect(markdownRootFolderIdError("/foo")).toContain("path separator");
+    expect(workspaceItemIdError("foo/bar")).toContain("path separator");
+    expect(workspaceItemIdError("foo\\bar")).toContain("path separator");
+    expect(workspaceItemIdError("/foo")).toContain("path separator");
   });
   it("rejects values with whitespace", () => {
-    expect(markdownRootFolderIdError("foo bar")).toContain("whitespace");
-    expect(markdownRootFolderIdError("foo\tbar")).toContain("whitespace");
+    expect(workspaceItemIdError("foo bar")).toContain("whitespace");
+    expect(workspaceItemIdError("foo\tbar")).toContain("whitespace");
   });
 });
 
-describe("hasMarkdownConfig", () => {
+describe("workspaceDriveIdError", () => {
+  it("accepts the literal 'me' sentinel", () => {
+    expect(workspaceDriveIdError("me")).toBeNull();
+  });
+  it("accepts an opaque drive id", () => {
+    expect(workspaceDriveIdError("b!abcdef0123456789")).toBeNull();
+  });
+  it("rejects non-strings, empty, /, and path separators", () => {
+    expect(workspaceDriveIdError(undefined)).toBe("missing");
+    expect(workspaceDriveIdError("")).toBe("empty");
+    expect(workspaceDriveIdError("/")).toContain("drive root");
+    expect(workspaceDriveIdError("a/b")).toContain("path separator");
+    expect(workspaceDriveIdError("a b")).toContain("whitespace");
+  });
+});
+
+describe("hasWorkspaceConfig", () => {
   it("returns false for null, undefined, and empty configs", () => {
-    expect(hasMarkdownConfig(null)).toBe(false);
-    expect(hasMarkdownConfig({})).toBe(false);
-    expect(hasMarkdownConfig({ markdown: {} })).toBe(false);
+    expect(hasWorkspaceConfig(null)).toBe(false);
+    expect(hasWorkspaceConfig({})).toBe(false);
+    expect(hasWorkspaceConfig({ workspace: {} })).toBe(false);
+  });
+  it("returns false when only one of driveId/itemId is set", () => {
+    expect(hasWorkspaceConfig({ workspace: { driveId: "me" } })).toBe(false);
+    expect(hasWorkspaceConfig({ workspace: { itemId: "folder-1" } })).toBe(false);
   });
   it("returns false for invalid IDs", () => {
-    expect(hasMarkdownConfig({ markdown: { rootFolderId: "/" } })).toBe(false);
-    expect(hasMarkdownConfig({ markdown: { rootFolderId: "sub/dir" } })).toBe(false);
-    expect(hasMarkdownConfig({ markdown: { rootFolderId: "with space" } })).toBe(false);
+    expect(hasWorkspaceConfig({ workspace: { driveId: "me", itemId: "/" } })).toBe(false);
+    expect(hasWorkspaceConfig({ workspace: { driveId: "me", itemId: "sub/dir" } })).toBe(false);
+    expect(hasWorkspaceConfig({ workspace: { driveId: "/", itemId: "folder-1" } })).toBe(false);
   });
   it("returns true for valid IDs", () => {
-    expect(hasMarkdownConfig({ markdown: { rootFolderId: "folder-1" } })).toBe(true);
+    expect(hasWorkspaceConfig({ workspace: { driveId: "me", itemId: "folder-1" } })).toBe(true);
   });
 });
 
-describe("loadAndValidateMarkdownConfig", () => {
+describe("loadAndValidateWorkspaceConfig", () => {
   it("throws a helpful error when not configured", async () => {
     const dir = getTempDir();
-    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
-      /not configured.*markdown_select_root_folder/,
+    await expect(loadAndValidateWorkspaceConfig(dir, testSignal())).rejects.toThrow(
+      /not configured.*markdown_select_workspace/,
     );
   });
 
-  it("throws when rootFolderId contains a path separator", async () => {
+  it("throws when itemId contains a path separator", async () => {
     const dir = getTempDir();
-    await saveConfig({ markdown: { rootFolderId: "sub/dir" } } as Config, dir, testSignal());
-    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
-      /invalid.*path separator.*markdown_select_root_folder/,
+    await saveConfig(
+      { workspace: { driveId: "me", itemId: "sub/dir" } } as Config,
+      dir,
+      testSignal(),
+    );
+    await expect(loadAndValidateWorkspaceConfig(dir, testSignal())).rejects.toThrow(
+      /invalid.*path separator.*markdown_select_workspace/,
     );
   });
 
-  it("throws when rootFolderId is /", async () => {
+  it("throws when itemId is /", async () => {
     const dir = getTempDir();
     // Bypass zod validation by writing the file directly.
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, "config.json"),
-      JSON.stringify({ markdown: { rootFolderId: "/" } }),
+      JSON.stringify({
+        config_version: 3,
+        workspace: { drive_id: "me", item_id: "/" },
+      }),
     );
-    await expect(loadAndValidateMarkdownConfig(dir, testSignal())).rejects.toThrow(
-      /invalid.*drive root.*markdown_select_root_folder/,
+    await expect(loadAndValidateWorkspaceConfig(dir, testSignal())).rejects.toThrow(
+      /invalid.*drive root.*markdown_select_workspace/,
     );
   });
 
   it("returns the config when valid", async () => {
     const dir = getTempDir();
     await saveConfig(
-      { markdown: { rootFolderId: "folder-1", rootFolderName: "Notes" } } as Config,
+      { workspace: { driveId: "me", itemId: "folder-1", itemName: "Notes" } } as Config,
       dir,
       testSignal(),
     );
-    const loaded = await loadAndValidateMarkdownConfig(dir, testSignal());
-    expect(loaded.markdown.rootFolderId).toBe("folder-1");
+    const loaded = await loadAndValidateWorkspaceConfig(dir, testSignal());
+    expect(loaded.workspace.driveId).toBe("me");
+    expect(loaded.workspace.itemId).toBe("folder-1");
   });
 });

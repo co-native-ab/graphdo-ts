@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v3.json",
+  "config_version": 3,
+  "todo": {
+    "list_id": "list-abc",
+    "list_name": "Inbox"
+  },
+  "workspace": {
+    "drive_id": "me",
+    "drive_name": "OneDrive",
+    "item_id": "folder-xyz",
+    "item_name": "Notes",
+    "item_path": "/Notes"
+  }
+}

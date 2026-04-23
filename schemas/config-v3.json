@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "config_version": {
+      "type": "number",
+      "const": 3,
+      "description": "On-disk schema version discriminator. Files with a higher value than the running build supports are rejected (never silently downgraded)."
+    },
+    "todo": {
+      "type": "object",
+      "properties": {
+        "list_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Microsoft Graph todoTaskList id. Opaque token: must not contain `/`, `\\`, or whitespace."
+        },
+        "list_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name of the selected list. Cached so `auth_status` can show it without an extra Graph round-trip."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Selection persisted by the `todo_select_list` tool."
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "drive_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Microsoft Graph drive id of the workspace's drive. The literal `me` is reserved for the signed-in user's own OneDrive (`/me/drive`); any other value is treated as an opaque drive id (`/drives/{drive_id}`). Opaque tokens must not contain `/`, `\\`, or whitespace, and must not equal `/`."
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Microsoft Graph driveItem id of the workspace folder. Opaque token: must not equal `/`, contain `/`, `\\`, or whitespace."
+        },
+        "drive_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name of the drive containing the workspace (e.g. `OneDrive`). Cached so `auth_status` can show it without an extra Graph round-trip."
+        },
+        "item_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name of the workspace folder. Cached for the same reason as drive_name."
+        },
+        "item_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display-only path of the workspace folder within its drive (e.g. `/Notes`). Never used to address the folder; the `item_id` is the source of truth."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Selection persisted by the `markdown_select_workspace` tool."
+    }
+  },
+  "required": [
+    "config_version"
+  ],
+  "additionalProperties": false,
+  "$id": "https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v3.json",
+  "title": "graphdo-ts config (v3)",
+  "description": "Versioned snake_case on-disk shape of `config.json`. Replaces v2's `markdown` subsystem with the generalised `workspace` subsystem (drive id + item id) so the persisted folder can address any drive the user can reach. The current build only writes `drive_id: \"me\"` (the user's own OneDrive); the field exists as a forward-compatible sentinel. Generated from the Zod source of truth in `src/config.ts` by `scripts/generate-schemas.ts`; do not edit by hand."
+}
