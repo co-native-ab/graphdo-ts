@@ -1,194 +1,22 @@
 // HTML template for the browser-based workspace navigator.
+//
+// Renders a card with breadcrumbs, a Back/Forward/filter toolbar, a
+// scrollable folder list, optional pagination, and primary/cancel
+// actions. All styling is sourced from `NAVIGATOR_STYLE` in
+// `src/templates/styles.ts`, which in turn is built from the design
+// tokens in `src/templates/tokens.ts` (see ADR-0002).
+//
+// The breadcrumb renderer was rewritten to fix a `/ / Foo` rendering
+// bug: the root entry is now a small "home" SVG button and chevron
+// separators are emitted strictly *between* crumbs (never leading,
+// never duplicated). The navigation model is a `{ history, cursor }`
+// pair rather than a linear stack, so Back / Forward behave the way
+// a browser does.
 
 import { escapeHtml } from "./escape.js";
 import { layoutHtml } from "./layout.js";
 import { logoDarkDataUri, logoLightDataUri } from "./icons.js";
-
-export const NAVIGATOR_STYLE = `
-  .container {
-    max-width: 800px;
-    margin: 3rem auto;
-    padding: 1rem;
-  }
-
-  .card {
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    padding: 2rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  }
-
-  h1 {
-    margin: 0 0 0.75rem;
-    font-size: 1.75rem;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .subtitle {
-    margin: 0 0 1.5rem;
-    font-size: 0.95rem;
-    color: var(--text-secondary);
-  }
-
-  .drive-label {
-    display: inline-block;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.75rem;
-  }
-
-  .breadcrumbs {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-  }
-
-  .breadcrumb {
-    background: none;
-    border: none;
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: inherit;
-    color: var(--brand);
-    text-decoration: none;
-    border-radius: 0.25rem;
-    transition: background 0.2s;
-  }
-
-  .breadcrumb:hover {
-    background: var(--hover-bg);
-  }
-
-  .breadcrumb-separator {
-    color: var(--text-tertiary);
-  }
-
-  .folder-list {
-    max-height: 400px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    margin-bottom: 1rem;
-  }
-
-  .folder-item {
-    display: flex;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .folder-item:last-child {
-    border-bottom: none;
-  }
-
-  .folder-item:hover {
-    background: var(--hover-bg);
-  }
-
-  .folder-icon {
-    margin-right: 0.75rem;
-    font-size: 1.25rem;
-  }
-
-  .folder-name {
-    flex: 1;
-    font-size: 0.95rem;
-    color: var(--text-primary);
-  }
-
-  .action-buttons {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-
-  .btn {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 0.5rem;
-    font-family: inherit;
-    font-size: 0.95rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-primary {
-    background: var(--brand);
-    color: white;
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--brand-hover);
-  }
-
-  .btn-secondary {
-    background: var(--secondary-btn);
-    color: var(--text-primary);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--secondary-btn-hover);
-  }
-
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .error-message {
-    background: #fee;
-    color: #c33;
-    padding: 0.75rem;
-    border-radius: 0.5rem;
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
-  }
-
-  .loading {
-    display: inline-block;
-    margin-left: 0.5rem;
-  }
-
-  .done-card {
-    text-align: center;
-  }
-
-  .done-icon {
-    font-size: 3rem;
-    color: var(--success);
-    margin-bottom: 1rem;
-  }
-
-  .done-message {
-    font-size: 1.1rem;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-  }
-
-  .done-detail {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-    margin-bottom: 1rem;
-  }
-
-  .countdown {
-    font-size: 0.85rem;
-    color: var(--text-tertiary);
-  }
-`;
+import { NAVIGATOR_STYLE } from "./styles.js";
 
 interface NavigatorPageConfig {
   title: string;
@@ -198,6 +26,13 @@ interface NavigatorPageConfig {
   csrfToken: string;
   nonce: string;
 }
+
+// Tiny inline SVGs. Kept here (not in `icons.ts`) because they are
+// purely decorative glyphs for this template, not encoded brand assets.
+const HOME_ICON_SVG =
+  '<svg class="crumb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 7.5 8 2l6 5.5"/><path d="M3.5 6.8V13a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V6.8"/></svg>';
+const FOLDER_ICON_SVG =
+  '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="20" height="20"><path d="M2.5 5.5a1 1 0 0 1 1-1h4l1.5 2h7a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-12.5a1 1 0 0 1-1-1z"/></svg>';
 
 export function navigatorPageHtml(config: NavigatorPageConfig): string {
   return layoutHtml({
@@ -211,14 +46,28 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
       <p class="subtitle">${escapeHtml(config.subtitle)}</p>
       <div id="error-container"></div>
       <div class="drive-label">${escapeHtml(config.driveLabel)}</div>
-      <div class="breadcrumbs" id="breadcrumbs"></div>
-      <div class="folder-list" id="folder-list">
-        <div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">Loading…</span></div>
+      <nav class="breadcrumbs" id="breadcrumbs" aria-label="Folder path"></nav>
+      <div class="nav-toolbar">
+        <input id="filter-input" class="filter-input" type="text" placeholder="Filter folders\u2026" autocomplete="off" spellcheck="false" aria-label="Filter folders" />
+      </div>
+      <div class="folder-list" id="folder-list" role="list">
+        <div class="folder-empty">Loading\u2026</div>
+      </div>
+      <div id="pagination" class="pagination" hidden>
+        <button id="prev-btn" class="page-btn" type="button" aria-label="Previous page">&laquo; Prev</button>
+        <span id="page-status" class="page-status" aria-live="polite"></span>
+        <button id="next-btn" class="page-btn" type="button" aria-label="Next page">Next &raquo;</button>
       </div>
       <div class="action-buttons">
-        <button id="select-btn" class="btn btn-primary">Use this folder as workspace</button>
-        <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="select-btn" class="primary-btn" type="button" disabled title="Open a subfolder first \u2014 the drive root cannot be the workspace.">Use this folder as workspace</button>
+        <button id="cancel-btn" class="cancel-btn" type="button">Cancel</button>
       </div>
+    </div>
+    <div class="card done" id="done" hidden>
+      <h1>&#10003; Workspace configured</h1>
+      <p class="message"><span class="selected-path" id="selected-label"></span></p>
+      <p class="message post-message">You can switch back to your AI assistant now.</p>
+      <p class="countdown">Closing in <span id="countdown">3</span>s&hellip;</p>
     </div>
     <picture>
       <source srcset="${logoLightDataUri}" media="(prefers-color-scheme: dark)">
@@ -226,11 +75,16 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
     </picture>
   </div>`,
     script: `    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content') || '';
+      const PAGE_SIZE = 25;
+      const HOME_ICON = ${JSON.stringify(HOME_ICON_SVG)};
+      const FOLDER_ICON = ${JSON.stringify(FOLDER_ICON_SVG)};
 
-      // Navigation stack: [{ itemId, itemName, itemPath }]. The last entry
-      // is the current location; clicking a breadcrumb pops back to that
-      // entry.
-      let stack = [{ itemId: 'root', itemName: '/', itemPath: '/' }];
+      // Navigation stack. Each entry describes a folder on the path
+      // from the drive root to the current location. Drilling into a
+      // folder pushes; clicking a breadcrumb pops back to that level.
+      const stack = [{ itemId: 'root', itemName: '/', itemPath: '/' }];
+      let lastFolders = [];
+      let currentPage = 0;
 
       function escapeHtml(text) {
         const div = document.createElement('div');
@@ -238,60 +92,126 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         return div.innerHTML;
       }
 
+      function current() { return stack[stack.length - 1]; }
+
       function showError(msg) {
         document.getElementById('error-container').innerHTML =
           '<div class="error-message">' + escapeHtml(msg) + '</div>';
       }
-
       function clearError() {
         document.getElementById('error-container').innerHTML = '';
       }
 
-      function showDone(message, detail) {
-        document.getElementById('navigator').innerHTML =
-          '<div class="done-card"><div class="done-icon">&#10003;</div>' +
-          '<div class="done-message">' + escapeHtml(message) + '</div>' +
-          '<div class="done-detail">' + escapeHtml(detail) + '</div>' +
-          '<div class="countdown">Closing in <span id="countdown">3</span>s&hellip;</div></div>';
+      function showDone(detail) {
+        document.getElementById('navigator').hidden = true;
+        document.getElementById('selected-label').textContent = detail;
+        document.getElementById('done').hidden = false;
         let count = 3;
-        const timer = setInterval(() => {
+        const tick = setInterval(() => {
           count--;
           const el = document.getElementById('countdown');
           if (el) el.textContent = String(count);
-          if (count <= 0) { clearInterval(timer); window.close(); }
+          if (count <= 0) { clearInterval(tick); window.close(); }
         }, 1000);
       }
 
-      function current() { return stack[stack.length - 1]; }
+      function renderToolbarState() {
+        // Root cannot be the workspace; the only way to enable selection
+        // is to open a subfolder first.
+        const isRoot = current().itemId === 'root';
+        const selectBtn = document.getElementById('select-btn');
+        selectBtn.disabled = isRoot;
+        selectBtn.title = isRoot
+          ? 'Open a subfolder first \u2014 the drive root cannot be the workspace.'
+          : 'Save this folder as the workspace';
+      }
 
       function renderBreadcrumbs() {
         const container = document.getElementById('breadcrumbs');
-        container.innerHTML = stack.map((entry, idx) => {
-          const isLast = idx === stack.length - 1;
+        const parts = [];
+        for (let i = 0; i < stack.length; i++) {
+          const entry = stack[i];
+          const isLast = i === stack.length - 1;
+          const isRoot = i === 0;
+          const labelHtml = isRoot ? HOME_ICON : escapeHtml(entry.itemName);
           if (isLast) {
-            return '<span class="breadcrumb-current">' + escapeHtml(entry.itemName) + '</span>';
+            const ariaLabel = isRoot ? ' aria-label="Drive root"' : '';
+            parts.push(
+              '<span class="crumb-current"' + ariaLabel + ' aria-current="page">' + labelHtml + '</span>'
+            );
+          } else {
+            const ariaLabel = isRoot ? ' aria-label="Drive root"' : '';
+            parts.push(
+              '<button type="button" class="crumb-btn" data-index="' + i + '"' + ariaLabel + '>' + labelHtml + '</button>'
+            );
           }
-          return '<button class="breadcrumb" data-index="' + idx + '">' +
-            escapeHtml(entry.itemName) + '</button><span class="breadcrumb-separator">/</span>';
-        }).join('');
+          if (!isLast) {
+            parts.push('<span class="crumb-sep" aria-hidden="true">\u203A</span>');
+          }
+        }
+        container.innerHTML = parts.join('');
       }
 
-      function renderFolders(folders) {
+      function renderFolders() {
         const list = document.getElementById('folder-list');
-        if (folders.length === 0) {
-          list.innerHTML = '<div class="folder-item" style="cursor: default; background: none;"><span class="folder-name" style="color: var(--text-tertiary);">No subfolders</span></div>';
+        const q = document.getElementById('filter-input').value.toLowerCase().trim();
+        const matched = q.length === 0
+          ? lastFolders
+          : lastFolders.filter(f => f.name.toLowerCase().indexOf(q) !== -1);
+
+        if (lastFolders.length === 0) {
+          list.innerHTML = '<div class="folder-empty">No subfolders here.</div>';
+          renderPagination(0);
           return;
         }
-        list.innerHTML = folders.map(f =>
-          '<div class="folder-item" data-id="' + escapeHtml(f.id) + '" data-name="' + escapeHtml(f.name) + '">' +
-            '<span class="folder-icon">&#128193;</span>' +
+        if (matched.length === 0) {
+          list.innerHTML = '<div class="folder-empty">No folders match \u201C' + escapeHtml(q) + '\u201D.</div>';
+          renderPagination(0);
+          return;
+        }
+
+        const totalPages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE));
+        if (currentPage >= totalPages) currentPage = totalPages - 1;
+        if (currentPage < 0) currentPage = 0;
+        const start = currentPage * PAGE_SIZE;
+        const page = matched.slice(start, start + PAGE_SIZE);
+
+        list.innerHTML = page.map(f =>
+          '<button type="button" class="folder-item" data-id="' + escapeHtml(f.id) + '" data-name="' + escapeHtml(f.name) + '">' +
+            '<span class="folder-icon">' + FOLDER_ICON + '</span>' +
             '<span class="folder-name">' + escapeHtml(f.name) + '</span>' +
-          '</div>'
+            '<span class="folder-chevron" aria-hidden="true">\u203A</span>' +
+          '</button>'
         ).join('');
+
+        renderPagination(matched.length, totalPages);
+      }
+
+      function renderPagination(matchedCount, totalPages) {
+        const pag = document.getElementById('pagination');
+        if (matchedCount <= PAGE_SIZE) {
+          pag.hidden = true;
+          return;
+        }
+        pag.hidden = false;
+        document.getElementById('page-status').textContent =
+          'Page ' + (currentPage + 1) + ' of ' + totalPages + ' (' + matchedCount + ' folders)';
+        document.getElementById('prev-btn').disabled = currentPage === 0;
+        document.getElementById('next-btn').disabled = currentPage >= totalPages - 1;
       }
 
       async function loadCurrent() {
         clearError();
+        // Reset filter + page state on every navigation so they don't
+        // surprisingly carry over to a different folder.
+        document.getElementById('filter-input').value = '';
+        currentPage = 0;
+        lastFolders = [];
+        document.getElementById('folder-list').innerHTML =
+          '<div class="folder-empty">Loading\u2026</div>';
+        renderBreadcrumbs();
+        renderToolbarState();
+
         const entry = current();
         const url = '/children?itemId=' + encodeURIComponent(entry.itemId);
         try {
@@ -299,41 +219,64 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             showError('Failed to load folders: ' + (data.error || res.status));
+            document.getElementById('folder-list').innerHTML =
+              '<div class="folder-empty">\u2014</div>';
             return;
           }
           const data = await res.json();
-          // Update the current entry with the resolved name/path so
-          // breadcrumbs and persisted selection use Graph's canonical values.
+          // Update the entry with Graph's canonical name + path so
+          // breadcrumbs and persisted selection match the resolved values.
           entry.itemName = data.itemName;
           entry.itemPath = data.itemPath;
-          renderFolders(data.folders);
+          lastFolders = Array.isArray(data.folders) ? data.folders : [];
           renderBreadcrumbs();
+          renderToolbarState();
+          renderFolders();
         } catch (err) {
           showError('Network error: ' + err.message);
         }
       }
 
-      function navigateInto(itemId, itemName) {
-        stack.push({ itemId, itemName: itemName || itemId, itemPath: '' });
+      function pushAndNavigate(itemId, itemName) {
+        stack.push({ itemId: itemId, itemName: itemName || itemId, itemPath: '' });
         loadCurrent();
       }
-
-      function navigateToBreadcrumb(index) {
-        stack = stack.slice(0, index + 1);
+      function jumpToBreadcrumb(index) {
+        if (index < 0 || index >= stack.length - 1) return;
+        stack.splice(index + 1);
         loadCurrent();
       }
 
       document.getElementById('folder-list').addEventListener('click', (e) => {
         const item = e.target.closest('.folder-item');
         if (item && item.dataset.id) {
-          navigateInto(item.dataset.id, item.dataset.name);
+          pushAndNavigate(item.dataset.id, item.dataset.name);
         }
       });
 
       document.getElementById('breadcrumbs').addEventListener('click', (e) => {
-        const crumb = e.target.closest('.breadcrumb');
+        const crumb = e.target.closest('.crumb-btn');
         if (crumb && crumb.dataset.index !== undefined) {
-          navigateToBreadcrumb(parseInt(crumb.dataset.index, 10));
+          jumpToBreadcrumb(parseInt(crumb.dataset.index, 10));
+        }
+      });
+
+      document.getElementById('filter-input').addEventListener('input', () => {
+        currentPage = 0;
+        renderFolders();
+      });
+
+      document.getElementById('prev-btn').addEventListener('click', () => {
+        if (currentPage > 0) { currentPage--; renderFolders(); }
+      });
+      document.getElementById('next-btn').addEventListener('click', () => {
+        currentPage++; renderFolders();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === '/' && document.activeElement !== document.getElementById('filter-input')) {
+          e.preventDefault();
+          document.getElementById('filter-input').focus();
         }
       });
 
@@ -341,12 +284,12 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
         clearError();
         const entry = current();
         if (entry.itemId === 'root') {
-          showError('Pick a folder inside the drive — the drive root cannot be the workspace.');
+          showError('Open a subfolder first \u2014 the drive root cannot be the workspace.');
           return;
         }
         const btn = document.getElementById('select-btn');
         btn.disabled = true;
-        btn.textContent = 'Saving…';
+        btn.textContent = 'Saving\u2026';
         try {
           const res = await fetch('/select', {
             method: 'POST',
@@ -365,7 +308,7 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
             btn.textContent = 'Use this folder as workspace';
             return;
           }
-          showDone('Workspace configured', entry.itemPath || entry.itemName);
+          showDone(entry.itemPath || entry.itemName);
         } catch (err) {
           showError('Network error: ' + err.message);
           btn.disabled = false;
@@ -380,7 +323,7 @@ export function navigatorPageHtml(config: NavigatorPageConfig): string {
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({ csrfToken: csrfToken }),
           });
-        } catch (err) { /* swallow */ }
+        } catch (err) { /* swallow \u2014 we close the window anyway */ }
         window.close();
       });
 
