@@ -2,6 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional URL of the JSON Schema this file conforms to. Editor-only hint (VS Code, JetBrains, …) so completions and diagnostics light up; graphdo-ts itself ignores the field — `config_version` is the on-disk version discriminator."
+    },
     "config_version": {
       "type": "number",
       "const": 2,

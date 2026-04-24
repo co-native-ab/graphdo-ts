@@ -156,6 +156,13 @@ export function configSchemaUrl(v: number): string {
  */
 export const ConfigFileSchemaV1 = z
   .object({
+    $schema: z
+      .string()
+      .min(1)
+      .describe(
+        "Optional URL of the JSON Schema this file conforms to. Editor-only hint (VS Code, JetBrains, …) so completions and diagnostics light up; graphdo-ts itself ignores the field — the on-disk version is determined by `config_version` (or absence-of, for v1).",
+      )
+      .optional(),
     todoListId: z
       .string()
       .min(1)
@@ -202,6 +209,13 @@ export const ConfigFileSchemaV1 = z
  */
 export const ConfigFileSchemaV2 = z
   .object({
+    $schema: z
+      .string()
+      .min(1)
+      .describe(
+        "Optional URL of the JSON Schema this file conforms to. Editor-only hint (VS Code, JetBrains, …) so completions and diagnostics light up; graphdo-ts itself ignores the field — `config_version` is the on-disk version discriminator.",
+      )
+      .optional(),
     config_version: z
       .literal(2)
       .describe(
@@ -280,6 +294,13 @@ interface Migration {
  */
 export const ConfigFileSchemaV3 = z
   .object({
+    $schema: z
+      .string()
+      .min(1)
+      .describe(
+        "Optional URL of the JSON Schema this file conforms to. Editor-only hint (VS Code, JetBrains, …) so completions and diagnostics light up; graphdo-ts itself ignores the field — `config_version` is the on-disk version discriminator.",
+      )
+      .optional(),
     config_version: z
       .literal(3)
       .describe(

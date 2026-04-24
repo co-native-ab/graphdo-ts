@@ -2,6 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional URL of the JSON Schema this file conforms to. Editor-only hint (VS Code, JetBrains, …) so completions and diagnostics light up; graphdo-ts itself ignores the field — the on-disk version is determined by `config_version` (or absence-of, for v1)."
+    },
     "todoListId": {
       "type": "string",
       "minLength": 1,
