@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-04-24
+
 ### Fixed
 
 - `markdown_preview_file` on Windows + Claude Desktop: the SharePoint preview URL was being mangled before reaching the browser (`&parent=…` silently dropped because `cmd.exe` treats `&` as a command separator, and unreserved characters `_`, `-`, `.` re-encoded as `%5F`, `%2D`, `%2E` by ShellExecute), and the tool falsely reported "could not open browser" even when it did. Browser launch now goes through the `open` package, which uses PowerShell `Start-Process` on Windows so the URL is passed verbatim and the launch result is reliable. See [ADR-0011](docs/adr/0011-use-open-package-for-browser-launch.md).
