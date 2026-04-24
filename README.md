@@ -314,7 +314,7 @@ MCP Server (StdioServerTransport)
 - **Stdio transport** - communicates via stdin/stdout JSON-RPC (designed for MCPB)
 - **MSAL authentication** - interactive browser login only, tokens cached locally
 - **Graph client** - lightweight wrapper around `fetch` (no Microsoft Graph SDK)
-- **Minimal dependencies** - three runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
+- **Minimal dependencies** - five runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`, `diff`, `open`
 
 ---
 
