@@ -677,8 +677,35 @@ export function configPath(dir: string): string {
   return path.join(dir, "config.json");
 }
 
-/** Reads and parses config.json from the given directory. Returns null if the file does not exist. */
-export async function loadConfig(dir: string, signal: AbortSignal): Promise<Config | null> {
+/**
+ * Outcome of {@link loadAndMigrateConfig} / {@link migrateConfig}.
+ * Modelled as a TypeScript `enum` to match the rest of the codebase
+ * (`HttpMethod`, `GraphScope`, `MarkdownFolderEntryKind`).
+ *
+ *  - `Absent`   — `config.json` does not exist
+ *  - `Invalid`  — file exists but is unparseable or fails schema validation
+ *                 (corrupt files are backed up to `config.json.invalid-<ts>`)
+ *  - `Current`  — file already at {@link CURRENT_CONFIG_VERSION}; no rewrite
+ *  - `Migrated` — file rewritten in-place from an older version
+ */
+export enum ConfigMigrationStatus {
+  Absent = "absent",
+  Invalid = "invalid",
+  Current = "current",
+  Migrated = "migrated",
+}
+
+/**
+ * Single read-parse-migrate-rewrite path shared by {@link loadConfig} and
+ * {@link migrateConfig}. Returns the resulting in-memory `Config` (when one
+ * could be derived) alongside a status code describing what happened on
+ * disk. Centralising the I/O keeps "load it" and "ensure it's migrated" in
+ * lockstep — they cannot drift.
+ */
+async function loadAndMigrateConfig(
+  dir: string,
+  signal: AbortSignal,
+): Promise<{ status: ConfigMigrationStatus; config: Config | null }> {
   const filePath = configPath(dir);
   logger.debug("loading config", { path: filePath });
 
@@ -688,7 +715,7 @@ export async function loadConfig(dir: string, signal: AbortSignal): Promise<Conf
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === "ENOENT") {
       logger.debug("config file not found", { path: filePath });
-      return null;
+      return { status: ConfigMigrationStatus.Absent, config: null };
     }
     throw err;
   }
@@ -710,19 +737,44 @@ export async function loadConfig(dir: string, signal: AbortSignal): Promise<Conf
       path: filePath,
       error: cause instanceof Error ? cause.message : String(cause),
     });
-    return null;
+    return { status: ConfigMigrationStatus.Invalid, config: null };
   }
 
   const { config, migrated } = parseConfigFile(raw);
-  if (config === null) return null;
-  if (migrated) {
-    logger.info("rewriting config.json after migration", {
-      path: filePath,
-      to: CURRENT_CONFIG_VERSION,
-    });
-    await writeJsonAtomic(filePath, serialiseConfigFile(config), signal);
-  }
+  if (config === null) return { status: ConfigMigrationStatus.Invalid, config: null };
+  if (!migrated) return { status: ConfigMigrationStatus.Current, config };
+
+  logger.info("rewriting config.json after migration", {
+    path: filePath,
+    to: CURRENT_CONFIG_VERSION,
+  });
+  await writeJsonAtomic(filePath, serialiseConfigFile(config), signal);
+  return { status: ConfigMigrationStatus.Migrated, config };
+}
+
+/** Reads and parses config.json from the given directory. Returns null if the file does not exist. */
+export async function loadConfig(dir: string, signal: AbortSignal): Promise<Config | null> {
+  const { config } = await loadAndMigrateConfig(dir, signal);
   return config;
+}
+
+/**
+ * Read `config.json`, run any pending migrations, and rewrite the file
+ * in-place when the on-disk version was older than {@link CURRENT_CONFIG_VERSION}.
+ * Intended to be called once at server startup so that an older on-disk
+ * file (and its now-stale `$schema` URL) is brought up to date even when
+ * the user never invokes a config-using tool in this session.
+ *
+ * Idempotent: a `current` file is left untouched. Missing/corrupt files are
+ * handled silently (corrupt files get a `.invalid-<ts>` backup, same as
+ * {@link loadConfig}).
+ */
+export async function migrateConfig(
+  dir: string,
+  signal: AbortSignal,
+): Promise<ConfigMigrationStatus> {
+  const { status } = await loadAndMigrateConfig(dir, signal);
+  return status;
 }
 
 /**

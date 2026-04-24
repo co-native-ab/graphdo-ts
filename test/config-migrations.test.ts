@@ -15,8 +15,10 @@ import { fileURLToPath } from "node:url";
 
 import { testSignal } from "./helpers.js";
 import {
+  ConfigMigrationStatus,
   CURRENT_CONFIG_VERSION,
   loadConfig,
+  migrateConfig,
   parseConfigFile,
   saveConfig,
   type Config,
@@ -254,6 +256,81 @@ describe("byte-stable round-trip", () => {
     const second = await fs.readFile(path.join(dir, "config.json"), "utf-8");
 
     expect(second).toBe(first);
+  });
+});
+
+describe("migrateConfig", () => {
+  it("returns 'absent' when config.json does not exist and creates no file", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Absent);
+    expect(await fs.readdir(dir)).toEqual([]);
+  });
+
+  it("returns 'current' for a v3 file and leaves the bytes untouched", async () => {
+    const dir = await seedFixture(3, "full");
+    const filePath = path.join(dir, "config.json");
+    const before = await fs.readFile(filePath, "utf-8");
+    const beforeMtime = (await fs.stat(filePath)).mtimeMs;
+
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Current);
+
+    const after = await fs.readFile(filePath, "utf-8");
+    expect(after).toBe(before);
+    // mtime stable too — proves no rewrite happened
+    expect((await fs.stat(filePath)).mtimeMs).toBe(beforeMtime);
+  });
+
+  it("returns 'migrated' for a v2 file and rewrites it to v3 with the current $schema URL", async () => {
+    const dir = await seedFixture(2, "full");
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Migrated);
+
+    const raw = JSON.parse(await fs.readFile(path.join(dir, "config.json"), "utf-8")) as Record<
+      string,
+      unknown
+    >;
+    expect(raw["config_version"]).toBe(CURRENT_CONFIG_VERSION);
+    expect(raw["$schema"]).toBe(
+      `https://raw.githubusercontent.com/co-native-ab/graphdo-ts/main/schemas/config-v${String(CURRENT_CONFIG_VERSION)}.json`,
+    );
+    // v2 'markdown' is gone; replaced by 'workspace'.
+    expect(raw["markdown"]).toBeUndefined();
+    expect(raw["workspace"]).toBeDefined();
+  });
+
+  it("returns 'invalid' and backs up an unparseable file", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    const original = "not json {";
+    await fs.writeFile(path.join(dir, "config.json"), original);
+
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Invalid);
+
+    const files = await fs.readdir(dir);
+    const backups = files.filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups).toHaveLength(1);
+  });
+
+  it("returns 'invalid' for a parseable file that fails schema validation and leaves it untouched", async () => {
+    const dir = getTempDir();
+    await fs.mkdir(dir, { recursive: true });
+    // Valid JSON, valid version discriminator, but list_id violates min(1).
+    const body = JSON.stringify({ config_version: 3, todo: { list_id: "" } });
+    const filePath = path.join(dir, "config.json");
+    await fs.writeFile(filePath, body);
+
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Invalid);
+
+    // No backup — bytes left as-is, no rewrite.
+    expect(await fs.readFile(filePath, "utf-8")).toBe(body);
+    const files = await fs.readdir(dir);
+    expect(files.filter((f) => f.startsWith("config.json.invalid-"))).toHaveLength(0);
+  });
+
+  it("is idempotent: running it twice on a v2 file yields 'migrated' then 'current'", async () => {
+    const dir = await seedFixture(2, "full");
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Migrated);
+    expect(await migrateConfig(dir, testSignal())).toBe(ConfigMigrationStatus.Current);
   });
 });
 
