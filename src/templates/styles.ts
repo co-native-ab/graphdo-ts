@@ -402,3 +402,284 @@ export const PICKER_STYLE = `
       .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; background: ${dark.surfaceHover}; }
       .page-status { color: ${dark.text}; }
     }`;
+
+// ---------------------------------------------------------------------------
+// Navigator-specific styles (workspace folder picker)
+// ---------------------------------------------------------------------------
+
+export const NAVIGATOR_STYLE = `
+    .container { max-width: 480px; }
+    .card { text-align: left; }
+    .card h1 { text-align: center; }
+    .subtitle { text-align: center; }
+
+    .drive-label {
+      display: block;
+      font-size: ${fontSize.xs};
+      font-weight: ${fontWeight.semibold};
+      color: ${grey.grey3};
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: ${spacing.sm};
+      text-align: center;
+    }
+
+    .breadcrumbs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 2px;
+      justify-content: center;
+      margin-bottom: ${spacing.md};
+      font-size: ${fontSize.base};
+      color: ${grey.grey4};
+      min-height: 28px;
+    }
+    .crumb-btn {
+      background: none;
+      border: none;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      color: ${purple.brand};
+      border-radius: ${borderRadius.sm};
+      transition: background 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .crumb-btn:hover { background: ${purple.minus3}; }
+    .crumb-current {
+      padding: 4px 8px;
+      font-weight: ${fontWeight.semibold};
+      color: ${grey.grey4};
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .crumb-sep {
+      color: ${grey.grey3};
+      user-select: none;
+      font-size: ${fontSize.md};
+      line-height: 1;
+    }
+    .crumb-icon {
+      width: 14px;
+      height: 14px;
+      display: inline-block;
+      vertical-align: -2px;
+    }
+
+    .nav-toolbar {
+      display: flex;
+      gap: ${spacing.sm};
+      align-items: center;
+      margin-bottom: ${spacing.sm};
+    }
+
+    .filter-input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      border: 1.5px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      background: ${grey.white};
+      color: inherit;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .filter-input:focus { border-color: ${purple.brand}; }
+
+    .folder-list {
+      max-height: 360px;
+      overflow-y: auto;
+      border: 1px solid ${grey.grey1};
+      border-radius: ${borderRadius.md};
+      background: ${grey.white};
+      margin-bottom: ${spacing.sm};
+    }
+    .folder-item {
+      display: flex;
+      align-items: center;
+      gap: ${spacing.md};
+      padding: 12px 14px;
+      border: none;
+      border-bottom: 1px solid ${grey.grey1};
+      background: transparent;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      font-size: ${fontSize.md};
+      color: inherit;
+      transition: background 0.15s ease;
+    }
+    .folder-item:last-child { border-bottom: none; }
+    .folder-item:hover { background: ${purple.minus3}; }
+    .folder-item:focus { outline: none; background: ${purple.minus3}; }
+    .folder-icon {
+      flex: 0 0 20px;
+      width: 20px;
+      height: 20px;
+      color: ${purple.brand};
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .folder-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .folder-chevron {
+      flex: 0 0 auto;
+      color: ${grey.grey3};
+      font-size: ${fontSize.lg};
+      line-height: 1;
+    }
+    .folder-empty {
+      padding: 18px 14px;
+      text-align: center;
+      color: ${grey.grey3};
+      font-size: ${fontSize.base};
+    }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: ${spacing.sm};
+      margin-bottom: ${spacing.md};
+    }
+    .page-btn {
+      padding: 6px 12px;
+      background: ${purple.minus3};
+      border: 1px solid ${grey.grey2};
+      border-radius: ${borderRadius.md};
+      color: ${purple.brand};
+      font-size: ${fontSize.sm};
+      font-weight: ${fontWeight.semibold};
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .page-btn:hover:not(:disabled) { border-color: ${purple.brand}; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .page-status {
+      color: ${grey.grey4};
+      font-size: ${fontSize.sm};
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .action-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: ${spacing.md};
+      margin-top: ${spacing.md};
+    }
+    .primary-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: ${purple.brand};
+      cursor: pointer;
+      color: ${grey.white};
+      border: none;
+      border-radius: ${borderRadius.lg};
+      font-size: ${fontSize.md};
+      font-family: ${fontFamily};
+      font-weight: ${fontWeight.semibold};
+      transition: all 0.2s ease;
+    }
+    .primary-btn:hover:not(:disabled) {
+      background: ${purple.plus1};
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(102, 89, 167, 0.3);
+    }
+    .primary-btn:active { background: ${purple.plus2}; transform: translateY(0); }
+    .primary-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .error-message {
+      background: ${complementary.peach.light};
+      color: ${complementary.peach.base};
+      border-left: 3px solid ${complementary.peach.base};
+      padding: ${spacing.md};
+      border-radius: ${borderRadius.md};
+      margin-bottom: ${spacing.md};
+      font-size: ${fontSize.base};
+      text-align: left;
+      word-break: break-word;
+    }
+
+    .done { text-align: center; }
+    .done h1 { color: ${complementary.teal.base}; }
+    .done .selected-path {
+      display: inline-block;
+      margin-top: ${spacing.sm};
+      padding: 6px 12px;
+      background: ${purple.minus3};
+      border-radius: ${borderRadius.md};
+      color: ${purple.brand};
+      font-size: ${fontSize.base};
+      word-break: break-all;
+    }
+    .done .post-message { margin-top: ${spacing.lg}; }
+
+    @media (prefers-color-scheme: dark) {
+      .drive-label, .page-status, .folder-empty { color: ${dark.textMuted}; }
+      .crumb-current { color: ${dark.text}; }
+      .crumb-sep { color: ${dark.textMuted}; }
+      .crumb-btn:hover { background: ${dark.surfaceHover}; }
+      .filter-input {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .filter-input:focus { border-color: ${purple.brand}; }
+      .folder-list {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+      }
+      .folder-item {
+        border-bottom-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .folder-item:hover, .folder-item:focus { background: ${dark.surfaceHover}; }
+      .folder-icon { color: ${purple.minus1}; }
+      .folder-chevron { color: ${dark.textMuted}; }
+      .page-btn {
+        background: ${dark.surface};
+        border-color: ${dark.border};
+        color: ${dark.text};
+      }
+      .page-btn:hover:not(:disabled) {
+        border-color: ${purple.brand};
+        background: ${dark.surfaceHover};
+      }
+      .error-message {
+        background: rgba(249, 170, 143, 0.08);
+        border-left-color: ${complementary.peach.base};
+      }
+      .primary-btn:hover:not(:disabled) {
+        box-shadow: 0 6px 20px rgba(102, 89, 167, 0.4);
+      }
+      .done .selected-path {
+        background: ${dark.surfaceHover};
+        color: ${purple.minus1};
+      }
+    }`;
