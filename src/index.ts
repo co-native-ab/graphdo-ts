@@ -7,7 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Authenticator } from "./auth.js";
 import { MsalAuthenticator, StaticAuthenticator, DEFAULT_TENANT_ID } from "./auth.js";
 import { openBrowser } from "./browser/open.js";
-import { configDir } from "./config.js";
+import { ConfigMigrationStatus, configDir, migrateConfig } from "./config.js";
 import { GraphClient } from "./graph/client.js";
 import { logger, setLogLevel } from "./logger.js";
 import type { GraphScope } from "./scopes.js";
@@ -97,6 +97,22 @@ export async function createMcpServer(
   config.onScopesChanged = (grantedScopes: GraphScope[]) => {
     syncToolState(registry, grantedScopes, mcpServer);
   };
+
+  // Bring an older on-disk config.json forward to CURRENT_CONFIG_VERSION
+  // (and refresh its $schema URL) at startup so editors and downstream tool
+  // calls see the current shape immediately. Non-fatal: tools still load
+  // config lazily and will surface a useful error there if something is
+  // genuinely broken.
+  try {
+    const status = await migrateConfig(opts.configDir, signal);
+    if (status === ConfigMigrationStatus.Migrated) {
+      logger.info("config migrated to current version at startup");
+    }
+  } catch (err: unknown) {
+    logger.warn("startup config migration failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Check startup auth state — if already authenticated, enable matching tools
   try {
