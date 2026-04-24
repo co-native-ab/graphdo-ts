@@ -12,7 +12,7 @@ Repository: `github.com/co-native-ab/graphdo-ts`
 src/
   index.ts               Entry point, ServerConfig, createMcpServer()
   auth.ts                MSAL auth: browser-only login (Authenticator interface)
-  browser.ts             Cross-platform openBrowser() utility
+  browser.ts             Cross-platform openBrowser() utility (delegates to the `open` package; see ADR-0011)
   config.ts              Config struct, load/save (atomic via temp+rename), configDir()
   logger.ts              Structured logger with level filtering (debug/info/warn/error)
   loopback.ts            Custom MSAL loopback client - branded login landing page + success page
@@ -128,7 +128,7 @@ Config is stored in the OS config directory (`~/.config/graphdo-ts/` on Linux, `
 - **Cross-platform** - use `node:path`, `node:os`, `node:crypto` for filesystem ops; handle win32/darwin/linux paths
 - **Atomic file writes** - write to temp file then rename into place (`saveConfig`)
 - **Comments** - only where clarification is needed, not on every function
-- **Minimal dependencies** - only 3 runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`
+- **Minimal dependencies** - five runtime deps: `@modelcontextprotocol/sdk`, `zod`, `@azure/msal-node`, `diff`, `open`
 
 ## Testing
 

@@ -32,6 +32,12 @@ All three live behind a small platform shim, `src/browser.ts`
 (CSP nonce, CSRF token, Host / Origin / `Sec-Fetch-Site` / Content-Type
 pinning) and shared HTML rendering in `src/templates/`.
 
+> **Update (ADR-0011):** the platform shim has since been moved to
+> `src/browser/open.ts` and now delegates to the upstream `open`
+> package after our URL validation. The shim's role in this ADR — the
+> single seam every flow uses to open the browser, with DI for tests —
+> is unchanged.
+
 | File                              | Lines |
 | --------------------------------- | ----: |
 | `src/auth.ts` (incl. logout page) |   673 |

@@ -1,36 +1,30 @@
-// System browser opener - cross-platform utility.
+// System browser opener — cross-platform utility.
+//
+// We do our own URL validation (allowlist of protocols, no plain http to
+// non-localhost hosts) as a security gatekeeper, then hand the URL off to
+// the `open` package, which handles the platform/quoting/spawn details
+// (PowerShell `Start-Process` on Windows so the URL is passed verbatim,
+// `open` on macOS, an upstream `xdg-open` on Linux, plus WSL handling).
+//
+// See ADR-0011 for the rationale behind delegating to `open`.
 
-import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { platform } from "node:os";
-
-// Detect WSL once at module load by checking the kernel version string.
-let _isWsl: boolean | undefined;
-function isWsl(): boolean {
-  if (_isWsl === undefined) {
-    try {
-      const version = readFileSync("/proc/version", "utf-8");
-      _isWsl = /microsoft|wsl/i.test(version);
-    } catch {
-      _isWsl = false;
-    }
-  }
-  return _isWsl;
-}
+import openExternal from "open";
 
 /** Open a URL in the system browser. Throws on failure. */
-export function openBrowser(url: string): Promise<void> {
-  // Security: validate URL to prevent command injection via crafted strings.
-  // Only http: and https: protocols are allowed.
+export async function openBrowser(url: string): Promise<void> {
+  // Security: validate URL to prevent handing arbitrary strings to a
+  // platform launcher. `open` makes no security guarantees of its own
+  // (per its README), so this gatekeeper is the only thing standing
+  // between a caller-supplied URL and the OS.
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return Promise.reject(new Error("Invalid URL"));
+    throw new Error("Invalid URL");
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return Promise.reject(new Error(`Unsupported URL protocol: ${parsed.protocol}`));
+    throw new Error(`Unsupported URL protocol: ${parsed.protocol}`);
   }
 
   // Two callers open URLs through this helper:
@@ -45,40 +39,13 @@ export function openBrowser(url: string): Promise<void> {
   // attacker-controlled URL — so we reject that combination.
   const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
   if (parsed.protocol === "http:" && !isLocal) {
-    return Promise.reject(
-      new Error(`Plain http:// URLs must be a localhost address, got: ${parsed.hostname}`),
-    );
+    throw new Error(`Plain http:// URLs must be a localhost address, got: ${parsed.hostname}`);
   }
 
-  const os = platform();
-
-  // macOS and Linux: use execFile (no shell) to prevent command injection.
-  // The URL is passed as an argument array element, never interpolated into
-  // a shell command string, so metacharacters like $() and `` are harmless.
-  if (os !== "win32") {
-    // WSL: use wslview (from wslu) to open the host Windows browser.
-    // Native Linux: use xdg-open.
-    const cmd = os === "darwin" ? "open" : isWsl() ? "wslview" : "xdg-open";
-    return new Promise((resolve, reject) => {
-      execFile(cmd, [url], (err) => {
-        if (err) {
-          reject(new Error(`Failed to open browser: ${err.message}`));
-        } else {
-          resolve();
-        }
-      });
-    });
+  try {
+    await openExternal(url);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to open browser: ${message}`);
   }
-
-  // Windows: use execFile with cmd.exe /c start to avoid shell string injection.
-  // Arguments are passed as array elements, not interpolated into a command string.
-  return new Promise((resolve, reject) => {
-    execFile("cmd.exe", ["/c", "start", "", url], (err) => {
-      if (err) {
-        reject(new Error(`Failed to open browser: ${err.message}`));
-      } else {
-        resolve();
-      }
-    });
-  });
 }

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `markdown_preview_file` on Windows + Claude Desktop: the SharePoint preview URL was being mangled before reaching the browser (`&parent=…` silently dropped because `cmd.exe` treats `&` as a command separator, and unreserved characters `_`, `-`, `.` re-encoded as `%5F`, `%2D`, `%2E` by ShellExecute), and the tool falsely reported "could not open browser" even when it did. Browser launch now goes through the `open` package, which uses PowerShell `Start-Process` on Windows so the URL is passed verbatim and the launch result is reliable. See [ADR-0011](docs/adr/0011-use-open-package-for-browser-launch.md).
+
+### Changed
+
+- `src/browser/open.ts` delegates to the `open` package after URL validation, replacing the hand-rolled per-platform `execFile` branches (`open` on macOS, `xdg-open` on Linux, `wslview` on WSL detected via `/proc/version`, `cmd.exe /c start ""` on Windows). The public `openBrowser(url)` shim and its DI thread through `ServerConfig.openBrowser` are unchanged. See [ADR-0011](docs/adr/0011-use-open-package-for-browser-launch.md).
+- Added `open` as a runtime dependency.
+
 ## [0.2.5] — 2026-04-24
 
 ### Added
