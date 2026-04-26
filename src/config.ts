@@ -482,7 +482,7 @@ export type CurrentConfigFile = z.infer<typeof CurrentConfigSchema>;
  */
 function detectVersion(raw: unknown): number {
   if (raw !== null && typeof raw === "object" && "config_version" in raw) {
-    const v = (raw as { config_version: unknown }).config_version;
+    const v = raw.config_version;
     if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
   }
   return 1;

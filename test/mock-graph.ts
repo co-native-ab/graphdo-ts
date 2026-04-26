@@ -758,7 +758,7 @@ async function handleDriveRequest(
     }
     // Route through driveItemView so the response matches the wire shape
     // (no in-memory `content` field) and so any missing cTag is filled in.
-    const view = "file" in item ? driveItemView(item as MockDriveFile, state) : item;
+    const view = "file" in item ? driveItemView(item, state) : item;
     jsonResponse(res, 200, view);
     return true;
   }
