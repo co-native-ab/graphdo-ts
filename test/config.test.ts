@@ -359,11 +359,7 @@ describe("loadAndValidateWorkspaceConfig", () => {
 
   it("throws when itemId contains a path separator", async () => {
     const dir = getTempDir();
-    await saveConfig(
-      { workspace: { driveId: "me", itemId: "sub/dir" } } as Config,
-      dir,
-      testSignal(),
-    );
+    await saveConfig({ workspace: { driveId: "me", itemId: "sub/dir" } }, dir, testSignal());
     await expect(loadAndValidateWorkspaceConfig(dir, testSignal())).rejects.toThrow(
       /invalid.*path separator.*markdown_select_workspace/,
     );
@@ -388,7 +384,7 @@ describe("loadAndValidateWorkspaceConfig", () => {
   it("returns the config when valid", async () => {
     const dir = getTempDir();
     await saveConfig(
-      { workspace: { driveId: "me", itemId: "folder-1", itemName: "Notes" } } as Config,
+      { workspace: { driveId: "me", itemId: "folder-1", itemName: "Notes" } },
       dir,
       testSignal(),
     );

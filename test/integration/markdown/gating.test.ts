@@ -147,9 +147,7 @@ describe("integration: markdown gating", () => {
     try {
       await saveConfig(
         // saveConfig's schema allows any non-empty string, matching a hand-edit
-        { workspace: { driveId: "me", itemId: "folder-1/sub" } } as Parameters<
-          typeof saveConfig
-        >[0],
+        { workspace: { driveId: "me", itemId: "folder-1/sub" } },
         dir,
         testSignal(),
       );
